@@ -260,7 +260,7 @@ fn number_pair(s: &str) -> (Option<u32>, Option<u32>) {
 }
 
 /// The year in a date such as `"2004"`, `"2004-05-06"` or `"2004-05-06T10:00"`.
-fn year_of(s: &str) -> Option<i32> {
+pub(crate) fn year_of(s: &str) -> Option<i32> {
     let d: String = s.trim().chars().take_while(char::is_ascii_digit).collect();
     (d.len() == 4).then(|| d.parse().ok()).flatten()
 }
@@ -549,7 +549,9 @@ pub(crate) fn parse_vorbis_comments(b: &[u8], meta: &mut Metadata) {
             "TITLE" => meta.title = meta.title.take().or(Some(text)),
             "ARTIST" => meta.artist = meta.artist.take().or(Some(text)),
             "ALBUM" => meta.album = meta.album.take().or(Some(text)),
-            "ALBUMARTIST" | "ALBUM ARTIST" => meta.album_artist = meta.album_artist.take().or(Some(text)),
+            "ALBUMARTIST" | "ALBUM ARTIST" | "ALBUM_ARTIST" => {
+                meta.album_artist = meta.album_artist.take().or(Some(text))
+            }
             "TRACKNUMBER" => {
                 let (n, t) = number_pair(&text);
                 meta.track = meta.track.or(n);

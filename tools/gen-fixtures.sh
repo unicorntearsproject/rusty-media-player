@@ -2,7 +2,7 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=core|h264|vp9|m8|audio|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
+#   RVP_FIXTURE_SET=core|h264|vp9|m8|audio|library|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
 #                                       VP9 to <outdir>/vp9, M8 (subtitles, tracks, gapless) to <outdir>/m8, raw audio files to <outdir>/audio, and the one-minute 1080p30
 #                                       speed streams (M9) to <outdir>/perf (minutes of encoding: `cargo xtask perf-fixtures`)
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
@@ -379,11 +379,17 @@ gen_audio() {
   echo "$version" > "$d/.done"
 }
 
+# M10: a 200-track library in mixed formats with art, Unicode and odd tags, plus expected.json (the tree a scan must find).
+gen_library() {
+  python3 "$root/tools/gen-library.py" "$out/library"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
 if [[ "$fixture_set" == all || "$fixture_set" == h264 ]]; then gen_h264; fi
 if [[ "$fixture_set" == all || "$fixture_set" == vp9 ]]; then gen_vp9; fi
 if [[ "$fixture_set" == all || "$fixture_set" == m8 ]]; then gen_m8; fi
 if [[ "$fixture_set" == all || "$fixture_set" == audio ]]; then gen_audio; fi
+if [[ "$fixture_set" == all || "$fixture_set" == library ]]; then gen_library; fi
 if [[ "$fixture_set" == perf ]]; then gen_perf; fi
 echo "fixtures in $out"

@@ -414,6 +414,13 @@ pub struct Mp3Demuxer<S: Source> {
 impl<S: Source> Mp3Demuxer<S> {
     /// Read the tags and the first frames of `src`.
     pub async fn open(src: S) -> Result<Self> {
+        Self::open_with(src, false).await
+    }
+
+    /// Like [`Mp3Demuxer::open`], but with `quick` the file is not walked: the duration comes from the Xing/LAME frame count,
+    /// or is estimated from the size and the first frame's bit rate. Meant for scanning a library, where reading every file
+    /// whole would cost far more than the tags are worth.
+    pub async fn open_with(src: S, quick: bool) -> Result<Self> {
         let mut rd = Reader::new(src).await;
         let mut meta = Metadata::default();
         let start = read_id3v2(&mut rd, &mut meta).await?;
@@ -439,7 +446,9 @@ impl<S: Source> Mp3Demuxer<S> {
                 duration_hint = Some((n as u64 * spf * 1_000_000 / rate as u64) as i64);
             }
         }
-        f.scan().await?;
+        if !quick {
+            f.scan().await?;
+        }
         let duration = duration_hint.or_else(|| f.duration_us(Some(Mpeg3::bitrate(&head) as u64)));
         let c = Common {
             streams: alloc::vec![audio_stream("mp3", rate, channels, Vec::new(), duration)],
@@ -554,6 +563,11 @@ pub struct AdtsDemuxer<S: Source> {
 impl<S: Source> AdtsDemuxer<S> {
     /// Read the tags and the first frames of `src`.
     pub async fn open(src: S) -> Result<Self> {
+        Self::open_with(src, false).await
+    }
+
+    /// Like [`AdtsDemuxer::open`]; with `quick` the file is not walked and the duration is estimated from the first frame.
+    pub async fn open_with(src: S, quick: bool) -> Result<Self> {
         let mut rd = Reader::new(src).await;
         let mut meta = Metadata::default();
         let start = read_id3v2(&mut rd, &mut meta).await?;
@@ -567,7 +581,9 @@ impl<S: Source> AdtsDemuxer<S> {
         let asc = (((profile as u16) + 1) << 11) | ((sfi as u16) << 7) | ((chan as u16) << 3);
         let channels = if chan == 7 { 8 } else { chan as u16 };
         f.configure(rate, pos);
-        f.scan().await?;
+        if !quick {
+            f.scan().await?;
+        }
         // Beyond the full-scan size: estimate from the first frame's size (a constant bit rate is the usual case).
         let bits = hdr.len as u64 * 8 * rate as u64 / hdr.samples.max(1) as u64;
         let duration = f.duration_us(Some(bits));

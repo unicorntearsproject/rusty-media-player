@@ -101,8 +101,27 @@ fn parse_udta(udta: &[u8], meta: &mut Metadata, chapters: &mut Vec<Chapter>) {
                         match &ty {
                             [0xA9, b'n', b'a', b'm'] => meta.title = text(),
                             [0xA9, b'A', b'R', b'T'] => meta.artist = text().or(meta.artist.take()),
-                            b"aART" => meta.artist = meta.artist.take().or_else(text),
+                            b"aART" => {
+                                meta.album_artist = text();
+                                meta.artist = meta.artist.take().or_else(text);
+                            }
                             [0xA9, b'a', b'l', b'b'] => meta.album = text(),
+                            [0xA9, b'g', b'e', b'n'] => meta.genre = text(),
+                            [0xA9, b'd', b'a', b'y'] => {
+                                meta.year = text().and_then(|d| crate::tags::year_of(&d))
+                            }
+                            // Track and disc numbers: two reserved bytes, the number, the total (big-endian u16 each).
+                            b"trkn" | b"disk" if value.len() >= 6 => {
+                                let n = u16::from_be_bytes([value[2], value[3]]) as u32;
+                                let total = u16::from_be_bytes([value[4], value[5]]) as u32;
+                                let (num, tot) = if &ty == b"trkn" {
+                                    (&mut meta.track, &mut meta.track_total)
+                                } else {
+                                    (&mut meta.disc, &mut meta.disc_total)
+                                };
+                                *num = (n > 0).then_some(n);
+                                *tot = (total > 0).then_some(total);
+                            }
                             b"covr" if !value.is_empty() => {
                                 let mime = if kind == 14 { "image/png" } else { "image/jpeg" };
                                 meta.art = Some(Art { mime: mime.to_string(), data: value.to_vec() });

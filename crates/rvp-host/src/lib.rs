@@ -12,12 +12,14 @@ extern crate std;
 
 pub mod frame;
 pub mod input;
+pub mod library;
 pub mod media;
 pub mod mock;
 
 pub use frame::FrameSink;
 
 pub use input::{InputEvent, Key, Modifiers, PointerButton, Rect};
+pub use library::{FileEntry, Library, Listing, ScriptedLibrary};
 pub use media::{
     Art, NowPlaying, NowPlayingMeta, PlayState, Playback, RecordingNowPlaying, RecordingTap,
     TransportCommand, VIZ_BANDS, VisualizerTap, VizBlock, VizSummary,
@@ -149,6 +151,10 @@ pub trait Host {
     }
     /// The host's visualizer tap, if it wants the audio analysis.
     fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> {
+        None
+    }
+    /// Directory access for the library view, if the host has any.
+    fn library(&mut self) -> Option<&mut dyn Library> {
         None
     }
 }

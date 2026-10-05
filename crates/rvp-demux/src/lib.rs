@@ -128,7 +128,17 @@ pub enum AnyDemuxer<S: Source> {
 }
 
 /// Sniff `src` and open the matching demuxer.
-pub async fn open<S: Source>(mut src: S) -> Result<AnyDemuxer<S>> {
+pub async fn open<S: Source>(src: S) -> Result<AnyDemuxer<S>> {
+    open_with(src, false).await
+}
+
+/// Like [`open`], for scanning a library: MP3 and ADTS files are not walked to the end, so the duration of one without a
+/// Xing header is an estimate. Everything else opens exactly as with [`open`].
+pub async fn open_quick<S: Source>(src: S) -> Result<AnyDemuxer<S>> {
+    open_with(src, true).await
+}
+
+async fn open_with<S: Source>(mut src: S, quick: bool) -> Result<AnyDemuxer<S>> {
     let mut head = [0u8; 12];
     let mut n = 0;
     while n < head.len() {
@@ -170,11 +180,11 @@ pub async fn open<S: Source>(mut src: S) -> Result<AnyDemuxer<S>> {
     match kind {
         Some(Container::Mp4) => Ok(AnyDemuxer::Mp4(Mp4Demuxer::open(src).await?)),
         Some(Container::Matroska) => Ok(AnyDemuxer::Mkv(MkvDemuxer::open(src).await?)),
-        Some(Container::Mp3) => Ok(AnyDemuxer::Mp3(Mp3Demuxer::open(src).await?)),
+        Some(Container::Mp3) => Ok(AnyDemuxer::Mp3(Mp3Demuxer::open_with(src, quick).await?)),
         Some(Container::Flac) => Ok(AnyDemuxer::Flac(FlacDemuxer::open(src).await?)),
         Some(Container::Ogg) => Ok(AnyDemuxer::Ogg(OggDemuxer::open(src).await?)),
         Some(Container::Wav) => Ok(AnyDemuxer::Wav(WavDemuxer::open(src).await?)),
-        Some(Container::Adts) => Ok(AnyDemuxer::Adts(AdtsDemuxer::open(src).await?)),
+        Some(Container::Adts) => Ok(AnyDemuxer::Adts(AdtsDemuxer::open_with(src, quick).await?)),
         None => Err(Error::Unsupported("unrecognised container".to_string())),
     }
 }

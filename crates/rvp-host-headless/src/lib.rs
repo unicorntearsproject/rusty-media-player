@@ -6,8 +6,9 @@ pub use rvp_host::mock::{FakeClock as VirtualClock, ScriptedInput};
 
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
 use rvp_host::{
-    AudioSink, FrameSink, Host, HostClock, HostError, InputEvents, NowPlaying, OpenRequest,
-    RecordingNowPlaying, RecordingTap, Rect, Source, Storage, Surface, VideoSink, VisualizerTap,
+    AudioSink, FileEntry, FrameSink, Host, HostClock, HostError, InputEvents, Library, Listing, NowPlaying,
+    OpenRequest, RecordingNowPlaying, RecordingTap, Rect, ScriptedLibrary, Source, Storage, Surface,
+    VideoSink, VisualizerTap,
 };
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -15,6 +16,45 @@ use std::rc::Rc;
 
 /// Version string shown by the CLI.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Walk the directory `dir` and describe every file below it as a [`Listing`] for root `root_id` (files sorted by path,
+/// ids are absolute paths, which [`FileSource::open`] takes).
+pub fn walk_listing(root_id: &str, name: &str, dir: &std::path::Path) -> Listing {
+    fn walk(base: &std::path::Path, dir: &std::path::Path, out: &mut Vec<FileEntry>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = rd.filter_map(Result::ok).collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let p = e.path();
+            let Ok(md) = e.metadata() else { continue };
+            if md.is_dir() {
+                walk(base, &p, out);
+            } else if md.is_file() {
+                let rel = p
+                    .strip_prefix(base)
+                    .unwrap_or(&p)
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let mtime_ms = md
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_millis() as i64);
+                out.push(FileEntry {
+                    id: p.to_string_lossy().into_owned(),
+                    path: rel,
+                    size: md.len(),
+                    mtime_ms,
+                });
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(dir, dir, &mut files);
+    Listing { root: root_id.to_string(), name: name.to_string(), files }
+}
 
 /// A [`Source`] over a native file.
 pub struct FileSource {
@@ -224,6 +264,8 @@ pub struct HeadlessHost {
     pub storage: MemStorage,
     /// When set, the host offers a visualizer tap and records what it receives.
     pub tap: Option<RecordingTap>,
+    /// When set, the host offers directory access: push listings (see [`walk_listing`]) for the app to scan.
+    pub library: Option<ScriptedLibrary>,
     /// When set, the host offers a now-playing sink and records what it receives.
     pub now_playing: Option<RecordingNowPlaying>,
 }
@@ -246,6 +288,7 @@ impl HeadlessHost {
             input: ScriptedInput::default(),
             storage: MemStorage::default(),
             tap: None,
+            library: None,
             now_playing: None,
         }
     }
@@ -292,6 +335,9 @@ impl Host for HeadlessHost {
     fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> {
         self.tap.as_mut().map(|t| t as &mut dyn VisualizerTap)
     }
+    fn library(&mut self) -> Option<&mut dyn Library> {
+        self.library.as_mut().map(|l| l as &mut dyn Library)
+    }
 }
 
 /// A headless host for the full application ([`rvp_app::App`]): like [`HeadlessHost`], but the video sink keeps
@@ -312,6 +358,8 @@ pub struct UiHost {
     pub presents: u64,
     /// When set, the host offers a visualizer tap and records what it receives.
     pub tap: Option<RecordingTap>,
+    /// When set, the host offers directory access: push listings (see [`walk_listing`]) for the app to scan.
+    pub library: Option<ScriptedLibrary>,
     /// When set, the host offers a now-playing sink and records what it receives.
     pub now_playing: Option<RecordingNowPlaying>,
 }
@@ -334,6 +382,7 @@ impl UiHost {
             input: ScriptedInput::default(),
             storage: MemStorage::default(),
             tap: None,
+            library: None,
             now_playing: None,
             presents: 0,
         }
@@ -380,6 +429,9 @@ impl Host for UiHost {
     }
     fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> {
         self.tap.as_mut().map(|t| t as &mut dyn VisualizerTap)
+    }
+    fn library(&mut self) -> Option<&mut dyn Library> {
+        self.library.as_mut().map(|l| l as &mut dyn Library)
     }
 }
 
