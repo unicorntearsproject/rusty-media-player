@@ -13,3 +13,6 @@ workspace = true
 
 [dependencies]
 theme.workspace = true
+rvp-host.workspace = true
+fontdue = { version = "0.9", default-features = false, features = ["hashbrown"] }
+libm = "0.2"

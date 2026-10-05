@@ -314,6 +314,7 @@ pub struct Session {
     needs_sink_flush: bool,
     volume: f32,
     muted: bool,
+    rate: f64,
     ended: bool,
     trace: bool,
     seek_target: Option<Timestamp>,
@@ -342,6 +343,7 @@ impl Session {
             needs_sink_flush: false,
             volume: 1.0,
             muted: false,
+            rate: 1.0,
             ended: false,
             trace: false,
             seek_target: None,
@@ -446,6 +448,53 @@ impl Session {
         self.muted = m;
     }
 
+    /// Current volume.
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+
+    /// True if muted.
+    pub fn muted(&self) -> bool {
+        self.muted
+    }
+
+    /// Playback rate (1.0 = normal).
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+
+    /// True if a video stream is selected for decoding (or the file is still opening).
+    pub fn has_video(&self) -> bool {
+        let s = self.sh.borrow();
+        !s.opened || s.sel_video.is_some()
+    }
+
+    /// True if the container has a video stream, even one we cannot decode yet.
+    pub fn container_has_video(&self) -> bool {
+        self.sh.borrow().streams.iter().any(|i| i.kind == StreamKind::Video)
+    }
+
+    /// Track id of the selected audio stream.
+    pub fn selected_audio(&self) -> Option<u32> {
+        self.sh.borrow().sel_audio.as_ref().map(|i| i.id)
+    }
+
+    /// Set the playback rate, 0.25..=4.0. Audio is resampled (varispeed), so pitch follows speed until M8's
+    /// time-stretching. The pipeline restarts at the current position, which costs a short rebuffer.
+    pub fn set_rate(&mut self, rate: f64, now_us: Timestamp) {
+        let rate = rate.clamp(0.25, 4.0);
+        if (rate - self.rate).abs() < 1e-9 {
+            return;
+        }
+        let pos = self.position_us(now_us);
+        self.rate = rate;
+        self.clock.set_rate(rate, now_us);
+        self.seek(pos);
+        if let Some(a) = &mut self.audio {
+            a.set_rate(rate);
+        }
+    }
+
     /// Playback position at host time `now_us`.
     pub fn position_us(&self, now_us: Timestamp) -> Timestamp {
         self.clock.now_stream(now_us).max(0)
@@ -510,6 +559,7 @@ impl Session {
             if has_audio {
                 if let Ok(p) = host.audio().open(WANT_AUDIO) {
                     let mut out = AudioOut::new(p);
+                    out.set_rate(self.rate);
                     if self.trace {
                         out.enable_trace();
                     }

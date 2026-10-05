@@ -19,6 +19,10 @@ rvp-codec-audio.workspace = true
 rvp-codec-av1.workspace = true
 rvp-demux.workspace = true
 
+[dev-dependencies]
+rvp-app.workspace = true
+rvp-ui.workspace = true
+
 [[bin]]
 name = "rvp-headless"
 path = "src/main.rs"

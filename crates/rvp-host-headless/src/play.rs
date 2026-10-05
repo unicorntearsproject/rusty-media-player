@@ -77,6 +77,8 @@ pub struct PlayOptions {
     pub video_stall: Option<(usize, Timestamp)>,
     /// Virtual time between ticks (default 10 ms). Use an awkward value to test unaligned presentation.
     pub tick_us: Option<Timestamp>,
+    /// Playback rate (default 1.0).
+    pub rate: Option<f64>,
 }
 
 /// Result of a run.
@@ -113,6 +115,9 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
     let mut session = Session::new(FileSource::open(path)?, Rc::new(codecs));
     session.enable_audio_trace();
     session.enable_video_trace();
+    if let Some(r) = opts.rate {
+        session.set_rate(r, 0);
+    }
     session.play();
     let mut seeks = opts.seeks.iter().copied().peekable();
     let mut max_us = opts.max_virtual_us;

@@ -1,0 +1,498 @@
+//! Software drawing into an RGBA8 framebuffer: anti-aliased rounded rectangles, gradients, glows, text masks
+//! and a bilinear picture scaler. Everything is deterministic integer/`f32` math (no `std`), so the same
+//! pixels come out in a browser and in Rusty Bucket.
+use alloc::vec::Vec;
+use libm::{cosf, expf, floorf, sinf, sqrtf};
+use theme::{GradientStop, LinearGradient, RadialGradient, Rgba};
+
+/// A rectangle in physical pixels, `f32` so layouts can place edges between pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RectF {
+    /// Left.
+    pub x: f32,
+    /// Top.
+    pub y: f32,
+    /// Width.
+    pub w: f32,
+    /// Height.
+    pub h: f32,
+}
+
+impl RectF {
+    /// A rectangle from its origin and size.
+    pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self { x, y, w, h }
+    }
+
+    /// Right edge.
+    pub fn right(&self) -> f32 {
+        self.x + self.w
+    }
+
+    /// Bottom edge.
+    pub fn bottom(&self) -> f32 {
+        self.y + self.h
+    }
+
+    /// Horizontal centre.
+    pub fn cx(&self) -> f32 {
+        self.x + self.w * 0.5
+    }
+
+    /// Vertical centre.
+    pub fn cy(&self) -> f32 {
+        self.y + self.h * 0.5
+    }
+
+    /// True if the point lies inside.
+    pub fn contains(&self, px: f32, py: f32) -> bool {
+        px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
+    }
+
+    /// Grow (or shrink, when negative) on every side.
+    pub fn inflate(&self, d: f32) -> Self {
+        Self::new(self.x - d, self.y - d, self.w + 2.0 * d, self.h + 2.0 * d)
+    }
+
+    /// Scale about the centre.
+    pub fn scaled(&self, k: f32) -> Self {
+        Self::new(self.cx() - self.w * k * 0.5, self.cy() - self.h * k * 0.5, self.w * k, self.h * k)
+    }
+}
+
+/// `c` with its alpha multiplied by `k` (0.0..=1.0).
+pub fn fade(c: Rgba, k: f32) -> Rgba {
+    Rgba::new(c.r, c.g, c.b, (c.a as f32 * k.clamp(0.0, 1.0) + 0.5) as u8)
+}
+
+/// Linear interpolation between two colours (straight alpha).
+pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
+    let t = t.clamp(0.0, 1.0);
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t + 0.5) as u8;
+    Rgba::new(l(a.r, b.r), l(a.g, b.g), l(a.b, b.b), l(a.a, b.a))
+}
+
+/// How a shape is filled.
+#[derive(Debug, Clone, Copy)]
+pub enum Paint {
+    /// One colour.
+    Solid(Rgba),
+    /// Top to bottom.
+    Vertical(Rgba, Rgba),
+    /// Left to right.
+    Horizontal(Rgba, Rgba),
+    /// A design-system gradient (CSS angle semantics) stretched over the shape's box.
+    Gradient(&'static LinearGradient),
+    /// A gradient over the same box with its alpha scaled (used to dim a brand gradient).
+    GradientFaded(&'static LinearGradient, f32),
+}
+
+fn stops_at(stops: &[GradientStop], t: f32) -> Rgba {
+    let t = t.clamp(0.0, 1.0);
+    let mut prev = stops[0];
+    if t <= prev.pos {
+        return prev.color;
+    }
+    for &s in &stops[1..] {
+        if t <= s.pos {
+            let span = (s.pos - prev.pos).max(1e-6);
+            return mix(prev.color, s.color, (t - prev.pos) / span);
+        }
+        prev = s;
+    }
+    prev.color
+}
+
+/// A [`Paint`] resolved against a box, so evaluating a pixel needs no trigonometry.
+struct Painter {
+    paint: Paint,
+    bx: RectF,
+    dx: f32,
+    dy: f32,
+    inv_len: f32,
+}
+
+impl Painter {
+    fn new(paint: Paint, bx: RectF) -> Self {
+        let (mut dx, mut dy, mut inv_len) = (0.0, 1.0, 1.0 / bx.h.max(1.0));
+        if let Paint::Gradient(g) | Paint::GradientFaded(g, _) = paint {
+            let a = g.angle_deg * core::f32::consts::PI / 180.0;
+            dx = sinf(a);
+            dy = -cosf(a);
+            let len = (bx.w * dx).abs() + (bx.h * dy).abs();
+            inv_len = 1.0 / len.max(1.0);
+        } else if let Paint::Horizontal(..) = paint {
+            dx = 1.0;
+            dy = 0.0;
+            inv_len = 1.0 / bx.w.max(1.0);
+        }
+        Self { paint, bx, dx, dy, inv_len }
+    }
+
+    fn at(&self, px: f32, py: f32) -> Rgba {
+        match self.paint {
+            Paint::Solid(c) => c,
+            Paint::Vertical(a, b) => mix(a, b, (py - self.bx.y) * self.inv_len),
+            Paint::Horizontal(a, b) => mix(a, b, (px - self.bx.x) * self.inv_len),
+            Paint::Gradient(g) => stops_at(g.stops, self.t(px, py)),
+            Paint::GradientFaded(g, k) => fade(stops_at(g.stops, self.t(px, py)), k),
+        }
+    }
+
+    fn t(&self, px: f32, py: f32) -> f32 {
+        ((px - self.bx.cx()) * self.dx + (py - self.bx.cy()) * self.dy) * self.inv_len + 0.5
+    }
+}
+
+/// Signed distance from a point to a rounded rectangle (negative inside).
+fn sd_rrect(px: f32, py: f32, r: &RectF, radius: f32) -> f32 {
+    let hw = r.w * 0.5;
+    let hh = r.h * 0.5;
+    let rad = radius.min(hw).min(hh).max(0.0);
+    let qx = (px - r.cx()).abs() - (hw - rad);
+    let qy = (py - r.cy()).abs() - (hh - rad);
+    if qx > 0.0 && qy > 0.0 { sqrtf(qx * qx + qy * qy) - rad } else { qx.max(qy) - rad }
+}
+
+/// An RGBA8 framebuffer.
+#[derive(Debug, Clone)]
+pub struct FrameBuffer {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// `width * height * 4` bytes, RGBA, straight alpha (always opaque once `clear`ed).
+    pub pixels: Vec<u8>,
+}
+
+impl FrameBuffer {
+    /// A buffer filled with the page background (`ink-900`).
+    pub fn new(width: u32, height: u32) -> Self {
+        let mut fb = Self { width, height, pixels: alloc::vec![0; width as usize * height as usize * 4] };
+        fb.clear(theme::tokens::BG_PAGE);
+        fb
+    }
+
+    /// Fill everything with `c`.
+    pub fn clear(&mut self, c: Rgba) {
+        let row = self.width as usize * 4;
+        if row == 0 || self.pixels.len() < row {
+            return;
+        }
+        for px in self.pixels[..row].chunks_exact_mut(4) {
+            px.copy_from_slice(&[c.r, c.g, c.b, c.a]);
+        }
+        for y in 1..self.height as usize {
+            self.pixels.copy_within(0..row, y * row);
+        }
+    }
+
+    /// Change the size (contents become the page background).
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+        self.pixels.clear();
+        self.pixels.resize(width as usize * height as usize * 4, 0);
+        self.clear(theme::tokens::BG_PAGE);
+    }
+
+    /// Fill a rectangle, clipped to the buffer, with `c` written as is (no blending).
+    pub fn fill_rect(&mut self, x: i32, y: i32, w: u32, h: u32, c: Rgba) {
+        let x0 = x.max(0) as u32;
+        let y0 = y.max(0) as u32;
+        let x1 = (x as i64 + w as i64).clamp(0, self.width as i64) as u32;
+        let y1 = (y as i64 + h as i64).clamp(0, self.height as i64) as u32;
+        for yy in y0..y1 {
+            for xx in x0..x1 {
+                let i = (yy as usize * self.width as usize + xx as usize) * 4;
+                self.pixels[i..i + 4].copy_from_slice(&[c.r, c.g, c.b, c.a]);
+            }
+        }
+    }
+
+    /// The pixel at (x, y).
+    pub fn pixel(&self, x: u32, y: u32) -> Rgba {
+        let i = (y as usize * self.width as usize + x as usize) * 4;
+        Rgba::new(self.pixels[i], self.pixels[i + 1], self.pixels[i + 2], self.pixels[i + 3])
+    }
+
+    /// Source-over blend of `c` at (x, y) with extra coverage `cov` (0.0..=1.0). Out-of-bounds is ignored.
+    #[inline]
+    pub fn blend(&mut self, x: i32, y: i32, c: Rgba, cov: f32) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return;
+        }
+        let a = c.a as f32 * (1.0 / 255.0) * cov;
+        if a <= 0.002 {
+            return;
+        }
+        let i = (y as usize * self.width as usize + x as usize) * 4;
+        let d = &mut self.pixels[i..i + 4];
+        if a >= 0.998 {
+            d[0] = c.r;
+            d[1] = c.g;
+            d[2] = c.b;
+        } else {
+            d[0] = (d[0] as f32 + (c.r as f32 - d[0] as f32) * a + 0.5) as u8;
+            d[1] = (d[1] as f32 + (c.g as f32 - d[1] as f32) * a + 0.5) as u8;
+            d[2] = (d[2] as f32 + (c.b as f32 - d[2] as f32) * a + 0.5) as u8;
+        }
+        d[3] = 255;
+    }
+
+    /// Blend a rectangle with square corners (a scrim, a divider). Left and right edges snap to whole pixels;
+    /// top and bottom keep their fractional coverage. Solid and vertical paints take a per-row fast path.
+    pub fn fill_rect_paint(&mut self, r: RectF, paint: Paint, opacity: f32) {
+        let x0 = (libm::roundf(r.x) as i32).clamp(0, self.width as i32);
+        let x1 = (libm::roundf(r.right()) as i32).clamp(0, self.width as i32);
+        let y0 = (floorf(r.y) as i32).max(0);
+        let y1 = (r.bottom() as i32 + 1).min(self.height as i32);
+        if x1 <= x0 {
+            return;
+        }
+        let p = Painter::new(paint, r);
+        let stride = self.width as usize * 4;
+        for y in y0..y1 {
+            let cy = ((y as f32 + 1.0).min(r.bottom()) - (y as f32).max(r.y)).max(0.0);
+            if cy <= 0.0 {
+                continue;
+            }
+            match paint {
+                Paint::Solid(_) | Paint::Vertical(..) => {
+                    let c = p.at(r.x, y as f32 + 0.5);
+                    let a = (c.a as f32 * cy * opacity + 0.5) as i32;
+                    if a <= 0 {
+                        continue;
+                    }
+                    let a = a + (a >> 7); // 0..=256
+                    let (cr, cg, cb) = (c.r as i32, c.g as i32, c.b as i32);
+                    let row = &mut self.pixels
+                        [y as usize * stride + x0 as usize * 4..y as usize * stride + x1 as usize * 4];
+                    for d in row.chunks_exact_mut(4) {
+                        d[0] = (d[0] as i32 + (((cr - d[0] as i32) * a) >> 8)) as u8;
+                        d[1] = (d[1] as i32 + (((cg - d[1] as i32) * a) >> 8)) as u8;
+                        d[2] = (d[2] as i32 + (((cb - d[2] as i32) * a) >> 8)) as u8;
+                        d[3] = 255;
+                    }
+                }
+                _ => {
+                    for x in x0..x1 {
+                        let c = p.at(x as f32 + 0.5, y as f32 + 0.5);
+                        self.blend(x, y, c, cy * opacity);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Fill an anti-aliased rounded rectangle.
+    pub fn fill_rrect(&mut self, r: RectF, radius: f32, paint: Paint, opacity: f32) {
+        let x0 = (floorf(r.x) as i32 - 1).max(0);
+        let y0 = (floorf(r.y) as i32 - 1).max(0);
+        let x1 = (r.right() as i32 + 2).min(self.width as i32);
+        let y1 = (r.bottom() as i32 + 2).min(self.height as i32);
+        let p = Painter::new(paint, r);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let cov = 0.5 - sd_rrect(fx, fy, &r, radius);
+                if cov > 0.0 {
+                    self.blend(x, y, p.at(fx, fy), cov.min(1.0) * opacity);
+                }
+            }
+        }
+    }
+
+    /// Stroke the inside edge of a rounded rectangle.
+    pub fn stroke_rrect(&mut self, r: RectF, radius: f32, width: f32, color: Rgba, opacity: f32) {
+        let x0 = (floorf(r.x) as i32 - 1).max(0);
+        let y0 = (floorf(r.y) as i32 - 1).max(0);
+        let x1 = (r.right() as i32 + 2).min(self.width as i32);
+        let y1 = (r.bottom() as i32 + 2).min(self.height as i32);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let d = sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &r, radius);
+                let cov = (0.5 - d).clamp(0.0, 1.0) * (d + width + 0.5).clamp(0.0, 1.0);
+                if cov > 0.0 {
+                    self.blend(x, y, color, cov * opacity);
+                }
+            }
+        }
+    }
+
+    /// A soft glow around a rounded rectangle, like CSS `box-shadow: 0 0 <blur>px <color>`: half strength at
+    /// the edge, fading outwards. Draw it before the shape itself.
+    pub fn glow_rrect(&mut self, r: RectF, radius: f32, blur: f32, color: Rgba, opacity: f32) {
+        self.shadow_rrect(r, radius, 0.0, blur, color, opacity);
+    }
+
+    /// A drop shadow: the shape offset by `dy`, blurred.
+    pub fn shadow_rrect(&mut self, r: RectF, radius: f32, dy: f32, blur: f32, color: Rgba, opacity: f32) {
+        let sigma = (blur * 0.5).max(0.5);
+        let reach = blur * 1.5 + 1.0;
+        let sh = RectF::new(r.x, r.y + dy, r.w, r.h);
+        let x0 = (floorf(sh.x - reach) as i32).max(0);
+        let y0 = (floorf(sh.y - reach) as i32).max(0);
+        let x1 = ((sh.right() + reach) as i32 + 1).min(self.width as i32);
+        let y1 = ((sh.bottom() + reach) as i32 + 1).min(self.height as i32);
+        let k = 1.702 / sigma;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let d = sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &sh, radius);
+                // Logistic approximation of the Gaussian edge profile.
+                let cov = 1.0 / (1.0 + expf(d * k));
+                if cov > 0.004 {
+                    self.blend(x, y, color, cov * opacity);
+                }
+            }
+        }
+    }
+
+    /// Fill the whole buffer with a CSS-style radial gradient (an ellipse radius given in % of the buffer).
+    pub fn fill_radial(&mut self, g: &RadialGradient) {
+        let (w, h) = (self.width as f32, self.height as f32);
+        let (cx, cy) = (g.cx_pct * 0.01 * w, g.cy_pct * 0.01 * h);
+        let (rx, ry) = ((g.rx_pct * 0.01 * w).max(1.0), (g.ry_pct * 0.01 * h).max(1.0));
+        for y in 0..self.height {
+            let dy = (y as f32 + 0.5 - cy) / ry;
+            for x in 0..self.width {
+                let dx = (x as f32 + 0.5 - cx) / rx;
+                let c = stops_at(g.stops, sqrtf(dx * dx + dy * dy));
+                let i = (y as usize * self.width as usize + x as usize) * 4;
+                self.pixels[i..i + 4].copy_from_slice(&[c.r, c.g, c.b, 255]);
+            }
+        }
+    }
+
+    /// Blend a coverage mask (`w * h` bytes) tinted with `color` at integer position (x, y).
+    pub fn blit_mask(&mut self, x: i32, y: i32, w: u32, h: u32, mask: &[u8], color: Rgba, opacity: f32) {
+        for my in 0..h as i32 {
+            for mx in 0..w as i32 {
+                let m = mask[(my as u32 * w + mx as u32) as usize];
+                if m != 0 {
+                    self.blend(x + mx, y + my, color, m as f32 * (1.0 / 255.0) * opacity);
+                }
+            }
+        }
+    }
+
+    /// Draw a picture (`sw * sh` RGBA, opaque) scaled with bilinear filtering into `dst`.
+    ///
+    /// Two passes with packed channel arithmetic (red and blue share one `u32` multiply): first every source
+    /// row is scaled to the destination width (once per picture, `sh` rows), then each destination row blends
+    /// two of those rows. The second pass is a straight zip over contiguous memory, which the compiler turns
+    /// into SIMD where the target has it.
+    pub fn blit_scaled(&mut self, dst: RectF, src: &[u8], sw: u32, sh: u32) {
+        if sw == 0 || sh == 0 || dst.w < 1.0 || dst.h < 1.0 || src.len() < sw as usize * sh as usize * 4 {
+            return;
+        }
+        let x0 = dst.x.max(0.0) as i32;
+        let y0 = dst.y.max(0.0) as i32;
+        let x1 = ((dst.x + dst.w + 0.5) as i32).min(self.width as i32);
+        let y1 = ((dst.y + dst.h + 0.5) as i32).min(self.height as i32);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        const RB: u32 = 0x00FF_00FF;
+        const G: u32 = 0x0000_FF00;
+        #[inline(always)]
+        fn lerp(a: u32, b: u32, w: u32) -> u32 {
+            let rb = (((a & RB) * (256 - w) + (b & RB) * w) >> 8) & RB;
+            let g = (((a & G) * (256 - w) + (b & G) * w) >> 8) & G;
+            rb | g | 0xFF00_0000
+        }
+        let dw = (x1 - x0) as usize;
+        let (sx, sy) = (sw as f32 / dst.w, sh as f32 / dst.h);
+        let cols: Vec<(usize, usize, u32)> = (x0..x1)
+            .map(|x| {
+                let fx = ((x as f32 + 0.5 - dst.x) * sx - 0.5).clamp(0.0, (sw - 1) as f32);
+                let i0 = fx as usize;
+                (i0, (i0 + 1).min(sw as usize - 1), ((fx - i0 as f32) * 256.0) as u32)
+            })
+            .collect();
+        // Pass 1: source rows scaled to the destination width.
+        let stride = sw as usize * 4;
+        let mut wide: Vec<u32> = alloc::vec![0; dw * sh as usize];
+        let mut line: Vec<u32> = alloc::vec![0; sw as usize];
+        for (j, out) in wide.chunks_exact_mut(dw).enumerate() {
+            for (l, p) in line.iter_mut().zip(src[j * stride..(j + 1) * stride].chunks_exact(4)) {
+                *l = u32::from_le_bytes([p[0], p[1], p[2], p[3]]);
+            }
+            for (o, &(i0, i1, wx)) in out.iter_mut().zip(cols.iter()) {
+                *o = lerp(line[i0], line[i1], wx);
+            }
+        }
+        // Pass 2: blend two wide rows per destination row.
+        for y in y0..y1 {
+            let fy = ((y as f32 + 0.5 - dst.y) * sy - 0.5).clamp(0.0, (sh - 1) as f32);
+            let j0 = fy as usize;
+            let j1 = (j0 + 1).min(sh as usize - 1);
+            let wy = ((fy - j0 as f32) * 256.0) as u32;
+            let (a, b) = (&wide[j0 * dw..(j0 + 1) * dw], &wide[j1 * dw..(j1 + 1) * dw]);
+            let o = (y as usize * self.width as usize + x0 as usize) * 4;
+            let row = &mut self.pixels[o..o + dw * 4];
+            if wy == 0 {
+                for (d, &v) in row.chunks_exact_mut(4).zip(a) {
+                    d.copy_from_slice(&v.to_le_bytes());
+                }
+            } else {
+                for ((d, &p), &q) in row.chunks_exact_mut(4).zip(a).zip(b) {
+                    d.copy_from_slice(&lerp(p, q, wy).to_le_bytes());
+                }
+            }
+        }
+    }
+
+    /// Copy another buffer of the same size over this one.
+    pub fn copy_from(&mut self, other: &FrameBuffer) {
+        if self.pixels.len() == other.pixels.len() {
+            self.pixels.copy_from_slice(&other.pixels);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use theme::tokens;
+
+    #[test]
+    fn starts_on_ink_and_fill_rect_clips() {
+        let mut fb = FrameBuffer::new(8, 8);
+        assert_eq!(fb.pixel(3, 3), tokens::INK_900);
+        fb.fill_rect(-2, 6, 100, 100, tokens::MAGENTA_500);
+        assert_eq!(fb.pixel(0, 7), tokens::MAGENTA_500);
+        assert_eq!(fb.pixel(7, 5), tokens::INK_900);
+    }
+
+    #[test]
+    fn rounded_rect_is_antialiased_and_clipped() {
+        let mut fb = FrameBuffer::new(40, 40);
+        fb.fill_rrect(RectF::new(4.5, 4.0, 31.5, 32.0), 12.0, Paint::Solid(tokens::CYAN_500), 1.0);
+        assert_eq!(fb.pixel(20, 20), tokens::CYAN_500);
+        assert_eq!(fb.pixel(4, 4), tokens::INK_900); // the corner is rounded away
+        let edge = fb.pixel(4, 20); // half covered
+        assert!(edge.b > tokens::INK_900.b && edge != tokens::CYAN_500);
+        fb.fill_rrect(RectF::new(-50.0, -50.0, 200.0, 200.0), 4.0, Paint::Solid(tokens::WHITE), 1.0); // no panic
+    }
+
+    #[test]
+    fn gradient_runs_end_to_end() {
+        let mut fb = FrameBuffer::new(100, 10);
+        fb.fill_rect_paint(
+            RectF::new(0.0, 0.0, 100.0, 10.0),
+            Paint::Horizontal(tokens::WHITE, tokens::INK_900),
+            1.0,
+        );
+        assert!(fb.pixel(1, 5).r > 240 && fb.pixel(98, 5).r < 20);
+    }
+
+    #[test]
+    fn scaler_preserves_flat_colour() {
+        let src = alloc::vec![200u8, 100, 50, 255].repeat(16);
+        let mut fb = FrameBuffer::new(20, 20);
+        fb.blit_scaled(RectF::new(2.0, 2.0, 16.0, 16.0), &src, 4, 4);
+        assert_eq!(fb.pixel(10, 10), Rgba::rgb(200, 100, 50));
+        assert_eq!(fb.pixel(0, 0), tokens::INK_900);
+    }
+}

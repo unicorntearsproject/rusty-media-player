@@ -6,8 +6,8 @@ pub use rvp_host::mock::{FakeClock as VirtualClock, ScriptedInput};
 
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
 use rvp_host::{
-    AudioSink, Host, HostClock, HostError, InputEvents, OpenRequest, Rect, Source, Storage, Surface,
-    VideoSink,
+    AudioSink, FrameSink, Host, HostClock, HostError, InputEvents, OpenRequest, Rect, Source, Storage,
+    Surface, VideoSink,
 };
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -263,6 +263,83 @@ impl Host for HeadlessHost {
         &mut self.audio
     }
     fn video(&mut self) -> &mut HashVideo {
+        &mut self.video
+    }
+    fn surface(&mut self) -> &mut dyn Surface {
+        &mut self.surface
+    }
+    fn input(&mut self) -> &mut dyn InputEvents {
+        &mut self.input
+    }
+    fn storage(&mut self) -> &mut MemStorage {
+        &mut self.storage
+    }
+    async fn open(&mut self, req: OpenRequest) -> Result<FileSource, HostError> {
+        match req {
+            OpenRequest::Id(path) => FileSource::open(&path),
+            OpenRequest::Pick => Err(HostError("no file picker in the headless host".into())),
+        }
+    }
+}
+
+/// A headless host for the full application ([`rvp_app::App`]): like [`HeadlessHost`], but the video sink keeps
+/// the latest picture as RGBA so the app can compose it with the UI, and the surface keeps what was presented.
+pub struct UiHost {
+    clock: Rc<VirtualClock>,
+    /// Audio sink.
+    pub audio: NullAudio,
+    /// Video sink (the app reads the latest frame from it).
+    pub video: FrameSink,
+    /// Surface; `rgba` is the last presented frame.
+    pub surface: MemSurface,
+    /// Scripted input.
+    pub input: ScriptedInput,
+    /// Storage.
+    pub storage: MemStorage,
+    /// Frames presented to the surface.
+    pub presents: u64,
+}
+
+impl Default for UiHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UiHost {
+    /// A host at virtual time 0 with a 1280x720 surface.
+    pub fn new() -> Self {
+        let clock = Rc::new(VirtualClock::new());
+        Self {
+            audio: NullAudio::new(clock.clone()),
+            clock,
+            video: FrameSink::new(),
+            surface: MemSurface { size: (1280, 720, 1.0), rgba: Vec::new(), fullscreen: false },
+            input: ScriptedInput::default(),
+            storage: MemStorage::default(),
+            presents: 0,
+        }
+    }
+
+    /// Shared handle to the virtual clock.
+    pub fn virtual_clock(&self) -> Rc<VirtualClock> {
+        self.clock.clone()
+    }
+}
+
+impl Host for UiHost {
+    type Source = FileSource;
+    type Audio = NullAudio;
+    type Video = FrameSink;
+    type Store = MemStorage;
+
+    fn clock(&self) -> &dyn HostClock {
+        &*self.clock
+    }
+    fn audio(&mut self) -> &mut NullAudio {
+        &mut self.audio
+    }
+    fn video(&mut self) -> &mut FrameSink {
         &mut self.video
     }
     fn surface(&mut self) -> &mut dyn Surface {

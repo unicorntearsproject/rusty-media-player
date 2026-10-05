@@ -38,6 +38,8 @@ pub struct AudioOut {
     written: u64,
     discard_until: Timestamp,
     trace: Option<Vec<TraceEntry>>,
+    /// Playback rate: the input is consumed `rate` times faster than real time (varispeed: pitch follows).
+    rate: f64,
 }
 
 impl AudioOut {
@@ -55,6 +57,24 @@ impl AudioOut {
             written: 0,
             discard_until: 0,
             trace: None,
+            rate: 1.0,
+        }
+    }
+
+    /// Set the playback rate. Only call this right after [`AudioOut::reset`]: audio already queued keeps the
+    /// old rate. Rates other than 1.0 resample the input (so the pitch changes; time-stretching is M8).
+    pub fn set_rate(&mut self, rate: f64) {
+        self.rate = rate.clamp(0.1, 8.0);
+        self.resampler = None;
+    }
+
+    /// Stream microseconds covered by `frames` output frames at the current rate.
+    fn frames_to_us(&self, frames: i64) -> i64 {
+        let sr = self.sink.sample_rate as i64;
+        if self.rate == 1.0 {
+            frames * 1_000_000 / sr
+        } else {
+            (frames as f64 * 1_000_000.0 * self.rate / sr as f64) as i64
         }
     }
 
@@ -90,7 +110,7 @@ impl AudioOut {
 
     /// Stream time just after the last frame pushed, if any.
     pub fn end_pts(&self) -> Option<Timestamp> {
-        self.origin.map(|o| o + self.pushed as i64 * 1_000_000 / self.sink.sample_rate as i64)
+        self.origin.map(|o| o + self.frames_to_us(self.pushed as i64))
     }
 
     /// Append decoded audio.
@@ -133,12 +153,15 @@ impl AudioOut {
 
         let mixed = mix(samples, in_ch, self.sink.channels as usize);
         let before = self.pending.len();
-        if in_rate == self.sink.sample_rate {
+        // At rate r the input is played r times faster, which is the same as resampling from `in_rate * r`.
+        let eff_rate = if self.rate == 1.0 { in_rate } else { ((in_rate as f64 * self.rate) as u32).max(1) };
+        if eff_rate == self.sink.sample_rate {
             self.pending.extend_from_slice(&mixed);
         } else {
             let sink_ch = self.sink.channels as usize;
-            let r =
-                self.resampler.get_or_insert_with(|| Resampler::new(in_rate, self.sink.sample_rate, sink_ch));
+            let r = self
+                .resampler
+                .get_or_insert_with(|| Resampler::new(eff_rate, self.sink.sample_rate, sink_ch));
             r.process(&mixed, &mut self.pending);
         }
         let added = (self.pending.len() - before) / self.sink.channels as usize;
@@ -179,7 +202,7 @@ impl AudioOut {
     pub fn heard_pts(&self, sink: &impl AudioSink) -> Option<Timestamp> {
         let origin = self.origin?;
         let played = self.written as i64 - sink.queued_frames() as i64;
-        Some(origin + played * 1_000_000 / self.sink.sample_rate as i64 - sink.output_latency_us())
+        Some(origin + self.frames_to_us(played) - sink.output_latency_us())
     }
 
     /// Stream time of the first audio frame, once known.

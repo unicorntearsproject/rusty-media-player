@@ -13,6 +13,7 @@ members = [
     "crates/rvp-subs",
     "crates/rvp-player",
     "crates/rvp-ui",
+    "crates/rvp-app",
     "crates/rvp-host-headless",
     "crates/rvp-host-web",
     "crates/rvp-host-rb",
@@ -39,6 +40,8 @@ rvp-codec-audio = { path = "crates/rvp-codec-audio" }
 rvp-codec-av1 = { path = "crates/rvp-codec-av1" }
 rvp-demux = { path = "crates/rvp-demux" }
 rvp-player = { path = "crates/rvp-player" }
+rvp-ui = { path = "crates/rvp-ui" }
+rvp-app = { path = "crates/rvp-app" }
 theme = { path = "crates/theme" }
 
 [profile.release]

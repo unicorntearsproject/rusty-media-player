@@ -1,5 +1,6 @@
 //! Repo automation. Run as `cargo xtask <command>`.
 mod theme;
+mod web;
 
 use std::process::{Command, ExitCode};
 
@@ -11,7 +12,12 @@ const USAGE: &str = "usage: cargo xtask <command>
   check            cargo check for the host, and for wasm32 / no_std targets where applicable
   wasm-smoke       decode AV1 fixtures inside WebAssembly (Node) and compare with the native decoder
   fixtures [dir]   generate ffmpeg test media into target/fixtures (tools/gen-fixtures.sh)
-  web | serve | licenses   not implemented yet (see docs/PLAN.md)";
+  web [--no-opt]   build the browser player into target/web (wasm32 release, wasm-bindgen, wasm-opt if installed)
+  serve [--port N] [--dir D]   serve target/web (default port 8080) with the headers a wasm page likes
+  e2e [--update-golden] [--screenshots] [-- args]
+                   build the page, make fixtures and run the Playwright suite (tests/e2e);
+                   --screenshots regenerates docs/screenshots
+  licenses         not implemented yet (see docs/PLAN.md)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -20,7 +26,10 @@ fn main() -> ExitCode {
         Some("check") => check(),
         Some("fixtures") => fixtures(&args[1..]),
         Some("wasm-smoke") => wasm_smoke(),
-        Some(cmd @ ("web" | "serve" | "licenses")) => Err(format!("`{cmd}` is not implemented yet")),
+        Some("web") => web::build(args.iter().any(|a| a == "--no-opt")),
+        Some("serve") => web::serve(&args[1..]),
+        Some("e2e") => web::e2e(&args[1..]),
+        Some(cmd @ "licenses") => Err(format!("`{cmd}` is not implemented yet")),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -35,7 +44,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn fixtures(extra: &[String]) -> Result<(), String> {
+pub(crate) fn fixtures(extra: &[String]) -> Result<(), String> {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/gen-fixtures.sh");
     let status = Command::new("bash").arg(script).args(extra).status().map_err(|e| e.to_string())?;
     status.success().then_some(()).ok_or_else(|| "fixture generation failed".to_string())
@@ -72,7 +81,7 @@ fn wasm_smoke() -> Result<(), String> {
     Ok(())
 }
 
-fn cargo(args: &[&str]) -> Result<(), String> {
+pub(crate) fn cargo(args: &[&str]) -> Result<(), String> {
     println!("+ cargo {}", args.join(" "));
     let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
         .args(args)
@@ -94,13 +103,23 @@ const WASM_CRATES: &[&str] = &[
     "rvp-subs",
     "rvp-player",
     "rvp-ui",
+    "rvp-app",
     "rvp-host-web",
     "rvp-host-rb",
 ];
 
 /// Crates that promise `no_std + alloc` and must build for a target with no std at all.
-const NO_STD_CRATES: &[&str] =
-    &["theme", "rvp-core", "rvp-host", "rvp-demux", "rvp-codec-h264", "rvp-subs", "rvp-player", "rvp-ui"];
+const NO_STD_CRATES: &[&str] = &[
+    "theme",
+    "rvp-core",
+    "rvp-host",
+    "rvp-demux",
+    "rvp-codec-h264",
+    "rvp-subs",
+    "rvp-player",
+    "rvp-ui",
+    "rvp-app",
+];
 
 fn check() -> Result<(), String> {
     cargo(&["check", "--workspace", "--all-targets"])?;

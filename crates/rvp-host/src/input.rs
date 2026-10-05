@@ -134,6 +134,8 @@ pub enum InputEvent {
         /// Identifier.
         id: String,
     },
+    /// A file is being dragged over the window (`true`) or left it (`false`); lets the UI show a drop target.
+    DragOver(bool),
     /// Window focus changed.
     Focus(bool),
 }

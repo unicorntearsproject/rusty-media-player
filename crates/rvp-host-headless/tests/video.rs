@@ -153,3 +153,26 @@ fn seeking_shows_the_frame_at_the_target_and_stays_in_sync() {
     assert!(r.video_trace[k..].iter().all(|e| (e.clock_us - e.pts).abs() <= FRAME_US));
     assert!(r.video_trace.last().unwrap().pts >= 5_900_000);
 }
+
+#[test]
+fn speed_changes_how_fast_video_and_audio_play() {
+    if skip() {
+        return;
+    }
+    let path = fixture("av1_opus.webm"); // 6 s, 25 fps
+    for (rate, secs) in [(2.0, 3.0), (0.5, 12.0), (4.0, 1.5)] {
+        let r = play_file(&path, &PlayOptions { rate: Some(rate), ..Default::default() }).unwrap();
+        assert_eq!(r.state, SessionState::Ended, "{rate}x: {:?}", r.error);
+        let virt = r.virtual_us as f64 / 1e6;
+        assert!((virt - secs).abs() < 0.6, "{rate}x took {virt} s, wanted about {secs} s");
+        // Every picture is still shown in order, within a frame of the clock.
+        assert!(r.video_trace.windows(2).all(|w| w[0].pts < w[1].pts));
+        assert_eq!(r.video_stats.presented + r.video_stats.dropped, 150, "{rate}x: {:?}", r.video_stats);
+        if rate <= 2.0 {
+            assert_eq!(r.video_stats.dropped, 0, "{rate}x: {:?}", r.video_stats);
+        }
+        // The audio is the same six seconds, resampled to take 1/rate as long (varispeed).
+        let audio_s = r.audio.len() as f64 / 2.0 / 48_000.0;
+        assert!((audio_s - 6.0 / rate).abs() < 0.3, "{rate}x: {audio_s} s of audio");
+    }
+}

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#07060d">
+  <title>Rusty Video Player</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- The whole player (picture, controls, menus) is drawn by the Rust UI into this canvas. -->
+  <canvas id="screen" tabindex="0" role="application"
+    aria-label="Rusty Video Player. Press O to open a file, Space to play or pause, F for fullscreen."></canvas>
+  <div id="status" class="sr-only" role="status" aria-live="polite"></div>
+  <input id="file" type="file" hidden
+    accept="video/mp4,video/webm,video/x-matroska,audio/*,.mp4,.m4v,.mkv,.webm,.mka,.mp3,.flac,.ogg,.opus,.m4a">
+  <noscript>Rusty Video Player needs JavaScript and WebAssembly.</noscript>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

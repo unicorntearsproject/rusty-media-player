@@ -1,7 +1,7 @@
 //! `rvp-headless`: run the player without a display or sound card, in virtual time.
 //!
 //! ```text
-//! rvp-headless play <file> [--audio-wav out.wav] [--seek AT:TO ...]   (times in seconds of stream time)
+//! rvp-headless play <file> [--audio-wav out.wav] [--seek AT:TO ...] [--rate R]   (times in seconds of stream time)
 //! ```
 use rvp_host_headless::{PlayOptions, play_file, write_wav_f32};
 use std::process::ExitCode;
@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) != Some("play") || args.len() < 2 {
         eprintln!(
-            "rvp-headless {}\nusage: rvp-headless play <file> [--audio-wav out.wav] [--seek AT:TO ...]",
+            "rvp-headless {}\nusage: rvp-headless play <file> [--audio-wav out.wav] [--seek AT:TO ...] [--rate R]",
             rvp_host_headless::VERSION
         );
         return ExitCode::from(2);
@@ -38,6 +38,16 @@ fn main() -> ExitCode {
                     Some(p) => opts.seeks.push(p),
                     None => {
                         eprintln!("--seek needs AT:TO in seconds");
+                        return ExitCode::from(2);
+                    }
+                }
+                i += 2;
+            }
+            "--rate" => {
+                match args.get(i + 1).and_then(|v| v.parse::<f64>().ok()) {
+                    Some(r) => opts.rate = Some(r),
+                    None => {
+                        eprintln!("--rate needs a number (0.25 to 4)");
                         return ExitCode::from(2);
                     }
                 }

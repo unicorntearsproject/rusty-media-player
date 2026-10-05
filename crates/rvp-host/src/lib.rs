@@ -10,8 +10,11 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod frame;
 pub mod input;
 pub mod mock;
+
+pub use frame::FrameSink;
 
 pub use input::{InputEvent, Key, Modifiers, PointerButton, Rect};
 

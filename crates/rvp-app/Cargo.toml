@@ -1,0 +1,18 @@
+[package]
+name = "rvp-app"
+description = "The player application: session + UI + input glue behind the host trait (no_std + alloc)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true
+rvp-host.workspace = true
+rvp-player.workspace = true
+rvp-ui.workspace = true

@@ -5,7 +5,7 @@
 - Be efficient: minimal reporting, no superfluous output. Ask the user only when genuinely blocked.
 
 ## Context
-- Goal: a VLC-derived media player in Rust, compiled to WebAssembly, as an app for Rusty Bucket (`../rust-os`, see its `PLAN.md`).
+- Goal: a VLC-derived media player in Rust, compiled to WebAssembly, as an app for Rusty Bucket (`../rust-os`, plan index: `docs/planning/README.md`).
 - Reference source: `../vlc` (shallow clone of upstream VLC).
 - Drop legacy/obscure features (optical discs, rare protocols/codecs, skins, etc.).
 - Look & feel: follow `../u-studio-video-editor` and `/home/jj/projects/unicorn-tears/claude-design-system` — not VLC's UI.
