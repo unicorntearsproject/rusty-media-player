@@ -147,7 +147,9 @@ impl Default for Rav1dMsacDSPContext {
     }
 }
 
-pub type EcWin = usize;
+/// The arithmetic decoder's bit window: 64 bits everywhere (a 32-bit window on wasm32 refills from the stream twice as often; the decoded
+/// symbols are the same for any width).
+pub type EcWin = u64;
 
 /// # Safety
 ///

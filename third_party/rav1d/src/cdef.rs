@@ -238,7 +238,7 @@ fn padding<BD: BitDepth>(
 }
 
 #[inline(never)]
-fn cdef_filter_block_rust<BD: BitDepth>(
+fn cdef_filter_block_rust<BD: BitDepth, const W: usize, const H: usize>(
     dst: Rav1dPictureDataComponentOffset,
     left: &[LeftPixelRow2px<BD::Pixel>; 8],
     top: CdefTop,
@@ -247,11 +247,11 @@ fn cdef_filter_block_rust<BD: BitDepth>(
     sec_strength: c_int,
     dir: c_int,
     damping: c_int,
-    w: usize,
-    h: usize,
     edges: CdefEdgeFlags,
     bd: BD,
 ) {
+    // The block size is a constant of each instance, so the loops over a block's pixels have known lengths.
+    let (w, h) = (W, H);
     let dir = dir as usize;
 
     assert!((w == 4 || w == 8) && (h == 4 || h == 8));
@@ -398,7 +398,7 @@ unsafe extern "C" fn cdef_filter_block_c_erased<BD: BitDepth, const W: usize, co
     // SAFETY: Was passed as `FFISafe::new(_)` in `cdef::Fn::call`.
     let bottom = *unsafe { FFISafe::get(bottom) };
     let bd = BD::from_c(bitdepth_max);
-    cdef_filter_block_rust(
+    cdef_filter_block_rust::<BD, W, H>(
         dst,
         left,
         top,
@@ -407,8 +407,6 @@ unsafe extern "C" fn cdef_filter_block_c_erased<BD: BitDepth, const W: usize, co
         sec_strength,
         dir,
         damping,
-        W,
-        H,
         edges,
         bd,
     )

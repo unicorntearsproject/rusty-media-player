@@ -31,3 +31,21 @@ Upstreaming the `libc` change is the preferred end state.
 8. `src/lib.rs`: `dav1d_picture_unref` leaves the picture all-zero (it used to convert an empty Rust picture back, which allocated an
    `itut_t35` `Arc` that no caller released: one small leak per picture), and `dav1d_get_picture` returns an all-zero
    picture when there is none (`EAGAIN`) for the same reason. Found by the AV1 fuzz target (LeakSanitizer, even on valid input).
+
+## Speed of the portable (no assembly) code, for single-threaded wasm (post M10)
+
+The decoder runs the Rust fallbacks of the DSP functions (there is no assembly on wasm32). Profiling a 1080p30 stream in the browser
+showed time going to things that have nothing to do with the arithmetic. None of these changes the decoded pictures (the 1800
+frames of the perf stream hash the same before and after, natively and in wasm, and `cargo xtask wasm-smoke` still agrees); each
+only does the same integer sums with less overhead:
+
+9. `src/mc.rs`: `put_8tap_rust`, `prep_8tap_rust`. The two-pass filters kept their intermediate rows in a `[[i16; 128]; 135]` that was
+   zeroed for every block (34 KB, for an 8 x 8 block that needs 15 x 8 values). They use `MidRows`, which is not cleared and is only
+   read where it has been written (`unsafe`, with the reason beside it). The filters themselves work on whole rows: the taps are summed
+   eight outputs at a time over row slices (`acc_h8`, `acc_v8_pix`, `acc_v8_mid`), which the compiler vectorises, instead of one pixel
+   at a time through the bounds-checked picture accessor.
+10. `src/mc.rs`: `avg_rust`, `w_avg_rust`, `mask_rust` loop over zipped slices (no index arithmetic and checks per pixel).
+11. `src/msac.rs`: `EcWin` is `u64` instead of `usize`: on wasm32 the arithmetic decoder's bit window was 32 bits and refilled from the
+    stream twice as often. Any width decodes the same symbols.
+12. `src/cdef.rs`: `cdef_filter_block_rust` is generic over the block size (`W`, `H`), so the loops over a block's pixels have known
+    lengths. `src/itx.rs`: `inv_txfm_add` clears only the `w * h` intermediate values it uses, not all 64 x 64.

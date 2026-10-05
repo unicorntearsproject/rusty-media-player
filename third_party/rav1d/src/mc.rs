@@ -148,6 +148,127 @@ fn get_filter(m: usize, d: usize, filter_type: Rav1dFilterMode) -> Option<&'stat
     Some(&dav1d_mc_subpel_filters[i as usize][m])
 }
 
+/// Widest block (and so the longest row of filtered values) there is.
+const MAX_W: usize = 128;
+
+/// Rows of 16-bit intermediate values (`MID_STRIDE` wide) for the two-pass filters. Only what has been written is ever read,
+/// so nothing is cleared: zeroing the 34 KB of the array this replaces for every block, however small, cost more than the
+/// filtering of an 8 x 8 block did.
+struct MidRows<const N: usize> {
+    rows: [[mem::MaybeUninit<i16>; MID_STRIDE]; N],
+}
+
+impl<const N: usize> MidRows<N> {
+    #[inline(always)]
+    fn new() -> Self {
+        Self {
+            // SAFETY: an array of `MaybeUninit` is valid uninitialised.
+            rows: unsafe { mem::MaybeUninit::<[[mem::MaybeUninit<i16>; MID_STRIDE]; N]>::uninit().assume_init() },
+        }
+    }
+
+    /// Row `y` is the first `w` values of `acc`, each through `f`.
+    #[inline(always)]
+    fn put(&mut self, y: usize, w: usize, acc: &[i32; MAX_W], f: impl Fn(i32) -> i16) {
+        for (o, &a) in self.rows[y][..w].iter_mut().zip(&acc[..w]) {
+            o.write(f(a));
+        }
+    }
+
+    /// The first `w` values of row `y`, which `put` has written.
+    #[inline(always)]
+    fn row(&self, y: usize, w: usize) -> &[i16] {
+        let r = &self.rows[y][..w];
+        // SAFETY: the caller reads only rows (and widths) it has `put`; `MaybeUninit<i16>` has the layout of `i16`.
+        unsafe { slice::from_raw_parts(r.as_ptr().cast::<i16>(), w) }
+    }
+}
+
+/// `acc[x] = sum over k of f[k] * row[x + k]` for `x < w`: one row of the horizontal 8-tap filter (`row` starts 3 pixels before
+/// the block and is `w + 7` long). Eight outputs at a time are summed in registers, tap by tap, which the compiler turns into
+/// vector code; the last `w % 8` (blocks of 2 and 4 pixels) are summed one by one. All the sums are exact integers, so the
+/// result does not depend on how they are grouped.
+#[inline(always)]
+fn acc_h8<BD: BitDepth>(acc: &mut [i32; MAX_W], row: &[BD::Pixel], f: &[i8; 8], w: usize) {
+    let row = &row[..w + 7];
+    let f = f.map(|v| v as i32);
+    let mut x = 0;
+    while x + 8 <= w {
+        let mut a = [0i32; 8];
+        for k in 0..8 {
+            let s = &row[x + k..x + k + 8];
+            for l in 0..8 {
+                a[l] += f[k] * s[l].as_::<i16>() as i32;
+            }
+        }
+        acc[x..x + 8].copy_from_slice(&a);
+        x += 8;
+    }
+    for x in x..w {
+        acc[x] = (0..8).map(|k| f[k] * row[x + k].as_::<i16>() as i32).sum();
+    }
+}
+
+/// The vertical 8-tap filter over eight rows of the picture (see [`acc_h8`]).
+#[inline(always)]
+fn acc_v8_pix<BD: BitDepth>(acc: &mut [i32; MAX_W], rows: [&[BD::Pixel]; 8], f: &[i8; 8], w: usize) {
+    let f = f.map(|v| v as i32);
+    let mut x = 0;
+    while x + 8 <= w {
+        let mut a = [0i32; 8];
+        for k in 0..8 {
+            let s = &rows[k][x..x + 8];
+            for l in 0..8 {
+                a[l] += f[k] * s[l].as_::<i16>() as i32;
+            }
+        }
+        acc[x..x + 8].copy_from_slice(&a);
+        x += 8;
+    }
+    for x in x..w {
+        acc[x] = (0..8).map(|k| f[k] * rows[k][x].as_::<i16>() as i32).sum();
+    }
+}
+
+/// The vertical 8-tap filter over eight rows of intermediate values (see [`acc_h8`]).
+#[inline(always)]
+fn acc_v8_mid(acc: &mut [i32; MAX_W], rows: [&[i16]; 8], f: &[i8; 8], w: usize) {
+    let f = f.map(|v| v as i32);
+    let mut x = 0;
+    while x + 8 <= w {
+        let mut a = [0i32; 8];
+        for k in 0..8 {
+            let s = &rows[k][x..x + 8];
+            for l in 0..8 {
+                a[l] += f[k] * s[l] as i32;
+            }
+        }
+        acc[x..x + 8].copy_from_slice(&a);
+        x += 8;
+    }
+    for x in x..w {
+        acc[x] = (0..8).map(|k| f[k] * rows[k][x] as i32).sum();
+    }
+}
+
+/// `(x + 2^(sh-1)) >> sh`.
+#[inline(always)]
+fn rnd(x: i32, sh: u8) -> i32 {
+    (x + ((1 << sh) >> 1)) >> sh
+}
+
+/// Eight rows of the picture, starting `before` rows above `y`.
+#[inline(always)]
+fn pix_rows<'a, BD: BitDepth>(
+    src: Rav1dPictureDataComponentOffset<'a>,
+    y: usize,
+    w: usize,
+) -> [crate::src::disjoint_mut::DisjointImmutGuard<'a, crate::include::dav1d::picture::Rav1dPictureDataComponentInner, [BD::Pixel]>; 8]
+{
+    let stride = src.pixel_stride::<BD>();
+    std::array::from_fn(|k| (src + (y as isize + k as isize - 3) * stride).slice::<BD>(w))
+}
+
 #[inline(never)]
 fn put_8tap_rust<BD: BitDepth>(
     dst: Rav1dPictureDataComponentOffset,
@@ -164,55 +285,46 @@ fn put_8tap_rust<BD: BitDepth>(
 
     let fh = get_filter(mx, w, h_filter_type);
     let fv = get_filter(my, h, v_filter_type);
+    let (sstride, dstride) = (src.pixel_stride::<BD>(), dst.pixel_stride::<BD>());
+    let mut acc = [0i32; MAX_W];
 
-    if let Some(fh) = fh {
-        if let Some(fv) = fv {
-            let tmp_h = h + 7;
-            let mut mid = [[0i16; MID_STRIDE]; 135]; // Default::default()
-
-            for y in 0..tmp_h {
-                let src = src + (y as isize - 3) * src.pixel_stride::<BD>();
-                for x in 0..w {
-                    mid[y][x] = filter_8tap::<BD>(src, x, fh, 1)
-                        .rnd(6 - intermediate_bits)
-                        .get();
-                }
+    match (fh, fv) {
+        (Some(fh), Some(fv)) => {
+            let mut mid = MidRows::<135>::new();
+            for y in 0..h + 7 {
+                let row = &*(src + ((y as isize - 3) * sstride - 3)).slice::<BD>(w + 7);
+                acc_h8::<BD>(&mut acc, row, fh, w);
+                mid.put(y, w, &acc, |a| rnd(a, 6 - intermediate_bits) as i16);
             }
-
             for y in 0..h {
-                let dst = dst + y as isize * dst.pixel_stride::<BD>();
-                let dst = &mut *dst.slice_mut::<BD>(w);
-                for x in 0..w {
-                    dst[x] = filter_8tap_mid(&mid[y..], x, fv)
-                        .rnd(6 + intermediate_bits)
-                        .clip(bd);
-                }
-            }
-        } else {
-            for y in 0..h {
-                let src = src + y as isize * src.pixel_stride::<BD>();
-                let dst = dst + y as isize * dst.pixel_stride::<BD>();
-                let dst = &mut *dst.slice_mut::<BD>(w);
-                for x in 0..w {
-                    dst[x] = filter_8tap::<BD>(src, x, fh, 1)
-                        .rnd2(6, intermediate_rnd)
-                        .clip(bd);
+                acc_v8_mid(&mut acc, std::array::from_fn(|k| mid.row(y + k, w)), fv, w);
+                let dst = &mut *(dst + y as isize * dstride).slice_mut::<BD>(w);
+                for (d, &a) in dst.iter_mut().zip(&acc[..w]) {
+                    *d = bd.iclip_pixel(rnd(a, 6 + intermediate_bits));
                 }
             }
         }
-    } else if let Some(fv) = fv {
-        for y in 0..h {
-            let src = src + y as isize * src.pixel_stride::<BD>();
-            let dst = dst + y as isize * dst.pixel_stride::<BD>();
-            let dst = &mut *dst.slice_mut::<BD>(w);
-            for x in 0..w {
-                dst[x] = filter_8tap::<BD>(src, x, fv, src.pixel_stride::<BD>())
-                    .rnd(6)
-                    .clip(bd);
+        (Some(fh), None) => {
+            for y in 0..h {
+                let row = &*(src + (y as isize * sstride - 3)).slice::<BD>(w + 7);
+                acc_h8::<BD>(&mut acc, row, fh, w);
+                let dst = &mut *(dst + y as isize * dstride).slice_mut::<BD>(w);
+                for (d, &a) in dst.iter_mut().zip(&acc[..w]) {
+                    *d = bd.iclip_pixel((a + intermediate_rnd as i32) >> 6);
+                }
             }
         }
-    } else {
-        put_rust::<BD>(dst, src, w, h);
+        (None, Some(fv)) => {
+            for y in 0..h {
+                let rows = pix_rows::<BD>(src, y, w);
+                acc_v8_pix::<BD>(&mut acc, std::array::from_fn(|k| &*rows[k]), fv, w);
+                let dst = &mut *(dst + y as isize * dstride).slice_mut::<BD>(w);
+                for (d, &a) in dst.iter_mut().zip(&acc[..w]) {
+                    *d = bd.iclip_pixel(rnd(a, 6));
+                }
+            }
+        }
+        (None, None) => put_rust::<BD>(dst, src, w, h),
     }
 }
 
@@ -289,53 +401,44 @@ fn prep_8tap_rust<BD: BitDepth>(
     let intermediate_bits = bd.get_intermediate_bits();
     let fh = get_filter(mx, w, h_filter_type);
     let fv = get_filter(my, h, v_filter_type);
+    let sstride = src.pixel_stride::<BD>();
+    let mut acc = [0i32; MAX_W];
 
-    if let Some(fh) = fh {
-        if let Some(fv) = fv {
-            let tmp_h = h + 7;
-            let mut mid = [[0i16; MID_STRIDE]; 135]; // Default::default()
-
-            for y in 0..tmp_h {
-                let src = src + (y as isize - 3) * src.pixel_stride::<BD>();
-                for x in 0..w {
-                    mid[y][x] = filter_8tap::<BD>(src, x, fh, 1)
-                        .rnd(6 - intermediate_bits)
-                        .get();
-                }
+    match (fh, fv) {
+        (Some(fh), Some(fv)) => {
+            let mut mid = MidRows::<135>::new();
+            for y in 0..h + 7 {
+                let row = &*(src + ((y as isize - 3) * sstride - 3)).slice::<BD>(w + 7);
+                acc_h8::<BD>(&mut acc, row, fh, w);
+                mid.put(y, w, &acc, |a| rnd(a, 6 - intermediate_bits) as i16);
             }
-
             for y in 0..h {
-                let tmp = &mut tmp[y * w..][..w];
-                for x in 0..w {
-                    tmp[x] = filter_8tap_mid(&mid[y..], x, fv)
-                        .rnd(6)
-                        .sub_prep_bias::<BD>();
-                }
-            }
-        } else {
-            for y in 0..h {
-                let src = src + y as isize * src.pixel_stride::<BD>();
-                let tmp = &mut tmp[y * w..][..w];
-                for x in 0..w {
-                    tmp[x] = filter_8tap::<BD>(src, x, fh, 1)
-                        .rnd(6 - intermediate_bits)
-                        .sub_prep_bias::<BD>();
+                acc_v8_mid(&mut acc, std::array::from_fn(|k| mid.row(y + k, w)), fv, w);
+                for (t, &a) in tmp[y * w..][..w].iter_mut().zip(&acc[..w]) {
+                    *t = BD::sub_prep_bias(rnd(a, 6));
                 }
             }
         }
-    } else if let Some(fv) = fv {
-        for y in 0..h {
-            let src = src + y as isize * src.pixel_stride::<BD>();
-            let tmp = &mut tmp[y * w..][..w];
-            for x in 0..w {
-                tmp[x] = filter_8tap::<BD>(src, x, fv, src.pixel_stride::<BD>())
-                    .rnd(6 - intermediate_bits)
-                    .sub_prep_bias::<BD>()
+        (Some(fh), None) => {
+            for y in 0..h {
+                let row = &*(src + (y as isize * sstride - 3)).slice::<BD>(w + 7);
+                acc_h8::<BD>(&mut acc, row, fh, w);
+                for (t, &a) in tmp[y * w..][..w].iter_mut().zip(&acc[..w]) {
+                    *t = BD::sub_prep_bias(rnd(a, 6 - intermediate_bits));
+                }
             }
         }
-    } else {
-        prep_rust(tmp, src, w, h, bd);
-    };
+        (None, Some(fv)) => {
+            for y in 0..h {
+                let rows = pix_rows::<BD>(src, y, w);
+                acc_v8_pix::<BD>(&mut acc, std::array::from_fn(|k| &*rows[k]), fv, w);
+                for (t, &a) in tmp[y * w..][..w].iter_mut().zip(&acc[..w]) {
+                    *t = BD::sub_prep_bias(rnd(a, 6 - intermediate_bits));
+                }
+            }
+        }
+        (None, None) => prep_rust(tmp, src, w, h, bd),
+    }
 }
 
 #[inline(never)]
@@ -637,10 +740,9 @@ fn avg_rust<BD: BitDepth>(
     for y in 0..h {
         let dst = dst + (y as isize * dst.pixel_stride::<BD>());
         let dst = &mut *dst.slice_mut::<BD>(w);
-        for x in 0..w {
-            dst[x] = bd.iclip_pixel(
-                ((tmp1[y * w + x] as i32 + tmp2[y * w + x] as i32 + rnd) >> sh).to::<i32>(),
-            );
+        let (a, b) = (&tmp1[y * w..][..w], &tmp2[y * w..][..w]);
+        for ((d, &a), &b) in dst.iter_mut().zip(a).zip(b) {
+            *d = bd.iclip_pixel((a as i32 + b as i32 + rnd) >> sh);
         }
     }
 }
@@ -662,11 +764,9 @@ fn w_avg_rust<BD: BitDepth>(
     for y in 0..h {
         let dst = dst + (y as isize * dst.pixel_stride::<BD>());
         let dst = &mut *dst.slice_mut::<BD>(w);
-        for x in 0..w {
-            dst[x] = bd.iclip_pixel(
-                (tmp1[y * w + x] as i32 * weight + tmp2[y * w + x] as i32 * (16 - weight) + rnd)
-                    >> sh,
-            );
+        let (a, b) = (&tmp1[y * w..][..w], &tmp2[y * w..][..w]);
+        for ((d, &a), &b) in dst.iter_mut().zip(a).zip(b) {
+            *d = bd.iclip_pixel((a as i32 * weight + b as i32 * (16 - weight) + rnd) >> sh);
         }
     }
 }
@@ -685,16 +785,13 @@ fn mask_rust<BD: BitDepth>(
     let rnd = (32 << intermediate_bits) + i32::from(BD::PREP_BIAS) * 64;
     let tmp1 = &tmp1[..w * h];
     let tmp2 = &tmp2[..w * h];
+    let mask = &mask[..w * h];
     for y in 0..h {
         let dst = dst + (y as isize * dst.pixel_stride::<BD>());
         let dst = &mut *dst.slice_mut::<BD>(w);
-        for x in 0..w {
-            dst[x] = bd.iclip_pixel(
-                (tmp1[y * w + x] as i32 * mask[y * w + x] as i32
-                    + tmp2[y * w + x] as i32 * (64 - mask[y * w + x] as i32)
-                    + rnd)
-                    >> sh,
-            );
+        let (a, b, m) = (&tmp1[y * w..][..w], &tmp2[y * w..][..w], &mask[y * w..][..w]);
+        for (((d, &a), &b), &m) in dst.iter_mut().zip(a).zip(b).zip(m) {
+            *d = bd.iclip_pixel((a as i32 * m as i32 + b as i32 * (64 - m as i32) + rnd) >> sh);
         }
     }
 }

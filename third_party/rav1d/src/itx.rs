@@ -120,7 +120,16 @@ fn inv_txfm_add<BD: BitDepth>(
     let row_clip_max = !row_clip_min;
     let col_clip_max = !col_clip_min;
 
-    let mut tmp = [0; 64 * 64];
+    // The block's `w * h` intermediate values, zeroed: clearing all 64 x 64 of them for every 4 x 4 block cost more than its transform.
+    let mut storage = std::mem::MaybeUninit::<[i32; 64 * 64]>::uninit();
+    let tmp: &mut [i32] = {
+        let p = storage.as_mut_ptr().cast::<i32>();
+        // SAFETY: `w * h <= 64 * 64` (asserted above); those elements are zeroed here and nothing beyond them is touched.
+        unsafe {
+            std::ptr::write_bytes(p, 0, w * h);
+            std::slice::from_raw_parts_mut(p, w * h)
+        }
+    };
     let mut c = &mut tmp[..];
     for y in 0..sh {
         if is_rect2 {
