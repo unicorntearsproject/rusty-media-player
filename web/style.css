@@ -3,3 +3,17 @@
 html, body { margin: 0; height: 100%; background: var(--ink-900); overflow: hidden; }
 #screen { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* The two little buttons of the installable app (pwa.js): install, and update. Tokens of the Unicorn Tears system. */
+.pwa-pill {
+  position: fixed; top: 14px; right: 16px; z-index: 5;
+  font: 600 13px/1 "Space Grotesk", system-ui, sans-serif; letter-spacing: 0.02em;
+  color: #fff; background: linear-gradient(120deg, #ff2bd6, #9d4eff 55%, #19e3ff);
+  border: 0; border-radius: 999px; padding: 9px 16px; cursor: pointer;
+  box-shadow: 0 0 18px rgba(157, 78, 255, 0.55);
+}
+.pwa-pill:hover { filter: brightness(1.1); }
+.pwa-pill:focus-visible { outline: 2px solid #19e3ff; outline-offset: 2px; }
+.pwa-pill[hidden] { display: none; }
+.pwa-pill-update { top: 56px; }
+@media (prefers-reduced-motion: no-preference) { .pwa-pill { transition: filter 120ms ease-out; } }

@@ -3,6 +3,7 @@
 import { RvpAudio } from "./audio.js";
 import { RvpMediaSession } from "./mediasession.js";
 import { Threads } from "./threads.js";
+import { setupPwa } from "./pwa.js";
 import { RvpStore, hasDirectoryPicker, listFromInput, rootId, walkEntry, walkHandle } from "./library.js";
 
 const canvas = document.getElementById("screen");
@@ -335,7 +336,14 @@ canvas.addEventListener("pointermove", (e) => {
 });
 canvas.addEventListener("pointerdown", (e) => {
   audio.unlock();
-  canvas.focus({ preventScroll: true });
+  // The installable app: service worker, install and update buttons, files opened with the app or shared to it.
+setupPwa({ openFiles, status: (t) => { statusEl.textContent = t; } });
+// The manifest's "Music library" shortcut opens on the Library face.
+if (new URLSearchParams(location.search).get("face") === "library") {
+  player.key_down("b", false, false, false, false, false);
+  player.key_up("b", false, false, false, false);
+}
+canvas.focus({ preventScroll: true });
 restoreFolders();
   if (e.button === 0) canvas.setPointerCapture(e.pointerId);
   const [x, y] = pos(e);
@@ -503,4 +511,11 @@ window.rvp = {
   debugCrash: (what) => (what === "decoder" ? player.debug_crash_decoder() : player.debug_panic()),
   threadInfo: () => threadInfo,
 };
+// The installable app: service worker, install and update buttons, files opened with the app or shared to it.
+setupPwa({ openFiles, status: (t) => { statusEl.textContent = t; } });
+// The manifest's "Music library" shortcut opens on the Library face.
+if (new URLSearchParams(location.search).get("face") === "library") {
+  player.key_down("b", false, false, false, false, false);
+  player.key_up("b", false, false, false, false);
+}
 canvas.focus({ preventScroll: true });

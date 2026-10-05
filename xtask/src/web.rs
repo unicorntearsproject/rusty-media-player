@@ -46,10 +46,57 @@ pub fn build(no_opt: bool, threads: bool) -> Result<(), String> {
         let p = entry.map_err(|e| e.to_string())?.path();
         if p.is_file() {
             std::fs::copy(&p, out.join(p.file_name().unwrap_or_default())).map_err(|e| e.to_string())?;
+        } else if p.is_dir() {
+            // One level of subdirectories (icons/): files only.
+            let to = out.join(p.file_name().unwrap_or_default());
+            std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+            for f in std::fs::read_dir(&p).map_err(|e| e.to_string())?.flatten() {
+                if f.path().is_file() {
+                    std::fs::copy(f.path(), to.join(f.file_name())).map_err(|e| e.to_string())?;
+                }
+            }
         }
     }
-    println!("built {} ({note})", out.display());
+    let version = stamp_service_worker(&out)?;
+    println!("built {} ({note}; service worker {version})", out.display());
     Ok(())
+}
+
+/// Every file below `dir` as a path relative to it, sorted.
+fn walk_files(dir: &Path, base: &Path, out: &mut Vec<String>) {
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk_files(&p, base, out);
+            } else if let Ok(rel) = p.strip_prefix(base) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    out.sort();
+}
+
+/// Fill in the placeholders of `sw.js`: the list of files the page is made of (the service worker precaches them) and a version
+/// made of the Cargo version and a hash of those files, so any change to the page is a new service worker.
+fn stamp_service_worker(out: &Path) -> Result<String, String> {
+    let mut files = Vec::new();
+    walk_files(out, out, &mut files);
+    files.retain(|f| f != "sw.js" && !f.ends_with(".map"));
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for f in &files {
+        for b in f.bytes().chain(std::fs::read(out.join(f)).map_err(|e| e.to_string())?) {
+            hash = (hash ^ b as u64).wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    let version = format!("{}-{:010x}", env!("CARGO_PKG_VERSION"), hash & 0xff_ffff_ffff);
+    let mut urls: Vec<String> = vec!["./".into()];
+    urls.extend(files.iter().map(|f| format!("./{f}")));
+    let list = format!("[{}]", urls.iter().map(|u| format!("{u:?}")).collect::<Vec<_>>().join(", "));
+    let sw = std::fs::read_to_string(out.join("sw.js")).map_err(|e| e.to_string())?;
+    let sw = sw.replace("__RVP_VERSION__", &version).replace("__RVP_PRECACHE__", &list);
+    std::fs::write(out.join("sw.js"), sw).map_err(|e| e.to_string())?;
+    Ok(version)
 }
 
 /// One wasm variant: returns the size of the final module. The page needs a modern browser anyway, so every variant is
@@ -158,7 +205,9 @@ fn mime(path: &Path) -> &'static str {
         "css" => "text/css; charset=utf-8",
         "wasm" => "application/wasm",
         "json" => "application/json",
+        "webmanifest" => "application/manifest+json",
         "png" => "image/png",
+        "ico" => "image/x-icon",
         "svg" => "image/svg+xml",
         _ => "application/octet-stream",
     }

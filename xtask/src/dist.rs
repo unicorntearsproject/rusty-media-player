@@ -509,7 +509,8 @@ impl Ctx {
         let venv = self.dist().join("flatpak-venv");
         if !venv.join("bin/python").exists() {
             sh(Command::new("python3").args(["-m", "venv"]).arg(&venv))?;
-            sh(Command::new(venv.join("bin/pip")).args(["install", "--quiet", "aiohttp", "tomlkit"]))?;
+            sh(Command::new(venv.join("bin/pip"))
+                .args(["install", "--quiet", "aiohttp", "tomlkit", "PyYAML"]))?;
         }
         sh(Command::new(venv.join("bin/python"))
             .arg(&gen_script)
@@ -535,7 +536,8 @@ impl Ctx {
         // Everything between the marker and the next `# @END-APP-SOURCE@` is replaced.
         let (_, rest) = tail.split_once("# @END-APP-SOURCE@").ok_or("no `# @END-APP-SOURCE@` marker")?;
         let local = format!(
-            "{head}      - type: archive\n        path: {}\n        sha256: {sha}\n        strip-components: 1\n{rest}",
+            "{}      - type: archive\n        path: {}\n        sha256: {sha}\n        strip-components: 1\n{rest}",
+            head.trim_end_matches(' '),
             src.display()
         );
         let local = local.replace(
