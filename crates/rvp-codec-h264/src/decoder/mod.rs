@@ -5,10 +5,14 @@
 
 pub mod deblock;
 mod deblock_tables;
+mod direct;
 pub mod dpb;
 pub mod entropy;
+pub mod inter;
+mod inter_mb;
 pub mod intra;
 pub mod mbinfo;
+mod mvpred;
 pub mod picture;
 pub mod poc;
 pub mod slice;
@@ -273,6 +277,8 @@ impl Decoder {
         if self.cur.is_none() {
             self.start_picture(&hdr, &sps, pts)?;
         }
+        let cur_poc = self.cur.as_ref().map(|c| c.pic.poc).ok_or(Error::Invalid("no current picture"))?;
+        let refs = self.make_ref_lists(&hdr, &sps, cur_poc);
         let Some(cur) = self.cur.as_mut() else { return Err(Error::Invalid("no current picture")) };
         // Level scale tables for this (SPS, PPS) pair.
         let stale = match &self.scale {
@@ -290,7 +296,18 @@ impl Decoder {
             offset_a: (hdr.slice_alpha_c0_offset_div2 * 2) as i8,
             offset_b: (hdr.slice_beta_offset_div2 * 2) as i8,
         });
-        let mut sd = SliceDecoder::new(&sps, &pps, &hdr, ls, &mut cur.pic, &mut self.mbs, slice_num);
+        let mut sd = SliceDecoder::new(
+            &sps,
+            &pps,
+            &hdr,
+            ls,
+            &mut cur.pic,
+            &mut self.mbs,
+            &self.dpb,
+            refs,
+            cur_poc,
+            slice_num,
+        );
         let r = if pps.cabac {
             Err(Error::Unsupported("CABAC"))
         } else {
@@ -302,6 +319,43 @@ impl Decoder {
             self.stats.slices += 1;
         }
         r
+    }
+
+    /// Reference lists for a slice, with missing entries concealed by an existing picture (or a grey one).
+    fn make_ref_lists(&mut self, hdr: &SliceHeader, sps: &Sps, cur_poc: i32) -> [Vec<slice::RefInfo>; 2] {
+        if hdr.slice_type.is_intra() {
+            return [Vec::new(), Vec::new()];
+        }
+        let lists = dpb::build_ref_lists(&self.dpb, hdr, sps, cur_poc);
+        let any = lists.iter().flat_map(|l| l.iter().flatten()).next().copied();
+        let needs_fallback = lists.iter().any(|l| l.iter().any(|e| e.is_none()));
+        let fallback = if !needs_fallback {
+            0
+        } else if let Some(i) = any.or_else(|| (0..self.dpb.len()).max_by_key(|&i| self.dpb[i].decode_order))
+        {
+            i
+        } else {
+            let mut p = Picture::new(sps.width_mbs(), sps.height_mbs());
+            p.uid = self.next_uid;
+            self.next_uid = self.next_uid.wrapping_add(1).max(1);
+            p.ref_state = RefState::Short;
+            p.non_existing = true;
+            p.frame_num = hdr.frame_num.wrapping_sub(1);
+            p.poc = cur_poc;
+            self.dpb.push(p);
+            self.dpb.len() - 1
+        };
+        let info = |i: usize| slice::RefInfo {
+            dpb_idx: i,
+            poc: self.dpb[i].poc,
+            uid: self.dpb[i].uid,
+            long: self.dpb[i].ref_state == RefState::Long,
+        };
+        let mut out: [Vec<slice::RefInfo>; 2] = [Vec::new(), Vec::new()];
+        for l in 0..2 {
+            out[l] = lists[l].iter().map(|e| info(e.unwrap_or(fallback))).collect();
+        }
+        out
     }
 
     fn alloc_picture(&mut self, mbw: usize, mbh: usize) -> Picture {

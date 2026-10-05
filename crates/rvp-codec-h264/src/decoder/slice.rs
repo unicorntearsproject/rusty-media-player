@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 use crate::params::{Pps, SliceHeader, SliceType, Sps};
 use crate::transform::{self as tr, LevelScale, ZIGZAG_4X4, ZIGZAG_8X8};
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 /// Classified `mb_type`.
 #[derive(Clone, Copy, Debug)]
@@ -20,6 +21,19 @@ pub(crate) enum MbType {
     IPcm,
 }
 
+/// One entry of a reference picture list, with what direct and weighted prediction need to know about it.
+#[derive(Clone, Copy, Debug)]
+pub struct RefInfo {
+    /// Index into the DPB slice.
+    pub dpb_idx: usize,
+    /// `PicOrderCnt` of the reference frame.
+    pub poc: i32,
+    /// Unique frame id (see `Picture::uid`).
+    pub uid: i32,
+    /// Marked as long-term.
+    pub long: bool,
+}
+
 /// Decodes the macroblocks of one slice into the current picture.
 pub struct SliceDecoder<'a> {
     #[allow(dead_code)]
@@ -29,6 +43,14 @@ pub struct SliceDecoder<'a> {
     pub(crate) ls: &'a LevelScale,
     pub(crate) cur: &'a mut Picture,
     pub(crate) mbs: &'a mut [MbInfo],
+    /// The decoded picture buffer the reference lists point into.
+    pub(crate) dpb: &'a [Picture],
+    /// `RefPicList0` and `RefPicList1`.
+    pub(crate) refs: [Vec<RefInfo>; 2],
+    /// `PicOrderCnt` of the current picture.
+    pub(crate) cur_poc: i32,
+    /// 0 default weighting, 1 explicit, 2 implicit.
+    pub(crate) weight_mode: u8,
     pub(crate) mbw: usize,
     pub(crate) mbh: usize,
     pub(crate) slice_num: u16,
@@ -64,9 +86,21 @@ impl<'a> SliceDecoder<'a> {
         ls: &'a LevelScale,
         cur: &'a mut Picture,
         mbs: &'a mut [MbInfo],
+        dpb: &'a [Picture],
+        refs: [Vec<RefInfo>; 2],
+        cur_poc: i32,
         slice_num: u16,
     ) -> Self {
+        let weight_mode = match hdr.slice_type {
+            SliceType::P | SliceType::Sp => pps.weighted_pred as u8,
+            SliceType::B => pps.weighted_bipred_idc as u8,
+            _ => 0,
+        };
         Self {
+            dpb,
+            refs,
+            cur_poc,
+            weight_mode,
             sps,
             pps,
             hdr,
@@ -190,22 +224,7 @@ impl<'a> SliceDecoder<'a> {
     // ---------------------------------------------------------------------------------------------------
     // Macroblock layer
 
-    fn classify(&self, raw: u32) -> Result<MbType> {
-        let intra_raw = match self.slice_type {
-            SliceType::I | SliceType::Si => raw,
-            SliceType::P | SliceType::Sp => {
-                if raw < 5 {
-                    return Err(Error::Unsupported("inter macroblocks"));
-                }
-                raw - 5
-            }
-            SliceType::B => {
-                if raw < 23 {
-                    return Err(Error::Unsupported("inter macroblocks"));
-                }
-                raw - 23
-            }
-        };
+    fn classify(&self, intra_raw: u32) -> Result<MbType> {
         Ok(match intra_raw {
             0 => MbType::INxN,
             1..=24 => {
@@ -224,7 +243,22 @@ impl<'a> SliceDecoder<'a> {
     /// Decode one non-skipped macroblock.
     pub(crate) fn decode_mb<E: Entropy>(&mut self, ent: &mut E) -> Result<()> {
         let raw = ent.mb_type(self)?;
-        let mt = self.classify(raw)?;
+        let intra_raw = match self.slice_type {
+            SliceType::I | SliceType::Si => raw,
+            SliceType::P | SliceType::Sp => {
+                if raw < 5 {
+                    return self.decode_inter_mb(ent, raw);
+                }
+                raw - 5
+            }
+            SliceType::B => {
+                if raw < 23 {
+                    return self.decode_inter_mb(ent, raw);
+                }
+                raw - 23
+            }
+        };
+        let mt = self.classify(intra_raw)?;
         let addr = self.mb_addr;
         self.mbs[addr].flags = F_INTRA;
         match mt {
@@ -283,12 +317,7 @@ impl<'a> SliceDecoder<'a> {
         }
     }
 
-    /// A skipped macroblock (P_Skip or B_Skip).
-    pub(crate) fn decode_skip_mb(&mut self) -> Result<()> {
-        Err(Error::Unsupported("skipped macroblocks"))
-    }
-
-    fn read_qp_delta<E: Entropy>(&mut self, ent: &mut E) -> Result<()> {
+    pub(crate) fn read_qp_delta<E: Entropy>(&mut self, ent: &mut E) -> Result<()> {
         let dqp = ent.mb_qp_delta(self)?;
         if !(-26..=25).contains(&dqp) {
             return Err(Error::Invalid("mb_qp_delta out of range"));
@@ -299,7 +328,7 @@ impl<'a> SliceDecoder<'a> {
     }
 
     /// Record the QP of the macroblock for deblocking and later chroma QP derivation.
-    fn finish_qp(&mut self) {
+    pub(crate) fn finish_qp(&mut self) {
         let qp = self.qp;
         let (o0, o1) = (self.pps.chroma_qp_index_offset, self.pps.second_chroma_qp_index_offset);
         let m = &mut self.mbs[self.mb_addr];
@@ -360,7 +389,7 @@ impl<'a> SliceDecoder<'a> {
     // Residual
 
     /// Parse the residual of the current macroblock into scaled coefficients.
-    fn read_residual<E: Entropy>(
+    pub(crate) fn read_residual<E: Entropy>(
         &mut self,
         ent: &mut E,
         intra: bool,
@@ -504,7 +533,7 @@ impl<'a> SliceDecoder<'a> {
     // Reconstruction
 
     /// Apply the 4x4 residual of luma block `r` (raster index) at plane position `(x, y)`.
-    fn add_luma_block(&mut self, r: usize, x: usize, y: usize) {
+    pub(crate) fn add_luma_block(&mut self, r: usize, x: usize, y: usize) {
         if self.blk_nz & (1 << r) == 0 {
             return;
         }
@@ -524,7 +553,7 @@ impl<'a> SliceDecoder<'a> {
     }
 
     /// Apply the 8x8 residual of luma block `i8` at plane position `(x, y)`.
-    fn add_luma_block8(&mut self, i8: usize, x: usize, y: usize) {
+    pub(crate) fn add_luma_block8(&mut self, i8: usize, x: usize, y: usize) {
         if self.blk_nz & (1 << (24 + i8)) == 0 {
             return;
         }
@@ -537,7 +566,7 @@ impl<'a> SliceDecoder<'a> {
         c.fill(0);
     }
 
-    fn add_chroma_blocks(&mut self) {
+    pub(crate) fn add_chroma_blocks(&mut self) {
         for comp in 0..2 {
             let stride = self.cur.strides[1 + comp];
             for blk in 0..4 {

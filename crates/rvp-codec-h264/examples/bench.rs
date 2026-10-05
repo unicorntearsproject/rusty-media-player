@@ -37,13 +37,17 @@ fn main() {
             let _ = dec.decode_sample(&p.data, p.pts);
             while let Some(f) = dec.next_frame() {
                 frames += 1;
-                sum = sum.wrapping_mul(31).wrapping_add(f.planes[0].iter().step_by(97).map(|&b| b as u64).sum::<u64>());
+                sum = sum
+                    .wrapping_mul(31)
+                    .wrapping_add(f.planes[0].iter().step_by(97).map(|&b| b as u64).sum::<u64>());
             }
         }
         let _ = dec.flush();
         while let Some(f) = dec.next_frame() {
             frames += 1;
-            sum = sum.wrapping_mul(31).wrapping_add(f.planes[0].iter().step_by(97).map(|&b| b as u64).sum::<u64>());
+            sum = sum
+                .wrapping_mul(31)
+                .wrapping_add(f.planes[0].iter().step_by(97).map(|&b| b as u64).sum::<u64>());
         }
         best = best.min(t.elapsed().as_secs_f64());
     }
