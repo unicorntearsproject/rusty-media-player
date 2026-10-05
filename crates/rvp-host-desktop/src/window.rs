@@ -538,9 +538,8 @@ impl ApplicationHandler for Handler {
 
 /// The window icon from the embedded PNG.
 fn window_icon() -> Option<Icon> {
-    static ICON: &[u8] = include_bytes!(
-        "../../../packaging/icons/hicolor/256x256/apps/io.github.idometeor.RustyWave.png"
-    );
+    static ICON: &[u8] =
+        include_bytes!("../../../packaging/icons/hicolor/256x256/apps/io.github.idometeor.RustyWave.png");
     let img = rvp_library::art::decode(ICON, 256)?;
     Icon::from_rgba(img.rgba, img.w, img.h).ok()
 }

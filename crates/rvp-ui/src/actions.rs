@@ -94,6 +94,18 @@ pub enum Action {
     GoBack,
     /// An action of the library (play, queue, playlists, folders, visualizer).
     Lib(LibAction),
+    /// Show the Audio settings panel (crossfade and automatic level).
+    ShowAudioSettings,
+    /// Crossfade on or off.
+    SetCrossfade(bool),
+    /// The length of the crossfade, seconds.
+    SetCrossfadeSecs(u8),
+    /// Automatic level on or off.
+    SetAutoLevel(bool),
+    /// The loudness the automatic level aims at, LUFS.
+    SetTargetLufs(i8),
+    /// Level each track on its own, or whole albums.
+    SetLevelMode(rvp_core::LevelMode),
 }
 
 /// The physical key of a shortcut.
@@ -174,6 +186,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::PageUp, Action::ChapterStep(-1)),
     sc(ShortKey::Char('b'), Action::ToggleMode),
     sc(ShortKey::Char('v'), Action::ShowView(View::Visualizer)),
+    sc(ShortKey::Char('u'), Action::ShowAudioSettings),
     // Ctrl+arrows keep seeking and the volume where the plain arrows move around lists in the library.
     Shortcut { key: ShortKey::Left, shift: false, ctrl: true, action: Action::SeekBy(-5_000) },
     Shortcut { key: ShortKey::Right, shift: false, ctrl: true, action: Action::SeekBy(5_000) },
@@ -474,6 +487,46 @@ pub fn playlist_menu(model: &UiModel) -> Vec<MenuItem> {
     v
 }
 
+/// The audio effects submenu: the panel, and every setting of it as menu entries (so a menu alone can set them all).
+pub fn audio_effects_menu(model: &UiModel) -> Vec<MenuItem> {
+    use rvp_core::settings::{
+        CROSSFADE_MAX_SECS, CROSSFADE_MIN_SECS, LevelMode, TARGET_MAX_LUFS, TARGET_MIN_LUFS,
+    };
+    let a = model.audio;
+    let plain = |label: &str, action: Action| {
+        let mut m = MenuItem::act(label, action);
+        m.hint.clear();
+        m
+    };
+    let lengths: Vec<MenuItem> = (CROSSFADE_MIN_SECS..=CROSSFADE_MAX_SECS)
+        .map(|s| plain(&alloc::format!("{s} s"), Action::SetCrossfadeSecs(s)).checked(a.crossfade_secs == s))
+        .collect();
+    // Loudest first: -10 down to -23.
+    let targets: Vec<MenuItem> = (TARGET_MIN_LUFS..=TARGET_MAX_LUFS)
+        .rev()
+        .map(|l| plain(&alloc::format!("{l} LUFS"), Action::SetTargetLufs(l)).checked(a.target_lufs == l))
+        .collect();
+    alloc::vec![
+        MenuItem::act("Audio settings\u{2026}", Action::ShowAudioSettings),
+        plain(
+            if a.crossfade { "Crossfade: on" } else { "Crossfade: off" },
+            Action::SetCrossfade(!a.crossfade)
+        )
+        .sep(),
+        MenuItem::parent("Crossfade length", lengths),
+        plain(
+            if a.auto_level { "Auto-level: on" } else { "Auto-level: off" },
+            Action::SetAutoLevel(!a.auto_level)
+        )
+        .sep(),
+        MenuItem::parent("Target level", targets),
+        plain("Level each track", Action::SetLevelMode(LevelMode::Track))
+            .checked(a.level_mode == LevelMode::Track),
+        plain("Level whole albums", Action::SetLevelMode(LevelMode::Album))
+            .checked(a.level_mode == LevelMode::Album),
+    ]
+}
+
 /// The right-click menu. It contains an entry for every shortcut in [`SHORTCUTS`].
 pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
     let has = model.has_media();
@@ -517,6 +570,7 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::parent("A-B loop", looping).enabled(has),
         MenuItem::parent("Speed", speed_menu(model)).enabled(has),
         MenuItem::parent("Volume", volume),
+        MenuItem::parent("Audio effects", audio_effects_menu(model)),
         MenuItem::parent("Audio track", audio_menu(model)).sep().enabled(has),
         MenuItem::parent("Subtitles", subtitle_menu(model)).enabled(has),
         MenuItem::parent("Chapters", chapter_menu(model)).enabled(!model.chapters.is_empty()),
@@ -578,6 +632,47 @@ mod tests {
                 s.action
             );
         }
+    }
+
+    #[test]
+    fn every_audio_setting_can_be_set_from_the_menu_alone() {
+        let mut reachable = Vec::new();
+        menu_actions(&context_menu(&model()), &mut reachable);
+        use rvp_core::LevelMode;
+        assert!(reachable.contains(&Action::ShowAudioSettings));
+        // The two switches, every length 2 to 10 s, every target -23 to -10 LUFS, and both modes.
+        assert!(
+            reachable.contains(&Action::SetCrossfade(true))
+                && reachable.contains(&Action::SetAutoLevel(true))
+        );
+        for secs in 2..=10 {
+            assert!(reachable.contains(&Action::SetCrossfadeSecs(secs)), "{secs} s");
+        }
+        for lufs in -23..=-10 {
+            assert!(reachable.contains(&Action::SetTargetLufs(lufs)), "{lufs} LUFS");
+        }
+        assert!(reachable.contains(&Action::SetLevelMode(LevelMode::Track)));
+        assert!(reachable.contains(&Action::SetLevelMode(LevelMode::Album)));
+        // The menu shows what is set: the switches say on or off and the chosen values are checked.
+        let mut m = model();
+        m.audio = rvp_core::AudioSettings {
+            crossfade: true,
+            crossfade_secs: 7,
+            auto_level: true,
+            target_lufs: -18,
+            level_mode: LevelMode::Album,
+        };
+        let items = audio_effects_menu(&m);
+        let by = |label: &str| items.iter().find(|i| i.label == label).unwrap();
+        assert_eq!(by("Crossfade: on").action, Some(Action::SetCrossfade(false)));
+        assert_eq!(by("Auto-level: on").action, Some(Action::SetAutoLevel(false)));
+        assert!(by("Level whole albums").checked && !by("Level each track").checked);
+        let checked = |label: &str| {
+            by(label).sub.iter().filter(|i| i.checked).map(|i| i.label.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(checked("Crossfade length"), ["7 s"]);
+        assert_eq!(checked("Target level"), ["-18 LUFS"]);
+        assert_eq!(shortcut_for(&Key::Char('u'), &Modifiers::default()), Some(Action::ShowAudioSettings));
     }
 
     #[test]

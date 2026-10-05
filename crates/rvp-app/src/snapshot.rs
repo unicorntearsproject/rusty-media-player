@@ -193,6 +193,32 @@ impl App {
             self.lib.now.art.is_some(),
             m.now_track.map_or("null".to_string(), |t| t.to_string()),
         );
+        let a = self.audio_settings();
+        j += &format!(
+            "\"audio\":{{\"crossfade\":{},\"crossfade_secs\":{},\"auto_level\":{},\"target_lufs\":{},\"level_mode\":\"{}\",\"gain_db\":{},\"crossfading\":{}}},",
+            a.crossfade,
+            a.crossfade_secs,
+            a.auto_level,
+            a.target_lufs,
+            if a.level_mode == rvp_core::LevelMode::Album { "album" } else { "track" },
+            m.level_gain_db.map_or("null".to_string(), |g| format!("{g:.2}")),
+            self.session().is_some_and(|s| s.crossfading()),
+        );
+        j += &match ui.audio_settings_open() {
+            true => {
+                let g = ui.audio_panel_geom();
+                let controls: alloc::vec::Vec<String> =
+                    g.controls.iter().map(|(c, hit, _)| format!("\"{}\":{}", c.name(), rect(*hit))).collect();
+                format!(
+                    "\"audio_panel\":{{\"card\":{},\"close\":{},\"focus\":{},\"controls\":{{{}}}}},",
+                    rect(g.card),
+                    rect(g.close),
+                    ui.audio_panel_focus().map_or("null".to_string(), |c| format!("\"{}\"", c.name())),
+                    controls.join(",")
+                )
+            }
+            false => "\"audio_panel\":null,".to_string(),
+        };
         let v = self.viz();
         j += &format!(
             "\"viz\":{{\"effect\":{},\"palette\":{},\"frames\":{}}},",

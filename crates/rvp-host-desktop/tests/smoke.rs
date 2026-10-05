@@ -120,7 +120,12 @@ fn text(report: &str, key: &str) -> Option<String> {
 
 fn run_ok(mut c: Command) {
     let out = c.output().expect("start xvfb-run and rusty-wave");
-    assert!(out.status.success(), "rusty-wave failed: {}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "rusty-wave failed: {}\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn read_png(path: &Path) -> (u32, u32, Vec<u8>) {
@@ -282,6 +287,75 @@ fn the_queue_and_the_position_come_back_after_a_restart() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+#[test]
+fn the_audio_settings_are_changed_from_the_keyboard_and_kept_for_the_next_run() {
+    let _turn = one_at_a_time();
+    if skip("the audio settings test", &[]) {
+        return;
+    }
+    let dir = scratch("audio-settings");
+    let data = dir.join("data");
+    let (r1, r2) = (dir.join("r1.json"), dir.join("r2.json"));
+    let base = |report: &Path| -> Vec<String> {
+        [
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--no-audio",
+            "--no-media-keys",
+            "--report",
+            report.to_str().unwrap(),
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    };
+    // First run: U opens the panel; Space turns the crossfade on, Tab and Right make it 6 s, Down and Space turn the automatic level
+    // on, Down and Left aim it a LUFS lower, Down and Right level by album; Escape closes.
+    let mut a = base(&r1);
+    for (t, k) in [
+        ("1", "u"),
+        ("1.5", "Space"),
+        ("2", "Tab"),
+        ("2.5", "Right"),
+        ("3", "Down"),
+        ("3.4", "Space"),
+        ("3.8", "Down"),
+        ("4.2", "Left"),
+        ("4.6", "Down"),
+        ("5", "Right"),
+        ("5.4", "Escape"),
+    ] {
+        a.extend(["--press".to_string(), format!("{t}:{k}")]);
+    }
+    a.extend(["--exit-after".into(), "7".into()]);
+    run_ok(rvp(&a.iter().map(String::as_str).collect::<Vec<_>>()));
+    let first = std::fs::read_to_string(&r1).unwrap();
+    assert!(first.contains("\"crossfade\": true"), "{first}");
+    assert_eq!(num(&first, "crossfade_secs"), Some(6.0), "{first}");
+    assert!(first.contains("\"auto_level\": true"), "{first}");
+    assert_eq!(num(&first, "target_lufs"), Some(-15.0), "{first}");
+    assert_eq!(text(&first, "level_mode").as_deref(), Some("album"), "{first}");
+    // It is in the data directory...
+    let saved =
+        std::fs::read_to_string(data.join("settings%2faudio.bin")).expect("settings/audio in the data directory");
+    assert!(
+        saved.contains("crossfade=1")
+            && saved.contains("crossfade_secs=6")
+            && saved.contains("level_mode=album"),
+        "{saved}"
+    );
+    // ...and the next run starts with it, nothing pressed.
+    let mut b = base(&r2);
+    b.extend(["--exit-after".into(), "3".into()]);
+    run_ok(rvp(&b.iter().map(String::as_str).collect::<Vec<_>>()));
+    let second = std::fs::read_to_string(&r2).unwrap();
+    assert!(second.contains("\"crossfade\": true"), "{second}");
+    assert_eq!(num(&second, "crossfade_secs"), Some(6.0), "{second}");
+    assert_eq!(num(&second, "target_lufs"), Some(-15.0), "{second}");
+    assert_eq!(text(&second, "level_mode").as_deref(), Some("album"), "{second}");
+    std::fs::remove_dir_all(dir).ok();
+}
+
 /// A started `xvfb-run rvp` that is stopped, with everything it started, when the test ends (also when it fails).
 struct Reaper(std::process::Child);
 
@@ -349,8 +423,7 @@ fn playerctl_reads_and_drives_it_over_mpris() {
     );
     let deadline = Instant::now() + Duration::from_secs(20);
     let name = loop {
-        if let Some(n) = players().into_iter().find(|p| p.contains("RustyWave") && !before.contains(p))
-        {
+        if let Some(n) = players().into_iter().find(|p| p.contains("RustyWave") && !before.contains(p)) {
             break n;
         }
         assert!(Instant::now() < deadline, "rvp never showed up on the session bus: {:?}", players());

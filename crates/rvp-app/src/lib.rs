@@ -24,7 +24,8 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use library::{LibState, RESUME_MIN_AUDIO_US, is_playlist_name};
-use rvp_core::{CodecFactory, Error, Timestamp};
+use rvp_core::settings::SETTINGS_KEY;
+use rvp_core::{AudioSettings, CodecFactory, Error, LevelMode, LoudnessTags, Timestamp};
 use rvp_host::{
     FrameSink, Host, InputEvent, NowPlayingMeta, OpenRequest, PlayState, Playback, Rect, Storage,
     TransportCommand,
@@ -119,6 +120,11 @@ pub struct App {
     drawn_lib_rev: u64,
     /// Restoring the queue after a restart, and keeping it saved.
     restore: restore::RestoreState,
+    /// Crossfade and automatic level, as the user set them (kept in storage under `settings/audio`).
+    settings: AudioSettings,
+    settings_loaded: bool,
+    /// The library revision the playing item's loudness hint was made for.
+    hint_rev: u64,
 }
 
 /// What was last told to the host's now-playing sink.
@@ -153,7 +159,6 @@ impl App {
     /// A new app showing the empty screen. `codecs` supplies the decoders linked into the host.
     pub fn new(codecs: Rc<dyn CodecFactory>, config: UiConfig) -> Self {
         Self {
-            codecs,
             session: None,
             ui: {
                 let mut ui = Ui::new(config);
@@ -190,9 +195,17 @@ impl App {
             now: 0,
             frames_drawn: 0,
             perf: Perf::default(),
-            lib: LibState::new(),
+            lib: {
+                let mut lib = LibState::new();
+                lib.scanner.set_codecs(codecs.clone());
+                lib
+            },
             drawn_lib_rev: u64::MAX,
             restore: restore::RestoreState::default(),
+            settings: AudioSettings::default(),
+            settings_loaded: false,
+            hint_rev: u64::MAX,
+            codecs,
         }
     }
 
@@ -250,6 +263,74 @@ impl App {
     /// The playlist.
     pub fn playlist(&self) -> &Playlist {
         &self.playlist
+    }
+
+    /// Crossfade and automatic level as set now.
+    pub fn audio_settings(&self) -> AudioSettings {
+        self.settings
+    }
+
+    /// What the library knows about the loudness of playlist item `id` (its track's figure and its album's).
+    fn loudness_hint_for(&self, id: u32) -> Option<LoudnessTags> {
+        self.playlist.get(id).and_then(|i| i.track).and_then(|t| self.lib.lib.loudness_hint(t))
+    }
+
+    /// Change the audio settings with `change`, keep them (host storage) and give them to the player. Settings that end up
+    /// unchanged do nothing.
+    fn update_settings<H>(&mut self, host: &mut H, change: impl FnOnce(&mut AudioSettings))
+    where
+        H: Host<Video = FrameSink>,
+    {
+        let mut s = self.settings;
+        change(&mut s);
+        let s = s.clamped();
+        if s == self.settings {
+            return;
+        }
+        self.settings = s;
+        rvp_core::task::block_on(host.storage().store(SETTINGS_KEY, s.to_text().as_bytes()));
+        if let Some(sess) = &mut self.session {
+            sess.set_audio_settings(s);
+        }
+    }
+
+    /// Read the saved audio settings (once, at the first tick), and keep the session and the library's measurement job in step
+    /// with them.
+    fn settings_tick<H>(&mut self, host: &mut H)
+    where
+        H: Host<Video = FrameSink>,
+    {
+        if !self.settings_loaded {
+            self.settings_loaded = true;
+            if let Some(bytes) = rvp_core::task::block_on(host.storage().load(SETTINGS_KEY)) {
+                if let Some(s) = core::str::from_utf8(&bytes).ok().and_then(AudioSettings::from_text) {
+                    self.settings = s;
+                }
+            }
+        }
+        let rev = self.lib.lib.revision();
+        if let Some(s) = &mut self.session {
+            if s.audio_settings() != self.settings {
+                s.set_audio_settings(self.settings);
+            }
+        }
+        if rev != self.hint_rev {
+            // The library learnt something (a track was measured): the item playing may know its loudness now.
+            self.hint_rev = rev;
+            if let Some(tag) = self.session.as_ref().map(|s| s.tag()) {
+                let hint = self.loudness_hint_for(tag);
+                if let Some(s) = &mut self.session {
+                    s.set_loudness_hint(hint);
+                }
+            }
+        }
+    }
+
+    /// A message for a change made by a shortcut or a menu (the panel shows its own state).
+    fn settings_toast(&mut self, text: &str, now: Timestamp) {
+        if !self.ui.audio_settings_open() {
+            self.ui.show_toast(text, now);
+        }
     }
 
     /// Open `source` and start playing it, replacing the playlist with that one item. (A subtitle file joins
@@ -382,6 +463,8 @@ impl App {
         self.queued = None;
         let mut s = Session::new(source, self.codecs.clone());
         s.set_tag(id);
+        s.set_audio_settings(self.settings);
+        s.set_loudness_hint(self.loudness_hint_for(id));
         s.set_volume(self.volume);
         s.set_muted(self.muted);
         s.set_rate(self.rate, now);
@@ -625,8 +708,9 @@ impl App {
                 if let Some(src) = src {
                     match rvp_core::task::block_on(host.open(OpenRequest::Id(src))) {
                         Ok(source) => {
+                            let hint = self.loudness_hint_for(next);
                             if let Some(s) = &mut self.session {
-                                s.queue_next(source, next);
+                                s.queue_next_with(source, next, hint);
                             }
                             self.queued = Some(next);
                         }
@@ -698,6 +782,7 @@ impl App {
     {
         let t0 = host.clock().now_us();
         self.pump(host);
+        self.settings_tick(host);
         let mut session = self.session.take();
         if let Some(s) = &mut session {
             s.tick(host);
@@ -971,6 +1056,38 @@ impl App {
             Action::OpenDetail(d) => self.ui.open_detail(d),
             Action::GoBack => self.ui.go_back(),
             Action::Lib(a) => self.apply_lib(host, a, now),
+            Action::ShowAudioSettings => self.ui.open_audio_settings(),
+            Action::SetCrossfade(on) => {
+                self.update_settings(host, |s| s.crossfade = on);
+                let secs = self.settings.crossfade_secs;
+                self.settings_toast(
+                    &if on { format!("Crossfade on ({secs} s)") } else { "Crossfade off".into() },
+                    now,
+                );
+            }
+            Action::SetCrossfadeSecs(n) => {
+                self.update_settings(host, |s| s.crossfade_secs = n);
+                self.settings_toast(&format!("Crossfade {} s", self.settings.crossfade_secs), now);
+            }
+            Action::SetAutoLevel(on) => {
+                self.update_settings(host, |s| s.auto_level = on);
+                let t = self.settings.target_lufs;
+                self.settings_toast(
+                    &if on { format!("Auto-level on ({t} LUFS)") } else { "Auto-level off".into() },
+                    now,
+                );
+            }
+            Action::SetTargetLufs(l) => {
+                self.update_settings(host, |s| s.target_lufs = l);
+                self.settings_toast(&format!("Level target {} LUFS", self.settings.target_lufs), now);
+            }
+            Action::SetLevelMode(m) => {
+                self.update_settings(host, |s| s.level_mode = m);
+                self.settings_toast(
+                    if m == LevelMode::Album { "Leveling whole albums" } else { "Leveling each track" },
+                    now,
+                );
+            }
         }
     }
 
@@ -1085,6 +1202,12 @@ impl App {
             loop_a: self.loop_a,
             loop_b: self.loop_b,
             fullscreen: self.fullscreen,
+            audio: self.settings,
+            level_gain_db: self
+                .session
+                .as_ref()
+                .filter(|_| self.settings.auto_level)
+                .map(|s| s.level_gain_db()),
             ..UiModel::default()
         };
         m.playlist = self.queue_entries();

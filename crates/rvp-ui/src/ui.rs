@@ -202,6 +202,8 @@ pub struct Ui {
     pub(crate) lib: crate::lib_ui::LibUi,
     /// What the primary button went down on in library mode.
     pub(crate) pressed_lib: Option<crate::lib_ui::LibHit>,
+    /// The Audio settings panel, while it is up.
+    pub(crate) audio_panel: Option<crate::audio_panel::AudioPanel>,
 }
 
 impl Default for Ui {
@@ -245,6 +247,7 @@ impl Ui {
             key_used: false,
             lib: crate::lib_ui::LibUi::default(),
             pressed_lib: None,
+            audio_panel: None,
         }
     }
 
@@ -378,6 +381,7 @@ impl Ui {
             || !self.menu.is_empty()
             || self.toast.is_some()
             || self.drag_over
+            || self.audio_panel.is_some()
     }
 
     /// Whether the transport bar is (becoming) visible.
@@ -606,6 +610,9 @@ impl Ui {
 
     /// Handle one input event; returns what the user asked for.
     pub fn handle(&mut self, ev: &InputEvent, now_us: i64, model: &UiModel) -> Vec<Action> {
+        if self.audio_panel.is_some() {
+            return self.audio_panel_event(ev, now_us, model);
+        }
         self.now = now_us;
         let mut out = Vec::new();
         self.dirty = true;

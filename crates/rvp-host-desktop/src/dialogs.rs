@@ -5,8 +5,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// Extensions the open dialog offers.
 pub const MEDIA_EXTENSIONS: &[&str] = &[
-    "mp4", "m4v", "mkv", "webm", "mka", "mp3", "mp2", "flac", "ogg", "oga", "opus", "wav", "m4a", "m4b", "aac",
-    "srt", "vtt", "m3u", "m3u8", "pls",
+    "mp4", "m4v", "mkv", "webm", "mka", "mp3", "mp2", "flac", "ogg", "oga", "opus", "wav", "m4a", "m4b",
+    "aac", "srt", "vtt", "m3u", "m3u8", "pls",
 ];
 
 /// What a dialog produced.

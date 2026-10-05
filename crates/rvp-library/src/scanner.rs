@@ -174,6 +174,11 @@ impl Scanner {
         self.phase != Phase::Idle || !self.queue.is_empty() || self.analysis.is_some()
     }
 
+    /// True while a folder is being scanned or one is queued (not counting the loudness measurement that follows).
+    pub fn scanning(&self) -> bool {
+        self.phase != Phase::Idle || !self.queue.is_empty()
+    }
+
     /// Progress of the running scan.
     pub fn status(&self) -> Option<ScanStatus> {
         if self.phase != Phase::Idle {

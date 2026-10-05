@@ -174,7 +174,7 @@ impl Smoke {
         };
         let state = format!("{:?}", m.state);
         let json = format!(
-            "{{\n  \"version\": \"{}\",\n  \"state\": \"{}\",\n  \"saw_playing\": {},\n  \"saw_ended\": {},\n  \"position_ms\": {},\n  \"max_position_ms\": {},\n  \"duration_ms\": {},\n  \"clock_ratio\": {},\n  \"clock_span_s\": {:.3},\n  \"title\": {},\n  \"artist\": {},\n  \"queue_len\": {},\n  \"video_frames\": {},\n  \"video_size\": [{}, {}],\n  \"frames_presented\": {},\n  \"window\": [{}, {}, {:.2}],\n  \"audio_backend\": {},\n  \"audio_frames_written\": {},\n  \"audio_frames_played\": {},\n  \"audio_failed\": {},\n  \"media_controls\": {},\n  \"mode\": \"{}\",\n  \"fullscreen\": {},\n  \"library_tracks\": {},\n  \"library_albums\": {}\n}}\n",
+            "{{\n  \"version\": \"{}\",\n  \"state\": \"{}\",\n  \"saw_playing\": {},\n  \"saw_ended\": {},\n  \"position_ms\": {},\n  \"max_position_ms\": {},\n  \"duration_ms\": {},\n  \"clock_ratio\": {},\n  \"clock_span_s\": {:.3},\n  \"title\": {},\n  \"artist\": {},\n  \"queue_len\": {},\n  \"video_frames\": {},\n  \"video_size\": [{}, {}],\n  \"frames_presented\": {},\n  \"window\": [{}, {}, {:.2}],\n  \"audio_backend\": {},\n  \"audio_frames_written\": {},\n  \"audio_frames_played\": {},\n  \"audio_failed\": {},\n  \"media_controls\": {},\n  \"mode\": \"{}\",\n  \"fullscreen\": {},\n  \"library_tracks\": {},\n  \"library_albums\": {},\n  \"crossfade\": {},\n  \"crossfade_secs\": {},\n  \"auto_level\": {},\n  \"target_lufs\": {},\n  \"level_mode\": \"{}\"\n}}\n",
             env!("CARGO_PKG_VERSION"),
             state,
             self.saw_playing,
@@ -203,6 +203,11 @@ impl Smoke {
             m.fullscreen,
             app.library().track_count(),
             app.library().albums().len(),
+            app.audio_settings().crossfade,
+            app.audio_settings().crossfade_secs,
+            app.audio_settings().auto_level,
+            app.audio_settings().target_lufs,
+            if app.audio_settings().level_mode == rvp_core::LevelMode::Album { "album" } else { "track" },
         );
         if let Err(e) = std::fs::write(path, json) {
             eprintln!("rusty-wave: could not write {}: {e}", path.display());

@@ -450,6 +450,9 @@ impl Ui {
         model: &UiModel,
         ctx: &LibCtx<'_>,
     ) -> Vec<Action> {
+        if self.audio_panel.is_some() {
+            return self.audio_panel_event(ev, now_us, model);
+        }
         self.now = now_us;
         let mut out = Vec::new();
         // A pointer that only moves over the same thing changes nothing on screen (see `lib_move`).

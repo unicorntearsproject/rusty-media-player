@@ -96,7 +96,13 @@ impl Ui {
         j += &format!("\"playlist_list\":[{}],", pls.join(","));
         j += &match ctx.scan {
             Some(s) => {
-                format!("\"scan\":{{\"root\":{},\"done\":{},\"total\":{}}},", esc(&s.root), s.done, s.total)
+                format!(
+                    "\"scan\":{{\"root\":{},\"done\":{},\"total\":{},\"analysing\":{}}},",
+                    esc(&s.root),
+                    s.done,
+                    s.total,
+                    s.analysing
+                )
             }
             None => "\"scan\":null,".into(),
         };

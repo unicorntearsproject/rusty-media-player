@@ -57,6 +57,7 @@ impl Ui {
         }
         self.draw_toast(fb, &l);
         self.draw_tooltip(fb, &l, model);
+        self.draw_audio_panel(fb, model);
         if self.drag_over {
             self.draw_drop_outline(fb, &l);
         }

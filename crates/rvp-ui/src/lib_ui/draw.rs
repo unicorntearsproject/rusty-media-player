@@ -234,6 +234,7 @@ impl Ui {
             self.draw_panel(fb, &l, p);
         }
         self.menu = panels;
+        self.draw_audio_panel(fb, model);
         if self.lib.prompt.is_some() {
             self.draw_prompt(fb, &g);
         }
@@ -423,7 +424,12 @@ impl Ui {
         if let Some(sc) = ctx.scan {
             let y = g.add_folder.y - 20.0 * s;
             if !compact {
-                let label = alloc::format!("Scanning {} / {}", sc.done, sc.total.max(sc.done));
+                let label = alloc::format!(
+                    "{} {} / {}",
+                    if sc.analysing { "Measuring" } else { "Scanning" },
+                    sc.done,
+                    sc.total.max(sc.done)
+                );
                 self.text(fb, Face::Mono, 11.0, px, y - 12.0 * s, &label, t::CYAN_400, 1.0, 0.0);
                 let tr = RectF::new(px, y, r.w - 2.0 * px, 4.0 * s);
                 fb.fill_rrect(tr, 2.0 * s, Paint::Solid(fade(t::WHITE, 0.14)), 1.0);
@@ -835,7 +841,8 @@ impl Ui {
         let s = self.scale;
         let cx = rect.cx();
         let mut y = rect.y + 70.0 * s;
-        if ctx.lib.track_count() == 0 && matches!(self.lib.view, View::Albums | View::Artists | View::Tracks) {
+        if ctx.lib.track_count() == 0 && matches!(self.lib.view, View::Albums | View::Artists | View::Tracks)
+        {
             // The empty library: the logo.
             crate::logo::draw(fb, RectF::new(cx - 46.0 * s, y - 46.0 * s, 92.0 * s, 92.0 * s), 1.0);
         } else {

@@ -16,6 +16,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod actions;
+pub mod audio_panel;
 mod draw;
 pub mod font;
 pub mod gfx;
@@ -28,6 +29,7 @@ mod subs;
 pub mod ui;
 
 pub use actions::{Action, MenuItem, SHORTCUTS, SPEEDS, Shortcut};
+pub use audio_panel::{AudioControl, AudioPanelGeom};
 pub use font::{FontData, FontLoader};
 pub use gfx::{FrameBuffer, Paint, RectF};
 pub use lib_ui::{Detail, Enqueue, LibAction, LibCtx, LibHit, LibUi, Mode, Scope, UiCommand, View};

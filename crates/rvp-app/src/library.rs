@@ -60,6 +60,9 @@ pub(crate) struct LibState {
     pub auto_mode: bool,
     pub scan_status: Option<ScanStatus>,
     pub last_scan_progress: usize,
+    /// The loudness measurement was asked for (the automatic level is on), and the library revision it last looked at.
+    pub analysis_on: bool,
+    pub analysis_rev: u64,
     /// Pictures that storage did not have (not asked for again).
     pub missing_art: alloc::collections::BTreeSet<u64>,
     pub queue_cache: Option<(QueueKey, Rc<Vec<PlaylistEntry>>)>,
@@ -81,6 +84,8 @@ impl LibState {
             auto_mode: false,
             scan_status: None,
             last_scan_progress: usize::MAX,
+            analysis_on: false,
+            analysis_rev: u64::MAX,
             missing_art: Default::default(),
             queue_cache: None,
         }
@@ -214,9 +219,33 @@ impl App {
         for x in listings {
             self.lib.scanner.push(x);
         }
-        if self.lib.scanner.busy() {
-            if let ScanEvent::Finished(rep) = self.lib.scanner.tick(&mut self.lib.lib, host) {
-                self.lib_scan_done(host, rep, now);
+        // The automatic level wants every track's loudness: queue the ones the tags do not cover (after a scan, when the setting was
+        // just turned on), and stop when it is turned off.
+        if self.lib.loaded {
+            let want = self.settings.auto_level;
+            let rev = self.lib.lib.revision();
+            if want != self.lib.analysis_on
+                || (want && rev != self.lib.analysis_rev && !self.lib.scanner.busy())
+            {
+                self.lib.analysis_on = want;
+                self.lib.analysis_rev = rev;
+                if want {
+                    let pending = self.lib.lib.pending_loudness();
+                    self.lib.scanner.start_analysis(pending);
+                } else {
+                    self.lib.scanner.stop_analysis();
+                }
+            }
+        }
+        // Measuring is background work: it waits while a picture is playing (decoding for the measurement would take frames).
+        let video_playing = self.session.as_ref().is_some_and(|s| {
+            s.container_has_video() && matches!(s.state(), rvp_player::SessionState::Playing)
+        });
+        if self.lib.scanner.busy() && (self.lib.scanner.scanning() || !video_playing) {
+            match self.lib.scanner.tick(&mut self.lib.lib, host) {
+                ScanEvent::Finished(rep) => self.lib_scan_done(host, rep, now),
+                ScanEvent::Analysed => self.lib_save(host),
+                _ => {}
             }
         }
         self.lib.scan_status = self.lib.scanner.status();

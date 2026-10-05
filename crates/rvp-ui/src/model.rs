@@ -126,6 +126,10 @@ pub struct UiModel {
     pub loop_b: Option<i64>,
     /// Why playback failed, in the player's own voice.
     pub error: Option<String>,
+    /// Crossfade and automatic level, as set.
+    pub audio: rvp_core::AudioSettings,
+    /// The gain the automatic level applies to what is playing, dB (`None` when it is off or nothing plays).
+    pub level_gain_db: Option<f32>,
 }
 
 impl UiModel {
