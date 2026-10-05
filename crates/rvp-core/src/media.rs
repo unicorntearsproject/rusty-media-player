@@ -96,8 +96,34 @@ pub struct Art {
     pub data: Vec<u8>,
 }
 
+/// Loudness the file's own tags state (ReplayGain, Opus R128), converted to LUFS: where the tags say how far to turn the
+/// track down or up to reach their reference level, the loudness is that reference minus the gain.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LoudnessTags {
+    /// Integrated loudness of the track, LUFS.
+    pub track_lufs: Option<f32>,
+    /// Integrated loudness of the album the track belongs to, LUFS.
+    pub album_lufs: Option<f32>,
+    /// Largest sample of the track, linear (1.0 is full scale).
+    pub track_peak: Option<f32>,
+    /// Largest sample of the album, linear.
+    pub album_peak: Option<f32>,
+}
+
+/// The reference level of ReplayGain 2.0 tags, LUFS.
+pub const REPLAYGAIN_REFERENCE_LUFS: f32 = -18.0;
+/// The reference level of Opus R128 gain tags, LUFS.
+pub const R128_REFERENCE_LUFS: f32 = -23.0;
+
+impl LoudnessTags {
+    /// True if the tags say nothing about loudness.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Descriptive tags read from the container or file.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Metadata {
     /// Title.
     pub title: Option<String>,
@@ -121,6 +147,10 @@ pub struct Metadata {
     pub genre: Option<String>,
     /// Cover art.
     pub art: Option<Art>,
+    /// Loudness the tags state (ReplayGain, Opus R128).
+    pub loudness: LoudnessTags,
+    /// The tags mark the album as one to play without gaps (iTunes "gapless album": `pgap`, `iTunPGAP`).
+    pub gapless_album: bool,
 }
 
 /// A chapter mark.

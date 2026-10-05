@@ -11,11 +11,14 @@ extern crate std;
 pub mod clock;
 pub mod codec;
 pub mod color;
+pub mod dynamics;
 pub mod error;
+pub mod loudness;
 pub mod media;
 pub mod par;
 pub mod resample;
 pub mod ring;
+pub mod settings;
 pub mod simd;
 pub mod stretch;
 pub mod task;
@@ -24,11 +27,13 @@ pub mod time;
 pub use clock::{ClockSource, MasterClock};
 pub use codec::{AudioDecoder, CodecFactory, VideoDecoder};
 pub use error::{Error, Result};
+pub use loudness::{LoudnessMeter, Measurement};
 pub use media::{
-    Art, AudioBuffer, AudioCodec, AudioInfo, AudioParams, Chapter, ColorMatrix, ColorRange, Metadata, Packet,
-    PixelFormat, StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
+    Art, AudioBuffer, AudioCodec, AudioInfo, AudioParams, Chapter, ColorMatrix, ColorRange, LoudnessTags,
+    Metadata, Packet, PixelFormat, StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
 };
 pub use resample::Resampler;
 pub use ring::RingBuffer;
+pub use settings::{AudioSettings, LevelMode};
 pub use stretch::TimeStretcher;
 pub use time::{Rational, Timestamp};
