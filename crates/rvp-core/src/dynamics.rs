@@ -169,7 +169,10 @@ impl Limiter {
                 if near <= quiet {
                     continue;
                 }
-                let peak = self.detector.around(&self.tmp, at);
+                // Where the filter would look past the end of the audio there is nothing to interpolate from (zeros there
+                // would ring): the samples themselves are all there is, and the clip below covers the rest.
+                let peak =
+                    if i + TRUE_PEAK_LOOKAHEAD < total { self.detector.around(&self.tmp, at) } else { near };
                 if peak > self.ceiling {
                     let need = (self.ceiling / peak).max(MIN_GAIN);
                     if need < self.env[i] {

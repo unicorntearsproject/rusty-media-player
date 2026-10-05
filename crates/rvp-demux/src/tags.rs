@@ -251,6 +251,59 @@ fn text_frame(body: &[u8]) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+/// The number at the start of a gain or peak value: `"-6.54 dB"`, `"+0.20"`, `"0.988"`, with a comma or a typographic minus
+/// tolerated (taggers write all of these).
+fn leading_number(v: &str) -> Option<f32> {
+    let v = v.trim().replace('\u{2212}', "-").replace(',', ".");
+    let end = v
+        .char_indices()
+        .find(|&(i, c)| !(c.is_ascii_digit() || c == '.' || (i == 0 && (c == '-' || c == '+'))))
+        .map_or(v.len(), |(i, _)| i);
+    v[..end].parse::<f32>().ok().filter(|x| x.is_finite())
+}
+
+/// Take a loudness or gapless tag (`REPLAYGAIN_TRACK_GAIN`, `R128_TRACK_GAIN`, `ITUNPGAP`, ...) into `meta`. `key` is
+/// matched without regard to case; the first value seen for a field wins (a file may carry both formats: the one met first
+/// is the one its tagger meant as primary). Returns true if the key was one of these.
+///
+/// ReplayGain 2 gains are decibels to add to reach -18 LUFS, so the loudness is -18 minus the gain; Opus `R128_*_GAIN` values
+/// are a signed integer in 1/256 dB to add (on top of the header's output gain, which the decoder applies) to reach -23 LUFS.
+/// Peaks are linear.
+pub(crate) fn apply_loudness_tag(meta: &mut Metadata, key: &str, value: &str) -> bool {
+    use rvp_core::media::{R128_REFERENCE_LUFS, REPLAYGAIN_REFERENCE_LUFS};
+    let rg = |g: f32| REPLAYGAIN_REFERENCE_LUFS - g;
+    let r128 = |q: i32| R128_REFERENCE_LUFS - q as f32 / 256.0;
+    let key = key.trim().to_ascii_uppercase();
+    match key.as_str() {
+        "REPLAYGAIN_TRACK_GAIN" => {
+            meta.loudness.track_lufs = meta.loudness.track_lufs.or(leading_number(value).map(rg))
+        }
+        "REPLAYGAIN_ALBUM_GAIN" => {
+            meta.loudness.album_lufs = meta.loudness.album_lufs.or(leading_number(value).map(rg))
+        }
+        "REPLAYGAIN_TRACK_PEAK" => {
+            meta.loudness.track_peak = meta.loudness.track_peak.or(leading_number(value).filter(|p| *p > 0.0))
+        }
+        "REPLAYGAIN_ALBUM_PEAK" => {
+            meta.loudness.album_peak = meta.loudness.album_peak.or(leading_number(value).filter(|p| *p > 0.0))
+        }
+        "R128_TRACK_GAIN" => {
+            meta.loudness.track_lufs = meta.loudness.track_lufs.or(value.trim().parse::<i32>().ok().map(r128))
+        }
+        "R128_ALBUM_GAIN" => {
+            meta.loudness.album_lufs = meta.loudness.album_lufs.or(value.trim().parse::<i32>().ok().map(r128))
+        }
+        // iTunes' "part of a gapless album" flag, under the names taggers give it.
+        "ITUNPGAP" | "PGAP" | "GAPLESS_ALBUM" | "GAPLESS" | "GAPLESS_PLAYBACK" => {
+            if matches!(value.trim(), "1" | "true" | "TRUE" | "True" | "yes") {
+                meta.gapless_album = true;
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
 /// `"3/12"` or `"3"` as (number, total).
 fn number_pair(s: &str) -> (Option<u32>, Option<u32>) {
     let mut it = s.split('/');
@@ -395,6 +448,15 @@ pub(crate) fn parse_id3v2(tag: &[u8], meta: &mut Metadata) {
             }
             "TCON" | "TCO" => {
                 meta.genre = meta.genre.take().or_else(|| text_frame(&data).and_then(|s| genre_text(&s)))
+            }
+            // User-defined text (`TXXX`: encoding, description, value) and comments (`COMM`: encoding, language, description,
+            // text): where ReplayGain and the gapless-album flag live.
+            "TXXX" | "TXX" | "COMM" | "COM" => {
+                let Some((&enc, rest)) = data.split_first() else { continue };
+                let rest = if id.starts_with("COM") { rest.get(3..).unwrap_or(&[]) } else { rest };
+                let (desc, used) = id3_text(enc, rest);
+                let (value, _) = id3_text(enc, rest.get(used..).unwrap_or(&[]));
+                apply_loudness_tag(meta, &desc, &value);
             }
             "APIC" | "PIC" => {
                 let Some((&enc, rest)) = data.split_first() else { continue };
@@ -566,7 +628,9 @@ pub(crate) fn parse_vorbis_comments(b: &[u8], meta: &mut Metadata) {
             "DISCTOTAL" | "TOTALDISCS" => meta.disc_total = meta.disc_total.or(text.parse().ok()),
             "DATE" | "YEAR" => meta.year = meta.year.or_else(|| year_of(&text)),
             "GENRE" => meta.genre = meta.genre.take().or(Some(text)),
-            _ => {}
+            other => {
+                apply_loudness_tag(meta, other, &text);
+            }
         }
     }
     if meta.art.is_none() {
@@ -746,5 +810,123 @@ mod tests {
         );
         assert_eq!(m.art.map(|a| (a.mime, a.data)), Some(("image/png".into(), b"\x89PNG".to_vec())));
         assert_eq!(base64("TWFu"), b"Man");
+    }
+
+    fn vorbis_block(entries: &[&str]) -> Vec<u8> {
+        let mut block = Vec::new();
+        block.extend(3u32.to_le_bytes());
+        block.extend(b"vnd");
+        block.extend((entries.len() as u32).to_le_bytes());
+        for e in entries {
+            block.extend((e.len() as u32).to_le_bytes());
+            block.extend(e.as_bytes());
+        }
+        block
+    }
+
+    #[test]
+    fn gain_values_as_taggers_write_them() {
+        assert_eq!(leading_number("-6.54 dB"), Some(-6.54));
+        assert_eq!(leading_number("+0.20 dB"), Some(0.2));
+        assert_eq!(leading_number("  1,25 DB "), Some(1.25));
+        assert_eq!(leading_number("\u{2212}3.5 dB"), Some(-3.5));
+        assert_eq!(leading_number("0.988553"), Some(0.988_553));
+        assert_eq!(leading_number("n/a"), None);
+        assert_eq!(leading_number(""), None);
+        assert_eq!(leading_number("-"), None);
+    }
+
+    #[test]
+    fn replaygain_in_vorbis_comments_flac_and_ogg() {
+        let block = vorbis_block(&[
+            "TITLE=Song",
+            "replaygain_track_gain=-6.50 dB",
+            "REPLAYGAIN_TRACK_PEAK=0.988553",
+            "REPLAYGAIN_ALBUM_GAIN=+2.25 dB",
+            "REPLAYGAIN_ALBUM_PEAK=1.000000",
+            "ITUNPGAP=1",
+        ]);
+        let mut m = Metadata::default();
+        parse_vorbis_comments(&block, &mut m);
+        // Gains are decibels to reach -18 LUFS: -6.5 dB to turn down means the track is at -11.5 LUFS.
+        assert_eq!(m.loudness.track_lufs, Some(-11.5));
+        assert_eq!(m.loudness.album_lufs, Some(-20.25));
+        assert_eq!((m.loudness.track_peak, m.loudness.album_peak), (Some(0.988_553), Some(1.0)));
+        assert!(m.gapless_album);
+        assert_eq!(m.title.as_deref(), Some("Song"));
+    }
+
+    #[test]
+    fn opus_r128_gains_are_q7_8_against_minus_23() {
+        // -512 is -2 dB to add: the track is at -21 LUFS; +256 is one dB to add: the album is at -24.
+        let block = vorbis_block(&["R128_TRACK_GAIN=-512", "R128_ALBUM_GAIN=256"]);
+        let mut m = Metadata::default();
+        parse_vorbis_comments(&block, &mut m);
+        assert_eq!((m.loudness.track_lufs, m.loudness.album_lufs), (Some(-21.0), Some(-24.0)));
+        assert!(!m.gapless_album);
+        // Nothing to go on, or nonsense: no loudness.
+        let mut m = Metadata::default();
+        parse_vorbis_comments(
+            &vorbis_block(&["R128_TRACK_GAIN=loud", "REPLAYGAIN_TRACK_GAIN=x", "REPLAYGAIN_TRACK_PEAK=-1"]),
+            &mut m,
+        );
+        assert!(m.loudness.is_empty());
+        // The first value of a field wins.
+        let mut m = Metadata::default();
+        parse_vorbis_comments(
+            &vorbis_block(&["REPLAYGAIN_TRACK_GAIN=-1 dB", "REPLAYGAIN_TRACK_GAIN=-9 dB"]),
+            &mut m,
+        );
+        assert_eq!(m.loudness.track_lufs, Some(-17.0));
+    }
+
+    #[test]
+    fn replaygain_and_gapless_flag_in_id3_txxx_and_comm() {
+        let txxx = |enc: u8, desc: &str, value: &str| -> Vec<u8> {
+            let mut b = vec![enc];
+            match enc {
+                1 => {
+                    for s in [desc, value] {
+                        b.extend([0xFF, 0xFE]);
+                        b.extend(s.encode_utf16().flat_map(|u| u.to_le_bytes()));
+                        b.extend([0, 0]);
+                    }
+                }
+                _ => {
+                    b.extend(desc.as_bytes());
+                    b.push(0);
+                    b.extend(value.as_bytes());
+                }
+            }
+            b
+        };
+        // v2.3 with UTF-16 descriptions (what ffmpeg and foobar2000 write) and a v2.4 UTF-8 frame, and iTunes' comment frame.
+        let mut f = Vec::new();
+        f.extend(frame(b"TXXX", &txxx(1, "REPLAYGAIN_TRACK_GAIN", "-7.00 dB"), false));
+        f.extend(frame(b"TXXX", &txxx(0, "replaygain_track_peak", "0.9"), false));
+        f.extend(frame(b"TXXX", &txxx(1, "REPLAYGAIN_ALBUM_GAIN", "-3.00 dB"), false));
+        let mut comm = vec![0u8];
+        comm.extend(b"eng");
+        comm.extend(b"iTunPGAP\0");
+        comm.extend(b"1");
+        f.extend(frame(b"COMM", &comm, false));
+        let mut m = Metadata::default();
+        parse_id3v2(&tag(3, &f), &mut m);
+        assert_eq!(m.loudness.track_lufs, Some(-11.0));
+        assert_eq!(m.loudness.album_lufs, Some(-15.0));
+        assert_eq!(m.loudness.track_peak, Some(0.9));
+        assert!(m.gapless_album);
+
+        let mut f = Vec::new();
+        f.extend(frame(b"TXXX", &txxx(3, "REPLAYGAIN_TRACK_GAIN", "+1.50 dB"), true));
+        f.extend(frame(b"TXXX", &txxx(3, "iTunPGAP", "0"), true));
+        let mut m = Metadata::default();
+        parse_id3v2(&tag(4, &f), &mut m);
+        assert_eq!(m.loudness.track_lufs, Some(-19.5));
+        assert!(!m.gapless_album, "0 is not the flag");
+        // A frame cut short does not take the parser down.
+        let mut m = Metadata::default();
+        parse_id3v2(&tag(4, &frame(b"TXXX", &[3, b'R'], true)), &mut m);
+        assert!(m.loudness.is_empty());
     }
 }

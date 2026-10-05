@@ -2,7 +2,7 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=basic|core|h264|vp9|m8|audio|library|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
+#   RVP_FIXTURE_SET=basic|core|h264|vp9|m8|audio|library|levels|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
 #                                       VP9 to <outdir>/vp9, M8 (subtitles, tracks, gapless) to <outdir>/m8, raw audio files to <outdir>/audio, and the one-minute 1080p30
 #                                       speed streams (M9) to <outdir>/perf (minutes of encoding: `cargo xtask perf-fixtures`)
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
@@ -469,6 +469,71 @@ gen_library() {
   python3 "$root/tools/gen-library.py" --showcase "$out/showcase"
 }
 
+# Loudness (automatic level, crossfade): programme-like signals at known levels with ffmpeg's EBU R128 reading of each in
+# <name>.ebur128 (integrated loudness, true peak), files that carry ReplayGain and Opus R128 tags in every container, and a small
+# library (an album of tracks 8 dB apart, one tagged track) for the scan.
+gen_levels() {
+  local d="$out/levels"
+  mkdir -p "$d/lib/quiet-loud" "$d/lib/tagged"
+  local version=3
+  [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
+  # ffmpeg's reading of the whole file as `lavfi.r128.I=<LUFS>` and `lavfi.r128.true_peak=<linear>` lines (the last values the
+  # filter reports, three decimals).
+  ebur() {
+    local raw; raw="$(mktemp)"
+    ffmpeg -hide_banner -nostats -loglevel error -i "$1" \
+      -af "${3:-anull},ebur128=metadata=1:peak=true,ametadata=mode=print:file=$raw" -f null -
+    tail -n 12 "$raw" | grep -E '^lavfi.r128.(I|true_peak)=' > "$2"
+    rm -f "$raw"
+  }
+  # 1 kHz sine, both channels, -23 LUFS (0.0708 peak): EBU Tech 3341 test 1; and -14 LUFS.
+  ff -f lavfi -i "aevalsrc=0.07079*sin(2*PI*1000*t)|0.07079*sin(2*PI*1000*t):s=48000:d=20" -c:a pcm_s24le "$d/tone_m23.wav"
+  ff -f lavfi -i "aevalsrc=0.19953*sin(2*PI*1000*t)|0.19953*sin(2*PI*1000*t):s=48000:d=10" -c:a pcm_s24le "$d/tone_m14.wav"
+  # Programme-like: tones with a pulsing envelope and a click track, different in the two channels.
+  local music="0.35*sin(2*PI*220*t)*(0.6+0.4*sin(2*PI*1.5*t))+0.15*sin(2*PI*1760*t)*lt(mod(t\,0.5)\,0.1)+0.1*sin(2*PI*55*t)|0.3*sin(2*PI*330*t)*(0.6+0.4*sin(2*PI*1.2*t))+0.15*sin(2*PI*2093*t)*lt(mod(t\,0.4)\,0.1)+0.1*sin(2*PI*82*t)"
+  ff -f lavfi -i "aevalsrc=$music:s=48000:d=30" -c:a flac "$d/music.flac"
+  # Loud for ten seconds, quiet for ten (the gate must follow the loud part), 44.1 kHz.
+  ff -f lavfi -i "aevalsrc=0.5*sin(2*PI*300*t)*if(lt(mod(t\,20)\,10)\,1\,0.04)|0.4*sin(2*PI*500*t)*if(lt(mod(t\,20)\,10)\,1\,0.04):s=44100:d=30" -c:a flac "$d/dynamic_44k.flac"
+  # Mono at 22.05 kHz (played to both speakers).
+  ff -f lavfi -i "aevalsrc=0.2*sin(2*PI*440*t)*(0.5+0.5*sin(2*PI*2*t)):s=22050:d=12" -c:a flac "$d/mono_22k.flac"
+  # The same programme through lossy codecs: the readings of two decoders must agree.
+  ff -i "$d/music.flac" -c:a libmp3lame -b:a 160k "$d/music.mp3"
+  ff -i "$d/music.flac" -c:a aac -b:a 128k "$d/music.m4a"
+  ff -i "$d/music.flac" -c:a libopus -b:a 96k "$d/music.opus"
+  ff -i "$d/music.flac" -c:a libvorbis -q:a 4 "$d/music.ogg"
+  for f in tone_m23.wav tone_m14.wav music.flac dynamic_44k.flac music.mp3 music.m4a music.opus music.ogg; do ebur "$d/$f" "$d/$f.ebur128"; done
+  ebur "$d/mono_22k.flac" "$d/mono_22k.flac.ebur128" "pan=stereo|c0=c0|c1=c0"
+  # Tags: ReplayGain (track -6.50 dB, album -3.20 dB) in every container; Opus gets R128 gains instead; the gapless-album flag.
+  local t=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2")
+  local rg=(-metadata REPLAYGAIN_TRACK_GAIN="-6.50 dB" -metadata REPLAYGAIN_TRACK_PEAK=0.977000 \
+            -metadata REPLAYGAIN_ALBUM_GAIN="-3.20 dB" -metadata REPLAYGAIN_ALBUM_PEAK=1.000000 -metadata title=Tagged -metadata album=Tags)
+  ff "${t[@]}" -c:a libmp3lame -b:a 128k "${rg[@]}" -metadata iTunPGAP=1 -id3v2_version 3 "$d/tagged_v23.mp3"
+  ff "${t[@]}" -c:a libmp3lame -b:a 128k "${rg[@]}" -id3v2_version 4 "$d/tagged_v24.mp3"
+  ff "${t[@]}" -c:a flac "${rg[@]}" "$d/tagged.flac"
+  ff "${t[@]}" -c:a libvorbis -q:a 3 "${rg[@]}" "$d/tagged.ogg"
+  ff "${t[@]}" -c:a libopus -b:a 64k -metadata R128_TRACK_GAIN=-512 -metadata R128_ALBUM_GAIN=256 -metadata title=Tagged -metadata album=Tags "$d/tagged.opus"
+  # M4A twice: QuickTime `mdta` keys (what ffmpeg writes), and iTunes-style free-form `----` items plus `pgap` (what iTunes, foobar2000
+  # and MP3Tag write, put in by tools/m4a-freeform.py).
+  ff "${t[@]}" -c:a aac -b:a 64k "${rg[@]}" -metadata gapless_playback=1 -movflags use_metadata_tags "$d/tagged_mdta.m4a"
+  ff "${t[@]}" -c:a aac -b:a 64k -metadata title=Tagged -metadata album=Tags "$d/plain_for_tags.m4a"
+  python3 "$root/tools/m4a-freeform.py" "$d/plain_for_tags.m4a" "$d/tagged_itunes.m4a" replaygain_track_gain="-6.50 dB" \
+    replaygain_track_peak=0.977000 replaygain_album_gain="-3.20 dB" replaygain_album_peak=1.000000 --pgap
+  rm -f "$d/plain_for_tags.m4a"
+  ff "${t[@]}" -c:a flac "${rg[@]}" "$d/tagged.mka"
+  ff "${t[@]}" -c:a pcm_s16le "$d/untagged.wav"
+  # A small library: an album whose tracks sit 8 LU apart (no tags: the scan measures them), and one tagged track.
+  local alb=(-metadata album="Quiet and Loud" -metadata artist="Levels")
+  local n=1
+  for g in 0.02 0.0504 0.1267; do
+    ff -f lavfi -i "aevalsrc=$g*sin(2*PI*$((200+n*110))*t)*(0.7+0.3*sin(2*PI*2*t))|$g*sin(2*PI*$((300+n*90))*t)*(0.7+0.3*sin(2*PI*1.7*t)):s=44100:d=12" \
+       -c:a flac "${alb[@]}" -metadata title="Track $n" -metadata track=$n "$d/lib/quiet-loud/0$n.flac"
+    ebur "$d/lib/quiet-loud/0$n.flac" "$d/lib/quiet-loud/0$n.flac.ebur128"
+    n=$((n+1))
+  done
+  ff "${t[@]}" -c:a libmp3lame -b:a 128k "${rg[@]}" -metadata artist=Tagger -id3v2_version 4 "$d/lib/tagged/01.mp3"
+  echo "$version" > "$d/.done"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == basic ]]; then gen_basic; fi
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
@@ -477,5 +542,6 @@ if [[ "$fixture_set" == all || "$fixture_set" == vp9 ]]; then gen_vp9; fi
 if [[ "$fixture_set" == all || "$fixture_set" == m8 ]]; then gen_m8; fi
 if [[ "$fixture_set" == all || "$fixture_set" == audio ]]; then gen_audio; fi
 if [[ "$fixture_set" == all || "$fixture_set" == library ]]; then gen_library; fi
+if [[ "$fixture_set" == all || "$fixture_set" == levels ]]; then gen_levels; fi
 if [[ "$fixture_set" == perf ]]; then gen_perf; fi
 echo "fixtures in $out"

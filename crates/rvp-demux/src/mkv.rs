@@ -279,7 +279,7 @@ pub struct MkvDemuxer<S: Source> {
     scan_pos: u64,
 }
 
-/// Read `SimpleTag`s (recursively) into `meta`: TITLE, ARTIST, ALBUM.
+/// Read `SimpleTag`s (recursively) into `meta`: TITLE, ARTIST, ALBUM and the loudness tags.
 fn read_simple_tags(body: &[u8], meta: &mut Metadata, depth: usize) {
     if depth > MAX_TAG_DEPTH {
         return;
@@ -313,11 +313,19 @@ fn simple_tag(b: &[u8], meta: &mut Metadata, depth: usize) {
             return;
         }
         match n.as_str() {
-            "TITLE" => meta.title.get_or_insert(v),
-            "ARTIST" => meta.artist.get_or_insert(v),
-            "ALBUM" => meta.album.get_or_insert(v),
-            _ => return,
-        };
+            "TITLE" => {
+                meta.title.get_or_insert(v);
+            }
+            "ARTIST" => {
+                meta.artist.get_or_insert(v);
+            }
+            "ALBUM" => {
+                meta.album.get_or_insert(v);
+            }
+            other => {
+                crate::tags::apply_loudness_tag(meta, other, &v);
+            }
+        }
     }
 }
 
@@ -1077,6 +1085,32 @@ mod tests {
         let mut meta = Metadata::default();
         read_simple_tags(&el(&[0x73, 0x73], &body), &mut meta, 0);
         let _ = vec![0u8; 0];
+    }
+
+    #[test]
+    fn replaygain_simple_tags() {
+        let simple = |name: &str, value: &str| {
+            el(
+                &[0x67, 0xC8],
+                &[el(&[0x45, 0xA3], name.as_bytes()), el(&[0x44, 0x87], value.as_bytes())].concat(),
+            )
+        };
+        let tag = el(
+            &[0x73, 0x73],
+            &[
+                simple("replaygain_track_gain", "-4.20 dB"),
+                simple("REPLAYGAIN_ALBUM_GAIN", "-5.00 dB"),
+                simple("REPLAYGAIN_TRACK_PEAK", "0.75"),
+                simple("TITLE", "T"),
+            ]
+            .concat(),
+        );
+        let mut meta = Metadata::default();
+        read_simple_tags(&tag, &mut meta, 0);
+        assert_eq!(meta.loudness.track_lufs, Some(-13.8));
+        assert_eq!(meta.loudness.album_lufs, Some(-13.0));
+        assert_eq!(meta.loudness.track_peak, Some(0.75));
+        assert_eq!(meta.title.as_deref(), Some("T"));
     }
 
     #[test]

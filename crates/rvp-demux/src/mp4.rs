@@ -87,7 +87,48 @@ fn parse_udta(udta: &[u8], meta: &mut Metadata, chapters: &mut Vec<Chapter>) {
         if let Some(body) = m.get(4..) {
             if let Ok(mk) = boxes(body) {
                 if let Some(ilst) = find(&mk, b"ilst") {
+                    // QuickTime-style metadata (`hdlr` mdta): the item types are 1-based indexes into the `keys` box.
+                    let keys = find(&mk, b"keys").map(mdta_keys).unwrap_or_default();
                     for (ty, item) in boxes(ilst).unwrap_or_default() {
+                        let index = u32::from_be_bytes(ty) as usize;
+                        if index >= 1 && index <= keys.len() {
+                            let data = boxes(item).ok().and_then(|b| find(&b, b"data"));
+                            let value =
+                                data.and_then(|d| d.get(8..)).and_then(|v| core::str::from_utf8(v).ok());
+                            if let Some(value) = value.filter(|v| !v.is_empty()) {
+                                let key = &keys[index - 1];
+                                match key.to_ascii_lowercase().as_str() {
+                                    "title" => {
+                                        meta.title = meta.title.take().or_else(|| Some(value.to_string()))
+                                    }
+                                    "artist" => {
+                                        meta.artist = meta.artist.take().or_else(|| Some(value.to_string()))
+                                    }
+                                    "album" => {
+                                        meta.album = meta.album.take().or_else(|| Some(value.to_string()))
+                                    }
+                                    _ => {
+                                        crate::tags::apply_loudness_tag(meta, key, value);
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                        if &ty == b"----" {
+                            // A free-form item: `mean` (reverse-DNS owner), `name` and `data`. ReplayGain is kept in
+                            // `com.apple.iTunes` items named `replaygain_track_gain` and so on, the gapless flag as `iTunPGAP`.
+                            let kids = boxes(item).unwrap_or_default();
+                            let name = find(&kids, b"name").and_then(|n| n.get(4..));
+                            let value = find(&kids, b"data").and_then(|d| d.get(8..));
+                            if let (Some(name), Some(value)) = (name, value) {
+                                if let (Ok(name), Ok(value)) =
+                                    (core::str::from_utf8(name), core::str::from_utf8(value))
+                                {
+                                    crate::tags::apply_loudness_tag(meta, name, value);
+                                }
+                            }
+                            continue;
+                        }
                         let Some(data) = boxes(item).ok().and_then(|b| find(&b, b"data")) else { continue };
                         // version/flags (type in the low 24 bits), 4 reserved bytes, then the value.
                         let (Some(flags), Some(value)) = (data.get(0..4), data.get(8..)) else { continue };
@@ -122,6 +163,8 @@ fn parse_udta(udta: &[u8], meta: &mut Metadata, chapters: &mut Vec<Chapter>) {
                                 *num = (n > 0).then_some(n);
                                 *tot = (total > 0).then_some(total);
                             }
+                            // `pgap`: one byte, 1 when the track belongs to a gapless album.
+                            b"pgap" if value.first() == Some(&1) => meta.gapless_album = true,
                             b"covr" if !value.is_empty() => {
                                 let mime = if kind == 14 { "image/png" } else { "image/jpeg" };
                                 meta.art = Some(Art { mime: mime.to_string(), data: value.to_vec() });
@@ -150,6 +193,24 @@ fn parse_udta(udta: &[u8], meta: &mut Metadata, chapters: &mut Vec<Chapter>) {
         let _ = go(&mut cur);
         chapters.sort_by_key(|c| c.start_us);
     }
+}
+
+/// The key names of a QuickTime `keys` box (version and flags, a count, then size, namespace and name for each), without
+/// the reverse-DNS prefix some writers put in front.
+fn mdta_keys(b: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut c = Cur::new(b);
+    let Ok(()) = c.skip(4) else { return out };
+    let Ok(n) = c.u32() else { return out };
+    for _ in 0..n.min(1000) {
+        let Ok(size) = c.u32() else { break };
+        let Ok(_namespace) = c.u32() else { break };
+        let Some(len) = (size as usize).checked_sub(8) else { break };
+        let Ok(name) = c.take(len) else { break };
+        let name = String::from_utf8_lossy(name);
+        out.push(name.rsplit('.').next().unwrap_or("").to_string());
+    }
+    out
 }
 
 fn boxes(d: &[u8]) -> Result<Vec<(Fourcc, &[u8])>> {
@@ -848,5 +909,66 @@ impl<S: Source> Demuxer for Mp4Demuxer<S> {
             }
         }
         Ok(landed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    fn bx(ty: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        v.extend_from_slice(ty);
+        v.extend_from_slice(body);
+        v
+    }
+
+    /// A `data` box of UTF-8 text (type 1) or an integer (type 21).
+    fn data(kind: u32, value: &[u8]) -> Vec<u8> {
+        let mut b = kind.to_be_bytes().to_vec();
+        b.extend_from_slice(&[0; 4]);
+        b.extend_from_slice(value);
+        bx(b"data", &b)
+    }
+
+    fn freeform(name: &str, value: &str) -> Vec<u8> {
+        let mut mean = vec![0u8; 4];
+        mean.extend_from_slice(b"com.apple.iTunes");
+        let mut nm = vec![0u8; 4];
+        nm.extend_from_slice(name.as_bytes());
+        bx(b"----", &[bx(b"mean", &mean), bx(b"name", &nm), data(1, value.as_bytes())].concat())
+    }
+
+    fn udta_with(items: &[Vec<u8>]) -> Vec<u8> {
+        let ilst = bx(b"ilst", &items.concat());
+        let mut meta = vec![0u8; 4];
+        meta.extend(ilst);
+        bx(b"meta", &meta)
+    }
+
+    #[test]
+    fn replaygain_free_form_items_and_the_gapless_album_flag() {
+        let items = [
+            freeform("replaygain_track_gain", "-6.50 dB"),
+            freeform("replaygain_track_peak", "0.977"),
+            freeform("REPLAYGAIN_ALBUM_GAIN", "+0.50 dB"),
+            bx(b"pgap", &data(21, &[1])),
+            bx(&[0xA9, b'n', b'a', b'm'], &data(1, b"Song")),
+        ];
+        let mut meta = Metadata::default();
+        let mut chapters = Vec::new();
+        parse_udta(&udta_with(&items), &mut meta, &mut chapters);
+        assert_eq!(meta.loudness.track_lufs, Some(-11.5));
+        assert_eq!(meta.loudness.album_lufs, Some(-18.5));
+        assert_eq!(meta.loudness.track_peak, Some(0.977));
+        assert!(meta.gapless_album);
+        assert_eq!(meta.title.as_deref(), Some("Song"));
+        // pgap 0 and a damaged free-form item change nothing.
+        let items =
+            [bx(b"pgap", &data(21, &[0])), bx(b"----", &bx(b"name", b"\0\0\0\0replaygain_track_gain"))];
+        let mut meta = Metadata::default();
+        parse_udta(&udta_with(&items), &mut meta, &mut chapters);
+        assert!(!meta.gapless_album && meta.loudness.is_empty());
     }
 }
