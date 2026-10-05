@@ -383,6 +383,8 @@ fn parse_trak(trak: &[u8], movie_ts: u32) -> Result<Option<TrackBuild>> {
 
     // Edit list.
     let mut shift = 0i64;
+    // Playable length in media ticks according to the edit list (leading empty edit plus the first real edit).
+    let mut edit_ticks: Option<i64> = None;
     if let Some(edts) = find(&kids, b"edts") {
         if let Some(elst) = find(&boxes(edts)?, b"elst") {
             let (v, _, mut c) = full_box(elst)?;
@@ -401,6 +403,9 @@ fn parse_trak(trak: &[u8], movie_ts: u32) -> Result<Option<TrackBuild>> {
                     }
                 } else {
                     shift = -media + empty;
+                    if movie_ts != 0 && seg > 0 {
+                        edit_ticks = Some(empty + seg * timescale as i64 / movie_ts as i64);
+                    }
                     break;
                 }
             }
@@ -412,8 +417,12 @@ fn parse_trak(trak: &[u8], movie_ts: u32) -> Result<Option<TrackBuild>> {
 
     let mut track = Track { id, time_base: tb, shift, samples, cursor: 0, keys: Vec::new() };
     track.rebuild_keys();
-    let dur_ticks =
-        if mdhd_dur != 0 { mdhd_dur as i64 } else { track.samples.iter().map(|s| s.dur as i64).sum() };
+    let dur_ticks = match edit_ticks {
+        // The edit list says how much of the media plays, which excludes encoder delay and end padding.
+        Some(e) => e,
+        None if mdhd_dur != 0 => mdhd_dur as i64,
+        None => track.samples.iter().map(|s| s.dur as i64).sum(),
+    };
     let info = StreamInfo {
         id,
         kind,
@@ -648,6 +657,7 @@ impl<S: Source> Demuxer for Mp4Demuxer<S> {
             dts: t.time_base.ticks_to_us(s.dts + t.shift),
             duration: t.time_base.ticks_to_us(s.dur as i64),
             keyframe: s.key,
+            discard_end_us: 0,
             data,
         };
         t.cursor += 1;

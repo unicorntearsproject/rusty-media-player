@@ -34,6 +34,7 @@ pub enum Icon {
     Settings,
     Loader,
     Film,
+    List,
 }
 
 impl Icon {
@@ -52,6 +53,7 @@ impl Icon {
             Icon::Minimize => d::MINIMIZE,
             Icon::FolderOpen => d::FOLDER_OPEN,
             Icon::Subtitles => d::SUBTITLES,
+            Icon::List => d::LIST,
             Icon::AudioLines => d::AUDIO_LINES,
             Icon::Gauge => d::GAUGE,
             Icon::X => d::X,

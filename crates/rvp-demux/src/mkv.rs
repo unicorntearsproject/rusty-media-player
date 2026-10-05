@@ -42,6 +42,7 @@ const ID_BLOCK_GROUP: u32 = 0xA0;
 const ID_BLOCK: u32 = 0xA1;
 const ID_BLOCK_DURATION: u32 = 0x9B;
 const ID_REFERENCE_BLOCK: u32 = 0xFB;
+const ID_DISCARD_PADDING: u32 = 0x75A2;
 
 #[derive(Debug, Clone, Copy)]
 struct Hdr {
@@ -520,23 +521,40 @@ impl<S: Source> MkvDemuxer<S> {
             dts: pts, // Matroska stores no decode timestamps; decoders reorder from pts.
             duration: self.time_base.ticks_to_us(dur_ticks),
             keyframe,
+            discard_end_us: 0,
             data,
         }
     }
 
     /// Decode a `BlockGroup` body: (block bytes, duration ticks, has reference).
     fn parse_group(&self, body: &[u8], cluster_ts: i64) -> Result<Vec<Packet>> {
-        let (mut block, mut dur, mut has_ref) = (None, None, false);
+        let (mut block, mut dur, mut has_ref, mut discard_ns) = (None, None, false, 0i64);
         for (id, b) in children(body)? {
             match id {
                 ID_BLOCK => block = Some(b),
                 ID_BLOCK_DURATION => dur = Some(uint(b) as i64),
                 ID_REFERENCE_BLOCK => has_ref = true,
+                ID_DISCARD_PADDING => {
+                    // A signed big-endian integer of 1 to 8 bytes (nanoseconds).
+                    discard_ns = b
+                        .iter()
+                        .fold(if b.first().is_some_and(|x| x & 0x80 != 0) { -1i64 } else { 0 }, |a, &x| {
+                            (a << 8) | x as i64
+                        });
+                }
                 _ => {}
             }
         }
         match block {
-            Some(b) => self.parse_block(b, cluster_ts, Some(!has_ref), dur),
+            Some(b) => {
+                let mut pkts = self.parse_block(b, cluster_ts, Some(!has_ref), dur)?;
+                if discard_ns > 0 {
+                    if let Some(last) = pkts.last_mut() {
+                        last.discard_end_us = discard_ns / 1000;
+                    }
+                }
+                Ok(pkts)
+            }
             None => Ok(Vec::new()),
         }
     }

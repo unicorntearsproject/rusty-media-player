@@ -54,6 +54,7 @@ pub const SUBTITLES: &[&str] = &[
     "M7 15h4M15 15h2M7 11h2M13 11h4",
 ];
 pub const AUDIO_LINES: &[&str] = &["M2 10v3", "M6 6v11", "M10 3v18", "M14 8v7", "M18 5v13", "M22 10v3"];
+pub const LIST: &[&str] = &["M3 6h.01", "M3 12h.01", "M3 18h.01", "M8 6h13", "M8 12h13", "M8 18h13"];
 pub const GAUGE: &[&str] = &["m12 14 4-4", "M3.34 19a10 10 0 1 1 17.32 0"];
 pub const X: &[&str] = &["M18 6 6 18", "m6 6 12 12"];
 pub const CHECK: &[&str] = &["M20 6 9 17l-5-5"];

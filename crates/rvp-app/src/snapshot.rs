@@ -76,6 +76,19 @@ impl App {
                 v.iter().map(|t| format!("{{\"id\":{},\"label\":{}}}", t.id, esc(&t.label))).collect();
             format!("[{}]", items.join(","))
         };
+        let pl: alloc::vec::Vec<String> = m
+            .playlist
+            .iter()
+            .map(|e| format!("{{\"id\":{},\"label\":{},\"current\":{}}}", e.id, esc(&e.label), e.current))
+            .collect();
+        j += &format!(
+            "\"playlist\":[{}],\"repeat\":{},\"shuffle\":{},\"loop_a\":{},\"loop_b\":{},",
+            pl.join(","),
+            m.repeat,
+            m.shuffle,
+            m.loop_a.map_or("null".to_string(), |v| v.to_string()),
+            m.loop_b.map_or("null".to_string(), |v| v.to_string()),
+        );
         j += &format!(
             "\"audio_tracks\":{},\"selected_audio\":{},\"subtitle_tracks\":{},\"selected_subtitle\":{},\"subtitle\":{},",
             tracks(&m.audio_tracks),

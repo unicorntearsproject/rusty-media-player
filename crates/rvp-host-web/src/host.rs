@@ -156,7 +156,8 @@ impl Host for WebHost {
         match req {
             OpenRequest::Id(id) => self
                 .files
-                .remove(&id)
+                .get(&id)
+                .cloned()
                 .map(WebSource::new)
                 .ok_or_else(|| HostError(format!("no dropped file `{id}`"))),
             OpenRequest::Pick => Err(HostError("the page shows the file picker itself".into())),

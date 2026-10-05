@@ -2,13 +2,13 @@
 //! [`InputEvent`]s, and exposes `tick` and a JSON `snapshot` for tests.
 use crate::audio::{JsAudio, WebAudio};
 use crate::host::{WebClock, WebHost, WebInput, WebStorage, WebSurface};
-use crate::source::WebSource;
 use rvp_app::{App, Effect};
 use rvp_core::{AudioDecoder, CodecFactory, Error, Result as CoreResult, StreamInfo, VideoDecoder};
 use rvp_host::{FrameSink, InputEvent, Key, Modifiers, PointerButton};
 use rvp_ui::{Cursor, UiConfig};
 use std::collections::HashMap;
 use std::rc::Rc;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 /// The decoders linked into the browser build.
@@ -90,9 +90,28 @@ impl WebPlayer {
 
     /// Open a `File` (picker or drop) and start playing it.
     pub fn open_file(&mut self, file: web_sys::File) {
+        self.open_files(vec![file.into()], false);
+    }
+
+    /// Open several files (picker or drop): they become the playlist and the first one plays, or with `append`
+    /// they are added to the end. Subtitle files (.srt, .vtt) attach to the video that is playing.
+    pub fn open_files(&mut self, files: Vec<JsValue>, append: bool) {
         self.host.input.0.push_back(InputEvent::DragOver(false));
-        self.app.open(&mut self.host, WebSource::new(file));
+        let items: Vec<(String, String)> = files
+            .into_iter()
+            .filter_map(|f| f.dyn_into::<web_sys::File>().ok())
+            .map(|f| {
+                let name = f.name();
+                (self.stash_file(f), name)
+            })
+            .collect();
+        self.app.open_items(&mut self.host, &items, append);
         self.app.pump(&mut self.host);
+    }
+
+    /// Write what must survive a reload (the resume position). Call before the page unloads.
+    pub fn save_state(&mut self) {
+        self.app.save_state(&mut self.host);
     }
 
     /// Remember a dropped file under an id (for hosts that open by id); returns the id.
@@ -191,6 +210,7 @@ impl WebPlayer {
         for e in self.app.take_effects() {
             match e {
                 Effect::PickFile => v.push("pick".into()),
+                Effect::AddFiles => v.push("add".into()),
             }
         }
         if let Some(on) = self.host.surface.fullscreen_request.take() {

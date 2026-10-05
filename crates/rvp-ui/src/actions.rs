@@ -57,6 +57,26 @@ pub enum Action {
     SetLoopB,
     /// Clear the A-B loop.
     ClearLoop,
+    /// The next playlist item.
+    Next,
+    /// The previous playlist item (or the start of this one, when it has played for a while).
+    Prev,
+    /// Off, then repeat all, then repeat one.
+    CycleRepeat,
+    /// Shuffle on or off.
+    ToggleShuffle,
+    /// Play a playlist item.
+    PlayItem(u32),
+    /// Remove a playlist item.
+    RemoveItem(u32),
+    /// Move a playlist item earlier (-1) or later (+1).
+    MoveItem(u32, i8),
+    /// Empty the playlist.
+    ClearPlaylist,
+    /// Pick more files to add to the playlist.
+    AddFiles,
+    /// Show the playlist menu.
+    ShowPlaylist,
 }
 
 /// The physical key of a shortcut.
@@ -124,6 +144,11 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::Char('.'), Action::FrameStep(1)),
     sc(ShortKey::Char(','), Action::FrameStep(-1)),
     sc(ShortKey::Char('i'), Action::LoopMark),
+    sc(ShortKey::Char('n'), Action::Next),
+    sc(ShortKey::Char('p'), Action::Prev),
+    sc(ShortKey::Char('r'), Action::CycleRepeat),
+    sc(ShortKey::Char('z'), Action::ToggleShuffle),
+    sc(ShortKey::Char('q'), Action::ShowPlaylist),
 ];
 
 /// The action bound to a key press, if any. Browser-style combinations (Ctrl, Alt or Meta with a letter)
@@ -344,6 +369,49 @@ pub fn tracks_menu(model: &UiModel) -> Vec<MenuItem> {
     v
 }
 
+/// Playlist rows shown at most (the list scrolls by showing the part around the current item).
+const PLAYLIST_ROWS: usize = 12;
+
+/// The playlist menu: the items (click to play), then what can be done with the list.
+pub fn playlist_menu(model: &UiModel) -> Vec<MenuItem> {
+    let mut v: Vec<MenuItem> = Vec::new();
+    let n = model.playlist.len();
+    if n == 0 {
+        v.push(MenuItem::act("The playlist is empty", Action::AddFiles).enabled(false));
+    } else {
+        let cur = model.playlist.iter().position(|e| e.current).unwrap_or(0);
+        let first = cur.saturating_sub(PLAYLIST_ROWS / 3).min(n.saturating_sub(PLAYLIST_ROWS));
+        let last = (first + PLAYLIST_ROWS).min(n);
+        if first > 0 {
+            v.push(MenuItem::heading(&alloc::format!("{first} earlier")));
+        }
+        for e in &model.playlist[first..last] {
+            let mut m = MenuItem::act(&e.label, Action::PlayItem(e.id)).checked(e.current);
+            m.hint.clear();
+            v.push(m);
+        }
+        if last < n {
+            v.push(MenuItem::heading(&alloc::format!("{} more", n - last)));
+        }
+    }
+    let cur_id = model.playlist.iter().find(|e| e.current).map(|e| e.id);
+    let has_cur = cur_id.is_some();
+    let id = cur_id.unwrap_or(0);
+    v.push(MenuItem::act("Add files\u{2026}", Action::AddFiles).sep());
+    v.push(MenuItem::act("Move current up", Action::MoveItem(id, -1)).enabled(has_cur));
+    v.push(MenuItem::act("Move current down", Action::MoveItem(id, 1)).enabled(has_cur));
+    v.push(MenuItem::act("Remove current", Action::RemoveItem(id)).enabled(has_cur));
+    v.push(MenuItem::act("Clear playlist", Action::ClearPlaylist).enabled(n > 0));
+    let repeat = match model.repeat {
+        1 => "Repeat: all",
+        2 => "Repeat: one",
+        _ => "Repeat: off",
+    };
+    v.push(MenuItem::act(repeat, Action::CycleRepeat).sep());
+    v.push(MenuItem::act(if model.shuffle { "Shuffle: on" } else { "Shuffle: off" }, Action::ToggleShuffle));
+    v
+}
+
 /// The right-click menu. It contains an entry for every shortcut in [`SHORTCUTS`].
 pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
     let has = model.has_media();
@@ -389,6 +457,18 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::parent("Volume", volume),
         MenuItem::parent("Audio track", audio_menu(model)).sep().enabled(has),
         MenuItem::parent("Subtitles", subtitle_menu(model)).enabled(has),
+        MenuItem::act("Show playlist", Action::ShowPlaylist).sep(),
+        MenuItem::parent("Playlist", {
+            let mut v = alloc::vec![
+                MenuItem::act("Next", Action::Next).enabled(has),
+                MenuItem::act("Previous", Action::Prev).enabled(has)
+            ];
+            v.extend(playlist_menu(model).into_iter().map(|mut m| {
+                m.separator = false;
+                m
+            }));
+            v
+        }),
         MenuItem::act(
             if model.fullscreen { "Leave fullscreen" } else { "Fullscreen" },
             Action::ToggleFullscreen

@@ -5,6 +5,8 @@ import { RvpAudio } from "./audio.js";
 
 const canvas = document.getElementById("screen");
 const fileInput = document.getElementById("file");
+// A second, hidden picker for "add to playlist" so that it never replaces the playlist.
+const addInput = document.getElementById("file-add");
 const statusEl = document.getElementById("status");
 
 await init();
@@ -35,6 +37,9 @@ function effects() {
     if (e === "pick") {
       fileInput.value = "";
       fileInput.click();
+    } else if (e === "add") {
+      addInput.value = "";
+      addInput.click();
     } else if (e.startsWith("fullscreen:")) {
       setFullscreen(e.endsWith("true"));
     }
@@ -54,18 +59,24 @@ document.addEventListener("fullscreenchange", () => {
   fit();
 });
 
-function openFile(file) {
+function openFiles(files, append = false) {
+  files = Array.from(files || []);
+  if (!files.length) return;
   audio.unlock();
-  player.open_file(file);
-  document.title = `${file.name} – Rusty Video Player`;
-  statusEl.textContent = `Opened ${file.name}`;
+  player.open_files(files, append);
+  const first = files.find((f) => !/\.(srt|vtt)$/i.test(f.name)) || files[0];
+  document.title = `${first.name} – Rusty Video Player`;
+  statusEl.textContent = files.length > 1 ? `Opened ${files.length} files` : `Opened ${first.name}`;
   if (audio.suspended) player.toast("Click anywhere to turn the sound on.");
 }
+const openFile = (file) => openFiles([file]);
 
-fileInput.addEventListener("change", () => {
-  const f = fileInput.files && fileInput.files[0];
-  if (f) openFile(f);
-});
+fileInput.addEventListener("change", () => openFiles(fileInput.files));
+addInput.addEventListener("change", () => openFiles(addInput.files, true));
+
+// Keep the resume position safe when the page goes away.
+window.addEventListener("pagehide", () => player.save_state());
+document.addEventListener("visibilitychange", () => { if (document.hidden) player.save_state(); });
 
 // ---- pointer --------------------------------------------------------------------------------------------
 
@@ -143,8 +154,8 @@ window.addEventListener("drop", (e) => {
   e.preventDefault();
   dragDepth = 0;
   player.drag_over(false);
-  const f = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f) openFile(f);
+  // A drop plays what was dropped (several files make a playlist); Shift+drop adds to the current playlist.
+  openFiles(e.dataTransfer.files, e.shiftKey);
 });
 
 // ---- frame loop -----------------------------------------------------------------------------------------
@@ -172,6 +183,8 @@ window.rvp = {
   ready: true,
   snapshot: () => JSON.parse(player.snapshot()),
   openFile,
+  openFiles,
+  saveState: () => player.save_state(),
   audio: () => audio.debug(),
   /** RGBA bytes of a canvas region (physical pixels). */
   pixels: (x, y, w, h) => Array.from(canvas.getContext("2d").getImageData(x, y, w, h).data),

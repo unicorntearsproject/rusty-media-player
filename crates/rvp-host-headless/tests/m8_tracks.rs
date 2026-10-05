@@ -43,8 +43,9 @@ const CUES: [(i64, i64, &str); 3] = [
 fn changes(r: &rvp_host_headless::PlayReport) -> Vec<(i64, Option<String>)> {
     r.events
         .iter()
-        .map(|(_, e)| match e {
-            SessionEvent::Subtitle { at_us, text } => (*at_us, text.clone()),
+        .filter_map(|(_, e)| match e {
+            SessionEvent::Subtitle { at_us, text } => Some((*at_us, text.clone())),
+            _ => None,
         })
         .collect()
 }

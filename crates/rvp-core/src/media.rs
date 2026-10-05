@@ -94,6 +94,9 @@ pub struct Packet {
     pub duration: Timestamp,
     /// True if decoding can start here.
     pub keyframe: bool,
+    /// Microseconds at the end of this packet's decoded audio that must be discarded (Matroska `DiscardPadding`,
+    /// used by Opus to cut the encoder's end padding). Zero for everything else.
+    pub discard_end_us: Timestamp,
     /// Compressed payload.
     pub data: Vec<u8>,
 }

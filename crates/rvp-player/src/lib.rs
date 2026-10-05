@@ -8,9 +8,11 @@ extern crate std;
 
 pub mod audio;
 pub mod exec;
+pub mod playlist;
 pub mod session;
 
 pub use audio::{AudioOut, TraceEntry};
+pub use playlist::{Item as PlaylistItem, Playlist, Repeat};
 pub use session::{
     EXTERNAL_TRACK_BASE, Session, SessionEvent, SessionState, SubtitleTrack, VideoStats, VideoTraceEntry,
     language_name,

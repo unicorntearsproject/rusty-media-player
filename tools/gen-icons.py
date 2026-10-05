@@ -10,7 +10,7 @@ import re, sys, urllib.request, pathlib
 ICONS = [
     "play", "pause", "skip-back", "skip-forward", "rewind", "fast-forward", "volume-2", "volume-1", "volume-x",
     "maximize", "minimize", "folder-open", "subtitles", "audio-lines", "gauge", "x", "check", "chevron-right",
-    "circle-alert", "settings-2", "loader-circle", "film",
+    "circle-alert", "settings-2", "loader-circle", "film", "list",
 ]
 BASE = "https://cdn.jsdelivr.net/npm/lucide-static/icons/{}.svg"
 

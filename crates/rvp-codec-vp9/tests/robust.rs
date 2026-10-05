@@ -144,7 +144,7 @@ fn oversized_pictures_are_refused_without_allocating() {
         ..stream_info_template()
     };
     let mut dec = rvp_codec_vp9::vp9_decoder(&info).unwrap();
-    let pkt = Packet { stream_id: 1, pts: 0, dts: 0, duration: 0, keyframe: true, data };
+    let pkt = Packet { stream_id: 1, pts: 0, dts: 0, duration: 0, keyframe: true, discard_end_us: 0, data };
     assert!(matches!(dec.send_packet(&pkt), Err(rvp_core::Error::Unsupported(_))));
 }
 

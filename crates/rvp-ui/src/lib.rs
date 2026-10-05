@@ -26,5 +26,5 @@ pub mod ui;
 
 pub use actions::{Action, MenuItem, SHORTCUTS, SPEEDS, Shortcut};
 pub use gfx::{FrameBuffer, Paint, RectF};
-pub use model::{MediaState, TrackItem, UiModel, format_time};
+pub use model::{MediaState, PlaylistEntry, TrackItem, UiModel, format_time};
 pub use ui::{Cursor, HIDE_AFTER_US, Layout, Target, Ui, UiConfig};

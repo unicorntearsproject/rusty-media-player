@@ -20,9 +20,20 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use rvp_core::{CodecFactory, Error, Timestamp};
-use rvp_host::{FrameSink, Host, InputEvent, OpenRequest, Rect};
-use rvp_player::{Session, SessionState};
-use rvp_ui::{Action, Cursor, FrameBuffer, MediaState, SPEEDS, TrackItem, Ui, UiConfig, UiModel};
+use rvp_host::{FrameSink, Host, InputEvent, OpenRequest, Rect, Storage};
+use rvp_player::{Playlist, Repeat, Session, SessionEvent, SessionState};
+use rvp_ui::{
+    Action, Cursor, FrameBuffer, MediaState, PlaylistEntry, SPEEDS, TrackItem, Ui, UiConfig, UiModel,
+};
+
+/// A saved resume position is only used when the file is longer than this past it, microseconds.
+const RESUME_MIN_REMAINING_US: Timestamp = 10_000_000;
+/// And only when it is at least this far in.
+const RESUME_MIN_POSITION_US: Timestamp = 5_000_000;
+/// How often the position is written to storage while playing, microseconds.
+const RESUME_SAVE_EVERY_US: Timestamp = 5_000_000;
+/// A previous-item request this far into an item restarts it instead of going back.
+const PREV_RESTART_US: Timestamp = 3_000_000;
 
 /// Granularity at which a moving position triggers a redraw (20 Hz).
 const LIVE_REDRAW_US: Timestamp = 50_000;
@@ -32,6 +43,8 @@ const LIVE_REDRAW_US: Timestamp = 50_000;
 pub enum Effect {
     /// Show the file picker (in a browser this must happen inside the user's input event).
     PickFile,
+    /// Show the file picker to add files to the playlist.
+    AddFiles,
 }
 
 /// The application.
@@ -58,6 +71,12 @@ pub struct App {
     warnings_seen: usize,
     loop_a: Option<Timestamp>,
     loop_b: Option<Timestamp>,
+    playlist: Playlist,
+    /// The playlist item queued to follow the current one gaplessly.
+    queued: Option<u32>,
+    resume_key: Option<String>,
+    resume_checked: bool,
+    last_resume_save: Timestamp,
     now: Timestamp,
     frames_drawn: u64,
     perf: Perf,
@@ -107,6 +126,11 @@ impl App {
             warnings_seen: 0,
             loop_a: None,
             loop_b: None,
+            playlist: Playlist::new(),
+            queued: None,
+            resume_key: None,
+            resume_checked: true,
+            last_resume_save: 0,
             now: 0,
             frames_drawn: 0,
             perf: Perf::default(),
@@ -158,7 +182,13 @@ impl App {
         self.fullscreen = on;
     }
 
-    /// Open `source` and start playing it, replacing the current item.
+    /// The playlist.
+    pub fn playlist(&self) -> &Playlist {
+        &self.playlist
+    }
+
+    /// Open `source` and start playing it, replacing the playlist with that one item. (A subtitle file joins
+    /// the video that is playing instead.)
     pub fn open<H>(&mut self, host: &mut H, source: H::Source)
     where
         H: Host<Video = FrameSink>,
@@ -166,9 +196,7 @@ impl App {
     {
         use rvp_host::Source;
         let now = host.clock().now_us();
-        // A subtitle file dropped onto a playing video joins it instead of replacing it.
-        let lower = source.name().to_ascii_lowercase();
-        if (lower.ends_with(".srt") || lower.ends_with(".vtt")) && self.session.is_some() {
+        if is_subtitle_name(source.name()) && self.session.is_some() {
             let name = source.name().to_string();
             if let Some(s) = &mut self.session {
                 s.add_subtitle_source(source, &name);
@@ -177,10 +205,102 @@ impl App {
             self.refresh_model(now);
             return;
         }
+        self.save_resume(host, true);
+        self.playlist.clear();
+        let id = self.playlist.add(source.name(), "");
+        self.playlist.set_current(id);
+        self.start(host, source, id, true);
+    }
+
+    /// Open files by host id (`(id, display name)`): they become the playlist and the first one plays, or with
+    /// `append` they join the end of the playlist (and play if nothing is playing). Subtitle files attach to the
+    /// video that is playing.
+    pub fn open_items<H>(&mut self, host: &mut H, items: &[(String, String)], append: bool)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
+        let now = host.clock().now_us();
+        let (subs, media): (Vec<_>, Vec<_>) = items.iter().partition(|(_, name)| is_subtitle_name(name));
+        let idle = !self.model.has_media() || self.model.state == MediaState::Failed;
+        if !append || idle {
+            if !media.is_empty() {
+                self.save_resume(host, true);
+            }
+            if !append && !media.is_empty() {
+                self.playlist.clear();
+            }
+        }
+        let mut first_new = None;
+        for (id, name) in &media {
+            let item = self.playlist.add(name, id);
+            first_new.get_or_insert(item);
+        }
+        if let Some(first) = first_new {
+            if !append || idle {
+                self.play_item(host, first);
+            } else {
+                self.ui.show_toast(&format!("Added {} to the playlist", media.len()), now);
+                self.queued = None; // the end of the list moved: ask again
+            }
+        }
+        for (id, name) in subs {
+            match rvp_core::task::block_on(host.open(OpenRequest::Id(id.clone()))) {
+                Ok(src) => {
+                    if let Some(s) = &mut self.session {
+                        s.add_subtitle_source(src, name);
+                        self.ui.show_toast(&format!("Subtitles: {name}"), now);
+                    } else {
+                        self.ui.show_toast("Open a video first, then add its subtitles.", now);
+                    }
+                }
+                Err(e) => self.ui.show_toast(&format!("Couldn't open that: {e}"), now),
+            }
+        }
+        self.refresh_model(now);
+    }
+
+    /// Start playing playlist item `id`.
+    fn play_item<H>(&mut self, host: &mut H, id: u32)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
+        let now = host.clock().now_us();
+        let Some(item) = self.playlist.get(id).cloned() else { return };
+        if item.source.is_empty() {
+            self.ui.show_toast("That file can't be opened again; pick it once more.", now);
+            return;
+        }
+        match rvp_core::task::block_on(host.open(OpenRequest::Id(item.source.clone()))) {
+            Ok(src) => {
+                self.save_resume(host, true);
+                self.playlist.set_current(id);
+                self.start(host, src, id, true);
+            }
+            Err(e) => {
+                self.ui.show_toast(&format!("Couldn't open {}: {e}", item.name), now);
+            }
+        }
+    }
+
+    /// Replace the session with one playing `source` (playlist item `id`).
+    fn start<H>(&mut self, host: &mut H, source: H::Source, id: u32, resume: bool)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
+        use rvp_host::Source;
+        let now = host.clock().now_us();
         self.title = source.name().to_string();
+        self.resume_key = Some(format!("resume:{}", self.title));
+        self.resume_checked = !resume;
+        self.last_resume_save = now;
         self.loop_a = None;
         self.loop_b = None;
+        self.queued = None;
         let mut s = Session::new(source, self.codecs.clone());
+        s.set_tag(id);
         s.set_volume(self.volume);
         s.set_muted(self.muted);
         s.set_rate(self.rate, now);
@@ -191,6 +311,123 @@ impl App {
         self.force_draw = true;
         self.warnings_seen = 0;
         self.refresh_model(now);
+    }
+
+    /// Write the playback position of the current file to storage (or forget it near the end).
+    fn save_resume<H: Host<Video = FrameSink>>(&mut self, host: &mut H, force: bool) {
+        let (Some(key), Some(s)) = (self.resume_key.clone(), &self.session) else { return };
+        if !self.resume_checked {
+            return; // nothing has played yet: do not overwrite the saved position with zero
+        }
+        let now = host.clock().now_us();
+        if !force && now - self.last_resume_save < RESUME_SAVE_EVERY_US {
+            return;
+        }
+        self.last_resume_save = now;
+        let (Some(dur), pos) = (s.duration_us(), s.position_us(now)) else { return };
+        let value: Vec<u8> = if s.state() == SessionState::Ended || pos + RESUME_MIN_REMAINING_US > dur {
+            Vec::new() // finished (or nearly): next time starts from the beginning
+        } else {
+            (pos / 1000).to_le_bytes().to_vec()
+        };
+        rvp_core::task::block_on(host.storage().store(&key, &value));
+    }
+
+    /// Persist what must survive a page reload (a host calls this before unloading).
+    pub fn save_state<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
+        self.save_resume(host, true);
+    }
+
+    /// Once the file is open, jump to the position saved last time.
+    fn check_resume<H: Host<Video = FrameSink>>(&mut self, host: &mut H, now: Timestamp) {
+        if self.resume_checked {
+            return;
+        }
+        let Some(s) = &mut self.session else { return };
+        let Some(dur) = s.duration_us() else {
+            if s.state() != SessionState::Opening {
+                self.resume_checked = true;
+            }
+            return;
+        };
+        self.resume_checked = true;
+        let Some(key) = self.resume_key.clone() else { return };
+        let Some(bytes) = rvp_core::task::block_on(host.storage().load(&key)) else { return };
+        let Ok(raw) = <[u8; 8]>::try_from(bytes.as_slice()) else { return };
+        let pos = i64::from_le_bytes(raw) * 1000;
+        if pos >= RESUME_MIN_POSITION_US && pos + RESUME_MIN_REMAINING_US <= dur {
+            s.seek(pos);
+            self.ui.show_toast(&format!("Resumed at {}", rvp_ui::format_time(pos)), now);
+        }
+    }
+
+    /// Gapless chaining and playlist upkeep after each session tick.
+    fn run_playlist<H>(&mut self, host: &mut H, now: Timestamp)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
+        // Events from the session.
+        let mut started = None;
+        let mut failed = Vec::new();
+        if let Some(s) = &mut self.session {
+            while let Some(e) = s.poll_event() {
+                match e {
+                    SessionEvent::ItemStarted { tag } => started = Some(tag),
+                    SessionEvent::ItemFailed { tag, error } => failed.push((tag, error)),
+                    SessionEvent::Subtitle { .. } => {}
+                }
+            }
+        }
+        for (tag, error) in failed {
+            let name = self.playlist.get(tag).map(|i| i.name.clone()).unwrap_or_default();
+            self.ui.show_toast(&format!("Skipped {name}: {}", friendly_error(&error)), now);
+            self.playlist.remove(tag);
+            self.queued = None;
+        }
+        if let Some(tag) = started {
+            if self.playlist.set_current(tag) {
+                self.title = self.playlist.get(tag).map(|i| i.name.clone()).unwrap_or_default();
+                self.loop_a = None;
+                self.loop_b = None;
+                self.warnings_seen = 0;
+                self.queued = None;
+                self.resume_key = Some(format!("resume:{}", self.title));
+                self.resume_checked = true;
+                self.last_resume_save = now;
+                self.base_dirty = true;
+                self.ui.show_toast(&format!("Now playing {}", self.title), now);
+            }
+        }
+        // Queue the next item when the current one is about to run out.
+        let want = self.session.as_ref().is_some_and(|s| s.wants_next(now));
+        if want && self.queued.is_none() {
+            if let Some(next) = self.playlist.peek_next() {
+                let src = self.playlist.get(next).map(|i| i.source.clone()).filter(|s| !s.is_empty());
+                if let Some(src) = src {
+                    match rvp_core::task::block_on(host.open(OpenRequest::Id(src))) {
+                        Ok(source) => {
+                            if let Some(s) = &mut self.session {
+                                s.queue_next(source, next);
+                            }
+                            self.queued = Some(next);
+                        }
+                        Err(e) => {
+                            let name = self.playlist.get(next).map(|i| i.name.clone()).unwrap_or_default();
+                            self.ui.show_toast(&format!("Skipped {name}: {e}"), now);
+                            self.playlist.remove(next);
+                        }
+                    }
+                }
+            }
+        }
+        // The session ended with nothing queued (a failed or late prefetch): move on by hand.
+        let ended = self.session.as_ref().is_some_and(|s| s.state() == SessionState::Ended);
+        if ended && self.queued.is_none() {
+            if let Some(next) = self.playlist.advance() {
+                self.play_item(host, next);
+            }
+        }
     }
 
     /// Process pending input right away (a browser host calls this inside the DOM event so the file picker
@@ -240,6 +477,10 @@ impl App {
             s.tick(host);
         }
         self.session = session;
+        let tn = host.clock().now_us();
+        self.check_resume(host, tn);
+        self.run_playlist(host, tn);
+        self.save_resume(host, false);
         let t1 = host.clock().now_us();
         self.now = t1;
         self.refresh_model(t1);
@@ -260,7 +501,11 @@ impl App {
     // ---- actions ---------------------------------------------------------------------------------------
 
     /// Apply one user action to the player.
-    pub fn apply<H: Host<Video = FrameSink>>(&mut self, host: &mut H, action: Action, now: Timestamp) {
+    pub fn apply<H>(&mut self, host: &mut H, action: Action, now: Timestamp)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
         match action {
             Action::OpenFile => self.effects.push(Effect::PickFile),
             Action::PlayPause => {
@@ -331,6 +576,69 @@ impl App {
             Action::SpeedStep(d) => self.set_speed(Ui::next_speed(self.rate as f32, d) as f64, now),
             Action::SetSpeed(r) => self.set_speed(r as f64, now),
             Action::ResetSpeed => self.set_speed(1.0, now),
+            Action::Next => match self.playlist.next() {
+                Some(id) => self.play_item(host, id),
+                None => self.ui.show_toast("That's the end of the playlist.", now),
+            },
+            Action::Prev => {
+                let pos = self.session.as_ref().map_or(0, |s| s.position_us(now));
+                if pos > PREV_RESTART_US || self.playlist.len() <= 1 {
+                    if let Some(s) = &mut self.session {
+                        s.seek(0);
+                    }
+                } else if let Some(id) = self.playlist.prev() {
+                    self.play_item(host, id);
+                }
+            }
+            Action::CycleRepeat => {
+                let r = self.playlist.repeat().cycled();
+                self.playlist.set_repeat(r);
+                self.requeue();
+                self.ui.show_toast(
+                    match r {
+                        Repeat::Off => "Repeat off",
+                        Repeat::All => "Repeat all",
+                        Repeat::One => "Repeat one",
+                    },
+                    now,
+                );
+            }
+            Action::ToggleShuffle => {
+                let on = !self.playlist.shuffle();
+                self.playlist.set_shuffle(on, now as u64);
+                self.requeue();
+                self.ui.show_toast(if on { "Shuffle on" } else { "Shuffle off" }, now);
+            }
+            Action::PlayItem(id) => self.play_item(host, id),
+            Action::RemoveItem(id) => {
+                let was_current = self.playlist.remove(id);
+                self.requeue();
+                if was_current {
+                    match self.playlist.current_id() {
+                        Some(next) => self.play_item(host, next),
+                        None => {
+                            self.session = None;
+                            host.video().clear();
+                            self.base_dirty = true;
+                            self.title.clear();
+                        }
+                    }
+                }
+            }
+            Action::MoveItem(id, d) => {
+                self.playlist.move_item(id, d as i32);
+                self.requeue();
+            }
+            Action::ClearPlaylist => {
+                self.playlist.clear();
+                self.requeue();
+                self.ui.show_toast("Playlist cleared", now);
+            }
+            Action::AddFiles => self.effects.push(Effect::AddFiles),
+            Action::ShowPlaylist => {
+                let m = self.model.clone();
+                self.ui.open_playlist_popup(&m);
+            }
             Action::FrameStep(d) => {
                 if let Some(s) = &mut self.session {
                     if matches!(s.state(), SessionState::Playing | SessionState::Buffering) {
@@ -431,6 +739,14 @@ impl App {
         self.ui.show_toast("Loop cleared", now);
     }
 
+    /// The play order changed: forget the item queued as next so the right one is queued.
+    fn requeue(&mut self) {
+        if let Some(s) = &mut self.session {
+            s.cancel_next();
+        }
+        self.queued = None;
+    }
+
     fn select_audio(&mut self, id: u32, label: &str, now: Timestamp) {
         if let Some(s) = &mut self.session {
             s.select_audio(id, now);
@@ -485,6 +801,19 @@ impl App {
             fullscreen: self.fullscreen,
             ..UiModel::default()
         };
+        let cur = self.playlist.current_id();
+        m.playlist = self
+            .playlist
+            .items()
+            .iter()
+            .map(|i| PlaylistEntry { id: i.id, label: i.name.clone(), current: Some(i.id) == cur })
+            .collect();
+        m.repeat = match self.playlist.repeat() {
+            Repeat::Off => 0,
+            Repeat::All => 1,
+            Repeat::One => 2,
+        };
+        m.shuffle = self.playlist.shuffle();
         if let Some(s) = &self.session {
             m.title = self.title.clone();
             m.duration_us = s.duration_us();
@@ -525,6 +854,12 @@ impl App {
                 m.subtitle_tracks.push(TrackItem { id: t.id, label: t.label });
             }
             m.selected_subtitle = s.selected_subtitle();
+            m.repeat = match self.playlist.repeat() {
+                Repeat::Off => 0,
+                Repeat::All => 1,
+                Repeat::One => 2,
+            };
+            m.shuffle = self.playlist.shuffle();
             m.subtitle = s.subtitle_text().map(|t| t.to_string());
             let warnings = s.warnings();
             if warnings.len() > self.warnings_seen {
@@ -610,6 +945,12 @@ impl App {
         self.frames_drawn += 1;
         true
     }
+}
+
+/// True for the names of sidecar subtitle files.
+fn is_subtitle_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.ends_with(".srt") || n.ends_with(".vtt")
 }
 
 /// An error in the app's voice.

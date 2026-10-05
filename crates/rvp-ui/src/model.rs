@@ -38,6 +38,17 @@ pub struct TrackItem {
     pub label: String,
 }
 
+/// One row of the playlist menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistEntry {
+    /// Playlist item id.
+    pub id: u32,
+    /// Display name.
+    pub label: String,
+    /// The item being played.
+    pub current: bool,
+}
+
 /// Everything the UI needs to draw and to build its menus.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct UiModel {
@@ -69,6 +80,12 @@ pub struct UiModel {
     pub selected_subtitle: Option<u32>,
     /// The subtitle text on screen right now.
     pub subtitle: Option<String>,
+    /// The playlist, in list order.
+    pub playlist: Vec<PlaylistEntry>,
+    /// Repeat mode: 0 off, 1 all, 2 one.
+    pub repeat: u8,
+    /// Shuffle on.
+    pub shuffle: bool,
     /// A-B loop start, microseconds.
     pub loop_a: Option<i64>,
     /// A-B loop end, microseconds.

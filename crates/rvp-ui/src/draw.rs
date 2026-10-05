@@ -494,6 +494,7 @@ impl Ui {
                         }
                     }
                     Btn::Tracks => Icon::Subtitles,
+                    Btn::Playlist => Icon::List,
                     Btn::Open => Icon::FolderOpen,
                     Btn::Fullscreen => {
                         if model.fullscreen {
@@ -591,6 +592,7 @@ impl Ui {
             Btn::Mute => (if model.muted { "Unmute" } else { "Mute" }, "M"),
             Btn::Speed => ("Playback speed", "[ ]"),
             Btn::Tracks => ("Audio and subtitles", "A / S"),
+            Btn::Playlist => ("Playlist", "Q"),
             Btn::Open => ("Open file", "O"),
             Btn::Fullscreen => (if model.fullscreen { "Leave fullscreen" } else { "Fullscreen" }, "F"),
             Btn::Welcome => return None,

@@ -51,6 +51,8 @@ pub enum Btn {
     Speed,
     /// Audio and subtitle menu.
     Tracks,
+    /// The playlist menu.
+    Playlist,
     /// Open a file.
     Open,
     /// Fullscreen.
@@ -60,8 +62,17 @@ pub enum Btn {
 }
 
 /// Tab order of the transport bar.
-const FOCUS_ORDER: [Btn; 8] =
-    [Btn::Play, Btn::Back, Btn::Fwd, Btn::Mute, Btn::Speed, Btn::Tracks, Btn::Open, Btn::Fullscreen];
+const FOCUS_ORDER: [Btn; 9] = [
+    Btn::Play,
+    Btn::Back,
+    Btn::Fwd,
+    Btn::Mute,
+    Btn::Speed,
+    Btn::Tracks,
+    Btn::Playlist,
+    Btn::Open,
+    Btn::Fullscreen,
+];
 
 /// What the pointer is over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -365,6 +376,8 @@ impl Ui {
         l.buttons.push((Btn::Open, RectF::new(rx - b, cy - b * 0.5, b, b)));
         rx -= b + 2.0 * s;
         l.buttons.push((Btn::Tracks, RectF::new(rx - b, cy - b * 0.5, b, b)));
+        rx -= b + 2.0 * s;
+        l.buttons.push((Btn::Playlist, RectF::new(rx - b, cy - b * 0.5, b, b)));
         rx -= b + 6.0 * s;
         let pw = 56.0 * s;
         l.buttons.push((Btn::Speed, RectF::new(rx - pw, cy - 14.0 * s, pw, 28.0 * s)));
@@ -610,7 +623,14 @@ impl Ui {
                     self.pressed = None;
                 }
             }
-            PointerButton::Back | PointerButton::Forward => {}
+            PointerButton::Back => {
+                self.menu.clear();
+                out.push(Action::Prev);
+            }
+            PointerButton::Forward => {
+                self.menu.clear();
+                out.push(Action::Next);
+            }
         }
     }
 
@@ -694,6 +714,7 @@ impl Ui {
                     self.open_popup(actions::tracks_menu(model), r);
                 }
             }
+            Btn::Playlist => self.open_playlist_popup(model),
         }
     }
 
@@ -874,6 +895,14 @@ impl Ui {
         let y = anchor.y - 10.0 * self.scale - p.rect.h;
         self.place(&mut p, x, y);
         self.menu = alloc::vec![p];
+    }
+
+    /// Open the playlist menu above its button.
+    pub fn open_playlist_popup(&mut self, model: &UiModel) {
+        let l = self.layout(model);
+        if let Some(r) = l.rect_of(Btn::Playlist) {
+            self.open_popup(actions::playlist_menu(model), r);
+        }
     }
 
     fn open_key_menu(&mut self, model: &UiModel) {

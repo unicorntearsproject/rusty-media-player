@@ -44,6 +44,8 @@ const WANT_AUDIO: AudioParams = AudioParams { sample_rate: 48_000, channels: 2 }
 const TICK_US: i64 = 10_000;
 /// Wall-clock budget for the task polling part of a tick.
 const BUDGET_US: i64 = 8_000;
+/// The caller should queue the next item when this little of the current one is left, microseconds.
+const NEXT_LEAD_US: i64 = 12_000_000;
 
 /// Playback state of a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +121,26 @@ pub enum SessionEvent {
         /// The new text, if any.
         text: Option<String>,
     },
+    /// Another item began to be heard (gapless chain or after the previous one ended). `tag` is the value given
+    /// to [`Session::queue_next`].
+    ItemStarted {
+        /// The caller's tag for the item.
+        tag: u32,
+    },
+    /// The queued next item could not be opened and was dropped.
+    ItemFailed {
+        /// The caller's tag for the item.
+        tag: u32,
+        /// What went wrong.
+        error: Error,
+    },
+}
+
+/// The next item of a chain, opened and decoding ahead while the current one plays.
+struct NextItem {
+    exec: Executor,
+    sh: Sh,
+    tag: u32,
 }
 
 #[derive(Default)]
@@ -157,6 +179,16 @@ type Sh = Rc<RefCell<Shared>>;
 
 fn buffer_us(b: &AudioBuffer) -> i64 {
     b.duration_us()
+}
+
+/// Create the shared state and the demux, audio and video tasks for one item.
+fn spawn_item<S: Source + 'static>(source: S, codecs: &Rc<dyn CodecFactory>) -> (Executor, Sh) {
+    let sh: Sh = Rc::default();
+    let mut exec = Executor::new();
+    exec.spawn(demux_task(source, sh.clone()));
+    exec.spawn(audio_task(sh.clone(), codecs.clone()));
+    exec.spawn(video_task(sh.clone(), codecs.clone()));
+    (exec, sh)
 }
 
 async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
@@ -260,6 +292,38 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
     }
 }
 
+/// Remove `us` microseconds from the end of the audio in `bufs` (a packet's decoded output).
+fn trim_end(bufs: &mut Vec<AudioBuffer>, us: i64) {
+    let Some(rate) = bufs.last().map(|b| b.params.sample_rate as i64) else { return };
+    let mut drop_frames = ((us as i128 * rate as i128 + 500_000) / 1_000_000) as usize;
+    while drop_frames > 0 {
+        let Some(last) = bufs.last_mut() else { break };
+        let ch = last.params.channels.max(1) as usize;
+        let frames = last.samples.len() / ch;
+        if frames <= drop_frames {
+            drop_frames -= frames;
+            bufs.pop();
+        } else {
+            last.samples.truncate((frames - drop_frames) * ch);
+            break;
+        }
+    }
+}
+
+/// Cut `b` so it ends at stream time `limit_us` (the audio track's playable length); `None` if nothing is left.
+fn limit_end(mut b: AudioBuffer, limit_us: Timestamp) -> Option<AudioBuffer> {
+    if b.pts >= limit_us {
+        return None;
+    }
+    let ch = b.params.channels.max(1) as usize;
+    let frames = b.samples.len() / ch;
+    let keep = ((limit_us - b.pts) as i128 * b.params.sample_rate as i128 / 1_000_000) as usize;
+    if keep < frames {
+        b.samples.truncate(keep * ch);
+    }
+    (!b.samples.is_empty()).then_some(b)
+}
+
 async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
     while !sh.borrow().opened {
         yield_now().await;
@@ -318,8 +382,15 @@ async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
         if let Some(p) = packet {
             // A packet that fails to decode is dropped; playback continues with the next one.
             if dec.send_packet(&p).is_ok() {
+                let mut bufs: Vec<AudioBuffer> = Vec::new();
                 while let Ok(Some(b)) = dec.receive_buffer() {
-                    let mut s = sh.borrow_mut();
+                    bufs.push(b);
+                }
+                if p.discard_end_us > 0 {
+                    trim_end(&mut bufs, p.discard_end_us);
+                }
+                let mut s = sh.borrow_mut();
+                for b in bufs {
                     s.audio_dec_us += buffer_us(&b);
                     s.audio_dec.push_back(b);
                 }
@@ -449,16 +520,20 @@ pub struct Session {
     stepped: bool,
     /// A-B loop: when playback reaches B it jumps back to A.
     ab_loop: Option<(Timestamp, Timestamp)>,
+    codecs: Rc<dyn CodecFactory>,
+    /// The caller's tag of the item being played.
+    tag: u32,
+    /// Item number stamped on audio segments (increments at every item change).
+    item_no: u32,
+    next: Option<NextItem>,
+    /// The audio feed has moved on to the next item; the current one is only being heard out.
+    feed_next: bool,
 }
 
 impl Session {
     /// Start opening `source`. Nothing happens until [`Session::tick`] is called.
     pub fn new<S: Source + 'static>(source: S, codecs: Rc<dyn CodecFactory>) -> Self {
-        let sh: Sh = Rc::default();
-        let mut exec = Executor::new();
-        exec.spawn(demux_task(source, sh.clone()));
-        exec.spawn(audio_task(sh.clone(), codecs.clone()));
-        exec.spawn(video_task(sh.clone(), codecs));
+        let (exec, sh) = spawn_item(source, &codecs);
         Self {
             exec,
             sh,
@@ -483,7 +558,57 @@ impl Session {
             steps: VecDeque::new(),
             stepped: false,
             ab_loop: None,
+            codecs,
+            tag: 0,
+            item_no: 0,
+            next: None,
+            feed_next: false,
         }
+    }
+
+    /// Give the current item a caller-chosen tag (reported back in [`SessionEvent::ItemStarted`] for later ones).
+    pub fn set_tag(&mut self, tag: u32) {
+        self.tag = tag;
+    }
+
+    /// The tag of the item being played.
+    pub fn tag(&self) -> u32 {
+        self.tag
+    }
+
+    /// Open `source` in the background as the item to play after this one. It decodes ahead while the current
+    /// item plays, and when the current item's audio ends the next one's follows without a gap. Replaces any
+    /// item queued before.
+    pub fn queue_next<S: Source + 'static>(&mut self, source: S, tag: u32) {
+        let (exec, sh) = spawn_item(source, &self.codecs);
+        self.next = Some(NextItem { exec, sh, tag });
+        self.feed_next = false;
+    }
+
+    /// True if a next item is queued.
+    pub fn has_next(&self) -> bool {
+        self.next.is_some()
+    }
+
+    /// Drop the queued next item.
+    pub fn cancel_next(&mut self) {
+        if self.feed_next {
+            return; // too late: its audio is already joined to ours
+        }
+        self.next = None;
+    }
+
+    /// True when it is time for the caller to queue the next item: the current one is about to run out of data.
+    pub fn wants_next(&self, now_us: Timestamp) -> bool {
+        if self.next.is_some() || self.ended {
+            return false;
+        }
+        let s = self.sh.borrow();
+        if !s.opened {
+            return false;
+        }
+        let near_end = s.duration_us.is_some_and(|d| d - self.clock.now_stream(now_us).max(0) < NEXT_LEAD_US);
+        near_end || s.demux_done
     }
 
     /// Loop between `a` and `b` (stream microseconds, `a < b`), or clear the loop with `None`.
@@ -771,6 +896,11 @@ impl Session {
         s.seek = Some(demux_target);
         s.seeking = true;
         drop(s);
+        if self.feed_next {
+            // Seeking out of the tail of an item: the joined next item is dropped (the caller queues it again).
+            self.next = None;
+            self.feed_next = false;
+        }
         if let Some(a) = &mut self.audio {
             a.reset(target);
         }
@@ -794,12 +924,31 @@ impl Session {
         // 1. Demux and decode tasks, until quiescent or out of budget.
         for _ in 0..64 {
             let before = self.sh.borrow().progress;
+            let next_before = self.next.as_ref().map(|n| n.sh.borrow().progress);
             self.exec.poll_all();
-            if self.sh.borrow().progress == before || host.clock().now_us() - t0 > BUDGET_US {
+            if let Some(n) = &mut self.next {
+                n.exec.poll_all();
+            }
+            let moved = self.sh.borrow().progress != before
+                || self.next.as_ref().map(|n| n.sh.borrow().progress) != next_before;
+            if !moved || host.clock().now_us() - t0 > BUDGET_US {
                 break;
             }
         }
         let now = host.clock().now_us();
+        // A queued item that cannot be opened is dropped, and the caller told.
+        let failed = self.next.as_ref().is_some_and(|n| {
+            let s = n.sh.borrow();
+            s.error.is_some() && !s.opened
+        });
+        if failed {
+            if let Some(n) = self.next.take() {
+                self.feed_next = false;
+                let error =
+                    n.sh.borrow().error.clone().unwrap_or(Error::Invalid(String::from("open failed")));
+                self.events.push_back(SessionEvent::ItemFailed { tag: n.tag, error });
+            }
+        }
 
         // 2. Open the audio sink once we know the streams.
         let (opened, has_audio, seeking) = {
@@ -808,7 +957,7 @@ impl Session {
         };
         if opened && !self.audio_opened {
             self.audio_opened = true;
-            if has_audio {
+            if has_audio && self.audio.is_none() {
                 if let Ok(p) = host.audio().open(WANT_AUDIO) {
                     let mut out = AudioOut::new(p);
                     out.set_rate(self.rate);
@@ -832,20 +981,50 @@ impl Session {
             }
         }
 
-        // 3. Feed the audio sink.
-        if let Some(out) = &mut self.audio {
-            if !seeking {
-                let want = (WANT_AUDIO.sample_rate / 5) as usize;
-                while out.pending_frames() < want {
-                    let mut s = self.sh.borrow_mut();
-                    let Some(b) = s.audio_dec.pop_front() else { break };
-                    s.audio_dec_us -= buffer_us(&b);
-                    drop(s);
-                    out.push(b);
+        // 3. Feed the audio sink. Once the current item has handed over all its audio and the next one is ready,
+        // the feed moves on to the next item with no gap and no flush: that is gapless playback.
+        if self.audio.is_some() {
+            let handover = !self.feed_next
+                && !seeking
+                && self.next.as_ref().is_some_and(|n| {
+                    let cur = self.sh.borrow();
+                    let nx = n.sh.borrow();
+                    cur.audio_done && cur.audio_dec.is_empty() && nx.opened && nx.sel_audio.is_some()
+                });
+            if handover {
+                self.feed_next = true;
+                let item = self.item_no + 1;
+                if let Some(out) = &mut self.audio {
+                    out.begin_item(item);
                 }
-                out.drain(host.audio());
             }
-            host.audio().set_volume(if self.muted { 0.0 } else { self.volume });
+            let feed: Sh = match (&self.next, self.feed_next) {
+                (Some(n), true) => n.sh.clone(),
+                _ => self.sh.clone(),
+            };
+            if let Some(out) = &mut self.audio {
+                if !seeking {
+                    let want = (WANT_AUDIO.sample_rate / 5) as usize;
+                    while out.pending_frames() < want {
+                        let mut s = feed.borrow_mut();
+                        let Some(b) = s.audio_dec.pop_front() else { break };
+                        s.audio_dec_us -= buffer_us(&b);
+                        let limit = s.sel_audio.as_ref().and_then(|a| a.duration_us);
+                        drop(s);
+                        // The track's playable length (MP4 edit lists) cuts the encoder's end padding.
+                        let b = match limit {
+                            Some(l) => match limit_end(b, l) {
+                                Some(b) => b,
+                                None => continue,
+                            },
+                            None => b,
+                        };
+                        out.push(b);
+                    }
+                    out.drain(host.audio());
+                }
+                host.audio().set_volume(if self.muted { 0.0 } else { self.volume });
+            }
         }
 
         // 4. Start playback once enough is buffered.
@@ -882,12 +1061,33 @@ impl Session {
             }
         }
 
-        // 5. Keep the clock locked to what is being heard.
+        // 5. Keep the clock locked to what is being heard; when the next item's audio is what is heard, it
+        // becomes the current item.
         if self.running {
+            let mut heard_next = false;
             if let Some(out) = &self.audio {
-                if let Some(h) = out.heard_pts(&*host.audio()) {
-                    self.clock.update_from_audio(h, now);
+                if self.feed_next {
+                    heard_next = out.heard_item(&*host.audio()) == Some(self.item_no + 1);
                 }
+                if !heard_next {
+                    if let Some(h) = out.heard_pts(&*host.audio()) {
+                        self.clock.update_from_audio(h, now);
+                    }
+                }
+            }
+            // The next item may have nothing audible to wait for (its audio never came): move on once drained.
+            let stalled = self.feed_next
+                && !heard_next
+                && self
+                    .audio
+                    .as_ref()
+                    .is_some_and(|out| out.pending_frames() == 0 && host.audio().queued_frames() == 0);
+            if heard_next || stalled {
+                let pos = self.audio.as_ref().and_then(|o| o.heard_pts(&*host.audio())).unwrap_or(0);
+                self.promote(now, Some(pos.max(0)));
+            }
+            if let Some(out) = &mut self.audio {
+                out.prune(&*host.audio());
             }
         }
 
@@ -908,11 +1108,16 @@ impl Session {
             };
             let video_drained = s.sel_video.is_none() || (s.video_done && s.video_dec.is_empty());
             drop(s);
-            if audio_drained && video_drained {
-                self.running = false;
-                self.ended = true;
-                self.clock.pause(now);
-                self.want_play = false;
+            if audio_drained && video_drained && !self.feed_next {
+                if self.next.is_some() {
+                    // The next item was not ready in time for a gapless join (or has no audio): start it now.
+                    self.promote(now, None);
+                } else {
+                    self.running = false;
+                    self.ended = true;
+                    self.clock.pause(now);
+                    self.want_play = false;
+                }
             }
         }
 
@@ -988,6 +1193,43 @@ impl Session {
 }
 
 impl Session {
+    /// Make the queued next item the current one. `heard` is the position its audio has reached when the switch
+    /// happens during playback (gapless); `None` means the previous item ended and the new one starts from zero.
+    fn promote(&mut self, now: Timestamp, heard: Option<Timestamp>) {
+        let Some(n) = self.next.take() else { return };
+        self.exec = n.exec;
+        self.sh = n.sh;
+        self.tag = n.tag;
+        self.item_no += 1;
+        self.feed_next = false;
+        self.last_presented = None;
+        self.seek_target = None;
+        self.steps.clear();
+        self.stepped = false;
+        self.ab_loop = None;
+        self.shown_subtitle = None;
+        self.shown_preview = false;
+        self.audio_opened = false; // let the sink logic look at the new item's streams
+        match heard {
+            Some(pos) => {
+                self.clock.seek(pos, now);
+            }
+            None => {
+                // Previous item played out: begin the new one like a fresh open.
+                if let Some(a) = &mut self.audio {
+                    a.reset(0);
+                    a.begin_item(self.item_no);
+                }
+                self.running = false;
+                self.want_play = true;
+                self.ended = false;
+                self.clock.seek(0, now);
+                self.clock.pause(now);
+            }
+        }
+        self.events.push_back(SessionEvent::ItemStarted { tag: self.tag });
+    }
+
     /// Carry out pending frame steps while paused. A forward step needs the next decoded frame; a backward step
     /// is an exact seek to just before the frame on screen, which shows the frame before it.
     fn run_steps<H: Host>(&mut self, host: &mut H, now: Timestamp) {

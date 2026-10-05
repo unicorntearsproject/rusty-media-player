@@ -20,6 +20,18 @@ pub struct TraceEntry {
     pub frames: usize,
 }
 
+/// A stretch of output with one continuous stream timeline: a new one starts at a seek, a timestamp jump, or the
+/// first frame of the next item in a gapless chain.
+#[derive(Debug, Clone, Copy)]
+struct Seg {
+    /// Output frame index (counted since the last reset) of the segment's first frame.
+    start_frame: u64,
+    /// Stream time of that frame.
+    origin: Timestamp,
+    /// Which playlist item the segment belongs to.
+    item: u32,
+}
+
 /// Converts decoded audio to the sink format and keeps track of its stream time.
 pub struct AudioOut {
     sink: AudioParams,
@@ -30,11 +42,15 @@ pub struct AudioOut {
     pending_off: usize,
     /// Expected stream time of the next input frame (advances with every input frame, kept or dropped).
     expected: Option<Timestamp>,
-    /// Stream time of the first frame pushed since the anchor.
-    origin: Option<Timestamp>,
-    /// Frames pushed to `pending` since the anchor, at the sink rate.
+    /// Timeline segments, oldest first; the last one is being appended to.
+    segs: Vec<Seg>,
+    /// The next kept frame starts a new segment.
+    need_seg: bool,
+    /// Item number stamped on new segments.
+    cur_item: u32,
+    /// Frames pushed to `pending` since the last reset, at the sink rate.
     pushed: u64,
-    /// Frames the sink has accepted since the anchor.
+    /// Frames the sink has accepted since the last reset.
     written: u64,
     discard_until: Timestamp,
     trace: Option<Vec<TraceEntry>>,
@@ -53,7 +69,9 @@ impl AudioOut {
             pending: Vec::new(),
             pending_off: 0,
             expected: None,
-            origin: None,
+            segs: Vec::new(),
+            need_seg: true,
+            cur_item: 0,
             pushed: 0,
             written: 0,
             discard_until: 0,
@@ -97,7 +115,8 @@ impl AudioOut {
         self.pending.clear();
         self.pending_off = 0;
         self.expected = None;
-        self.origin = None;
+        self.segs.clear();
+        self.need_seg = true;
         self.pushed = 0;
         self.written = 0;
         self.discard_until = discard_until;
@@ -116,7 +135,42 @@ impl AudioOut {
 
     /// Stream time just after the last frame pushed, if any.
     pub fn end_pts(&self) -> Option<Timestamp> {
-        self.origin.map(|o| o + self.frames_to_us(self.pushed as i64))
+        self.segs.last().map(|s| s.origin + self.frames_to_us(self.pushed as i64 - s.start_frame as i64))
+    }
+
+    /// Set the item number for audio pushed from now on and start a new timeline segment with it (the next
+    /// item of a gapless chain). Nothing queued is dropped, so there is no gap and no sink flush.
+    pub fn begin_item(&mut self, item: u32) {
+        self.cur_item = item;
+        self.need_seg = true;
+        self.expected = None;
+        self.discard_until = 0;
+    }
+
+    /// Output frame position (frames since the reset, device latency removed) that is being heard now.
+    fn heard_frame(&self, sink: &impl AudioSink) -> i64 {
+        let played = self.written as i64 - sink.queued_frames() as i64;
+        let lat = sink.output_latency_us() * self.sink.sample_rate as i64 / 1_000_000;
+        played - lat
+    }
+
+    /// The segment being heard.
+    fn heard_seg(&self, sink: &impl AudioSink) -> Option<Seg> {
+        let pf = self.heard_frame(sink);
+        self.segs.iter().rev().find(|s| s.start_frame as i64 <= pf).or(self.segs.first()).copied()
+    }
+
+    /// The item number of the audio being heard.
+    pub fn heard_item(&self, sink: &impl AudioSink) -> Option<u32> {
+        self.heard_seg(sink).map(|s| s.item)
+    }
+
+    /// Forget segments that are completely in the past (call from time to time while playing).
+    pub fn prune(&mut self, sink: &impl AudioSink) {
+        let pf = self.heard_frame(sink);
+        while self.segs.len() > 1 && self.segs[1].start_frame as i64 <= pf {
+            self.segs.remove(0);
+        }
     }
 
     /// Append decoded audio.
@@ -134,12 +188,8 @@ impl AudioOut {
             self.expected = None;
         }
         if self.expected.is_none_or(|e| (buf.pts - e).abs() > JUMP_US) {
-            if self.origin.is_some() {
-                // A jump while running: restart the output counters at the new time.
-                self.origin = None;
-                self.pushed = 0;
-                self.written = 0;
-            }
+            // A jump: a new timeline segment starts at the next kept frame.
+            self.need_seg = true;
             self.expected = Some(buf.pts);
         }
         let start = self.expected.unwrap_or(buf.pts);
@@ -175,8 +225,9 @@ impl AudioOut {
             None => self.pending.extend_from_slice(&at_sink),
         }
         let added = (self.pending.len() - before) / self.sink.channels as usize;
-        if self.origin.is_none() {
-            self.origin = Some(kept_start);
+        if self.need_seg || self.segs.is_empty() {
+            self.need_seg = false;
+            self.segs.push(Seg { start_frame: self.pushed, origin: kept_start, item: self.cur_item });
         }
         if let Some(t) = &mut self.trace {
             t.push(TraceEntry { pts: kept_start, frames: added });
@@ -210,14 +261,13 @@ impl AudioOut {
     /// Stream time of the audio being heard right now: written position minus what the sink still holds and
     /// its output latency.
     pub fn heard_pts(&self, sink: &impl AudioSink) -> Option<Timestamp> {
-        let origin = self.origin?;
-        let played = self.written as i64 - sink.queued_frames() as i64;
-        Some(origin + self.frames_to_us(played) - sink.output_latency_us())
+        let seg = self.heard_seg(sink)?;
+        Some(seg.origin + self.frames_to_us(self.heard_frame(sink) - seg.start_frame as i64))
     }
 
     /// Stream time of the first audio frame, once known.
     pub fn origin(&self) -> Option<Timestamp> {
-        self.origin
+        self.segs.first().map(|s| s.origin)
     }
 }
 
@@ -333,12 +383,39 @@ mod tests {
     }
 
     #[test]
-    fn jump_reanchors() {
+    fn jump_starts_a_new_segment_without_disturbing_queued_audio() {
         let mut a = AudioOut::new(AudioParams { sample_rate: 48_000, channels: 2 });
         a.reset(0);
         a.push(buf(0, 480, 48_000));
         a.push(buf(5_000_000, 480, 48_000));
-        assert_eq!(a.origin(), Some(5_000_000));
+        assert_eq!(a.origin(), Some(0));
+        assert_eq!(a.end_pts(), Some(5_010_000));
+        let mut sink = Sink { cap: 1_000_000, ..Default::default() };
+        let n = a.drain(&mut sink);
+        assert_eq!(n, 960);
+        sink.queued = n - 240; // 5 ms into the first segment
+        assert_eq!(a.heard_pts(&sink), Some(5_000));
+        sink.queued = n - 480 - 240; // 5 ms into the second
+        assert_eq!(a.heard_pts(&sink), Some(5_005_000));
+    }
+
+    #[test]
+    fn gapless_items_continue_without_a_gap_and_report_which_is_heard() {
+        let mut a = AudioOut::new(AudioParams { sample_rate: 48_000, channels: 2 });
+        a.reset(0);
+        a.push(buf(0, 480, 48_000));
+        a.begin_item(1);
+        a.push(buf(0, 480, 48_000)); // the next item starts at its own time zero
+        let mut sink = Sink { cap: 1_000_000, ..Default::default() };
+        let n = a.drain(&mut sink);
+        assert_eq!(n, 960, "nothing was dropped or inserted");
+        sink.queued = n - 479;
+        assert_eq!(a.heard_item(&sink), Some(0));
+        sink.queued = n - 480;
+        assert_eq!(a.heard_item(&sink), Some(1));
+        assert_eq!(a.heard_pts(&sink), Some(0));
+        a.prune(&sink);
+        assert_eq!(a.origin(), Some(0));
     }
 
     #[test]

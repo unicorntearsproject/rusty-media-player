@@ -91,6 +91,8 @@ pub struct PlayOptions {
     pub audio_track: Option<u32>,
     /// Loop between these stream times (A, B) from the start.
     pub ab_loop: Option<(Timestamp, Timestamp)>,
+    /// Files to play after the first one, joined gaplessly (each is queued when the session asks for the next).
+    pub chain: Vec<String>,
 }
 
 /// Result of a run.
@@ -142,6 +144,8 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
     session.play();
     let mut applied = false;
     let mut events = Vec::new();
+    let mut chain = opts.chain.iter();
+    let mut queued_tag = 0u32;
     let mut seeks = opts.seeks.iter().copied().peekable();
     let mut max_us = opts.max_virtual_us;
     loop {
@@ -158,6 +162,12 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         }
         while let Some(e) = session.poll_event() {
             events.push((now, e));
+        }
+        if session.wants_next(now) {
+            if let Some(path) = chain.next() {
+                queued_tag += 1;
+                session.queue_next(FileSource::open(path)?, queued_tag);
+            }
         }
         if max_us.is_none() {
             if let Some(d) = session.duration_us() {
