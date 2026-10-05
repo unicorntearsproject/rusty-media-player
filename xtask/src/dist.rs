@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod publish;
 mod sign;
 
 const APP_ID: &str = "io.github.idometeor.RustyWave";
@@ -40,6 +41,9 @@ targets:
   apt-repo     a signed apt repository of the .deb in target/dist/apt-repo (needs --sign)
   checksums    SHA256SUMS over everything in target/dist/release (and signatures if --sign or RVP_SIGN_CMD is set)
   verify       check every signature in target/dist against packaging/keys/rusty-wave-release.asc in a throwaway keyring
+  publish      copy the verified deb, rpm and AppImage (with .asc and a versioned SHA256SUMS) to /home/jj/projects/_software-dist/rusty-wave/ and
+               s3://ut-software-dist/; needs --sign, never overwrites (stops if a file of this version exists in either place);
+               --windows adds the Windows installer and zip (only when built and verified in the same run); --dry-run only checks
   check        validate the metadata (desktop file, AppStream, man page) without building anything
   linux        stage, tarball, deb, rpm, appimage and flatpak
   all          linux, windows, installer, pwa and checksums
@@ -79,6 +83,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut version = None;
     let (mut container, mut no_build, mut prepare_only) = (false, false, false);
     let (mut want_sign, mut sign_key, mut repo_url) = (false, None, None);
+    let (mut windows, mut dry_run) = (false, false);
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -86,6 +91,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--container" => container = true,
             "--no-build" => no_build = true,
             "--prepare-only" => prepare_only = true,
+            "--windows" => windows = true,
+            "--dry-run" => dry_run = true,
             "--sign" => want_sign = true,
             "--sign-key" => {
                 want_sign = true;
@@ -118,6 +125,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "checksums" => cx.checksums(),
         "apt-repo" => cx.apt_repo(),
         "verify" => cx.verify(),
+        "publish" => cx.publish(windows, dry_run),
         "check" => cx.check(),
         "linux" => {
             cx.stage()?;

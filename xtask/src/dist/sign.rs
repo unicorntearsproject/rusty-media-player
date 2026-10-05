@@ -307,7 +307,7 @@ impl Ctx {
 }
 
 /// The fingerprint of the public key in the repository.
-fn resolve_public_fpr(root: &Path) -> Result<String, String> {
+pub(super) fn resolve_public_fpr(root: &Path) -> Result<String, String> {
     fingerprint(&capture(
         Command::new("gpg").args(["--batch", "--show-keys", "--with-colons"]).arg(root.join(KEY_ASC)),
     )?)

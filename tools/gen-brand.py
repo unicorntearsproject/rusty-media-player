@@ -38,12 +38,22 @@ NIGHT_TOP = (42, 15, 74)
 MAGENTA, VIOLET, CYAN = (255, 43, 214), (157, 78, 255), (25, 227, 255)
 PINK_WHITE = (255, 239, 251)
 
-# The visible art (alpha > 32) spans x 25..1239 and y 153..1094 of the 1254 px master.
-FULL = (632.0, 623.5, 1290)  # centre x, centre y, side of the square crop: all the art with a little air
+# The full-art crop is computed from the art's bounding box (alpha > 32): a square around it with PAD of its longer side on every side. The
+# art is wide (about 1214 x 941), so a square tile is filled to about 94 percent of its width and 73 percent of its height at best.
+PAD = 0.03
 TIGHT = (720.0, 623.5, 960)  # the triangle and the inner waves, for 32 px and below
 SMALL_MAX = 32
 
 master = Image.open(MASTER).convert("RGBA")
+
+
+def art_box():
+    ys, xs = np.where(np.array(master.getchannel("A")) > 32)
+    return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+
+
+_x0, _y0, _x1, _y1 = art_box()
+FULL = ((_x0 + _x1) / 2, (_y0 + _y1) / 2, max(_x1 - _x0, _y1 - _y0) * (1 + 2 * PAD))
 
 
 def crop_square(cx, cy, side):
@@ -273,29 +283,28 @@ def contact_sheet(path):
     for panel in (dark, light):
         x = pad
         for n in small_sizes:
-            tile(x, y, icon(n), panel, 148, 148, f"{n}" if panel == light else None)
-            x += 148 + 8
+            tile(x, y, icon(n), panel, max(n, 24) + 12, max(n, 24) + 12, f"{n}" if panel == light else None)
+            x += max(n, 24) + 12 + 8
         y += 148 + 24
     title("16 to 48 px at 6x (nearest neighbour), as the pixels are")
     x = pad
     for n in (16, 22, 24, 32, 48):
         z = icon(n).resize((n * 6, n * 6), Image.NEAREST)
-        tile(x, y, z, dark, n * 6 + 12, 48 * 6 + 12, f"{n} px")
+        tile(x, y, z, dark, n * 6 + 12, n * 6 + 12, f"{n} px")
         x += n * 6 + 12 + 12
     # The same sizes made from the full art, to show why the small ones are cropped.
     for n in (16, 24, 32):
         z = downscale(FULL_ART, n, sharpen=70).resize((n * 6, n * 6), Image.NEAREST)
-        tile(x, y, z, dark, n * 6 + 12, 48 * 6 + 12, f"{n} full (not used)")
+        tile(x, y, z, dark, n * 6 + 12, n * 6 + 12, f"{n} full (not used)")
         x += n * 6 + 12 + 12
     y += 48 * 6 + 12 + 30
     title("192, 256 and 512 px")
     x = pad
     big = 512
     for n in (192, 256, 512):
-        tile(x, y, icon(n), dark, n + 16, big + 16)
-        d.text((x + 4, y + big + 19), f"{n}", font=small, fill=(180, 178, 196))
+        tile(x, y, icon(n), dark, n + 16, n + 16, f"{n}")
         x += n + 16 + 12
-    y += big + 16 + 40
+    y += 512 + 16 + 40
     title("PWA maskable 192 (circle = the 80 percent safe zone) and 512, apple touch 180, favicons 32 and 48, Inno Setup side 164x314 and corner 55 and 110")
     x = pad
     m = maskable(192).convert("RGBA")
