@@ -10,11 +10,12 @@ Rusty Video Player ships as a native desktop app (Linux and Windows) and as an i
 | .deb | `dist deb` | `cargo install cargo-deb` | `rusty-video-player_<ver>_amd64.deb` |
 | .rpm | `dist rpm` | `cargo install cargo-generate-rpm`, rpm tools | `rusty-video-player-<ver>-1.x86_64.rpm` |
 | AppImage | `dist appimage` | `appimagetool` (downloaded to `~/.local/bin` on first use) | `RustyVideoPlayer-<ver>-x86_64.AppImage` |
-| Flatpak | `dist flatpak` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.idometeor.RustyVideoPlayer-<ver>.flatpak` |
+| Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.idometeor.RustyVideoPlayer-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `target/dist/flatpak/repo`) |
 | Windows exe + zip | `dist windows` | MSVC or GNU toolchain; on Linux the wine image (podman) | `rvp-<ver>-windows-x64.zip` |
 | Windows installer | `dist installer` | Inno Setup 6 (`ISCC.exe`); on Linux wine in the image | `RustyVideoPlayer-<ver>-x64-Setup.exe` |
 | PWA | `dist pwa` | `cargo xtask web` prerequisites | `rusty-video-player-web-<ver>.zip` |
-| Checksums, signatures | `dist checksums` | | `SHA256SUMS` (+ whatever `RVP_SIGN_CMD` writes) |
+| Signed apt repo | `dist apt-repo --sign` | gpg | `target/dist/apt-repo/` |
+| Checksums, signatures | `dist checksums [--sign]` | gpg for `--sign` | `SHA256SUMS` (+ `.asc` files); `dist verify` checks them |
 
 `cargo xtask dist check` validates the metadata without building (desktop file, AppStream, man page, that the media types agree between the
 `.desktop` file and the AppStream file, that the Windows installer registers the main extensions). `linux` runs stage to flatpak, `all`
@@ -106,14 +107,46 @@ test), PWA (build and Playwright), publish.
 
 ## Signing
 
-No keys or secrets are in the repository. Hooks:
+No secret keys or passwords are in the repository. The public half of the release key is (`packaging/keys/rvp-release.asc`, and the binary
+`rvp-release.gpg` that apt and Flatpak import).
 
-- `RVP_WINDOWS_SIGN_CMD`: a signtool or `osslsigncode` command line with `$f` for the file. `dist windows` signs `rvp.exe` with it and `dist installer` passes it to
-  Inno Setup (`/DSign=1 /Srvpsign=...`), which signs the installer and the uninstaller. In CI it is set when the `WINDOWS_CERT_PFX_BASE64` and
-  `WINDOWS_CERT_PASSWORD` secrets exist.
-- `RVP_SIGN_CMD`: run per Linux artifact and for `SHA256SUMS` with `{}` for the path (for example `gpg --batch --armor --detach-sign {}`). In CI the
-  checksums are signed when `RELEASE_GPG_PRIVATE_KEY` and `RELEASE_GPG_PASSPHRASE` exist.
-- Flathub signs its own builds; a standalone `.flatpak` is unsigned. Unsigned Windows files show SmartScreen's "More info > Run anyway".
+**Release key**: "Rusty Video Player Release <noreply@users.noreply.github.com>", ed25519, sign-only (`[SC]`), created 2026-10-05, expires 2028-10-04.
+
+    Fingerprint  E13F F843 723D 5406 8E45  A3FF 54BF 2FA4 0709 3CEE     (key ID 54BF2FA407093CEE)
+
+It is a dedicated key (not the Unicorn Viz one) and mirrors how that one is kept: one `[SC]` key in the maintainer's gpg keyring, no passphrase
+(protected by the account and disk, as `unicorn-viz`'s is; add one with `gpg --edit-key E13FF843723D54068E45A3FF54BF2FA407093CEE passwd` and gpg-agent
+will ask), the revocation certificate that `gpg` wrote at creation, and the public key committed. Outside the repository, in `~/.local/share/rvp-release/`
+(directory 0700, files 0600): `revocation-<fingerprint>.rev` (publish it only to revoke the key) and `rvp-release-secret.asc` (a secret export, for
+backup or for CI). Move both to offline storage; never commit them. The repository secret `RELEASE_GPG_PRIVATE_KEY` for CI is not set and nothing
+uploads a secret; `release.yml` signs `SHA256SUMS` only if the maintainer adds that secret. To extend the expiry before 2028:
+`gpg --quick-set-expire <fingerprint> 2y` and re-export `packaging/keys/*`.
+
+**Signing locally**: `cargo xtask dist <target> --sign` (key from `RVP_GPG_KEY` or `--sign-key`, default the one in `packaging/keys`; its secret half
+must be in your keyring, otherwise the command stops at once). With `--sign`:
+
+| Artifact | Signature | Checked with |
+| --- | --- | --- |
+| `.rpm` | embedded (`rpmsign`), plus `.asc` | `rpm -K` after `rpm --import packaging/keys/rvp-release.asc` |
+| `.deb` | detached `.asc`; apt checks the repo instead (below), `dpkg-sig` is not used because apt ignores it | `gpg --verify x.deb.asc x.deb` |
+| apt repo (`dist apt-repo`, `target/dist/apt-repo`) | `InRelease` (clearsigned) and `Release.gpg` | `apt-get update` with `signed-by=rvp-release.gpg` |
+| AppImage | embedded by `appimagetool --sign` (ELF sections `.sha256_sig`, `.sig_key`), plus `.asc`; the runtime does not check it | `tools/packaging/verify-appimage-sig.py` or `gpg --verify` |
+| Flatpak | the commit and the repo summary (`--gpg-sign`), the key in `.flatpakrepo`, `.flatpakref` and the bundle; plus `.asc` of the bundle | `flatpak install` from the remote verifies; `ostree show` lists the signature |
+| tarballs, zip, exe, installer, `.flatpakref/.flatpakrepo` | detached `.asc` (from `dist checksums --sign`) | `gpg --verify` |
+| `SHA256SUMS` | `SHA256SUMS.asc` | `gpg --verify SHA256SUMS.asc SHA256SUMS`, then `sha256sum -c SHA256SUMS` |
+
+`cargo xtask dist verify` checks everything under `target/dist` against the committed public key in a throwaway keyring and rpm database (so it shows what a
+user with only the published key sees). `tools/packaging/verify-linux.sh apt-signed|rpm-signed` do the same in clean Ubuntu and Fedora containers and
+check that a tampered repository or rpm is refused. The Flatpak repo and its `.flatpakrepo`/`.flatpakref` use `file://` URLs unless you pass
+`--repo-url https://...` (re-run `dist flatpak --sign --repo-url ...` or just edit the `Url=` lines).
+
+Other hooks: `RVP_SIGN_CMD` runs a command per artifact and for `SHA256SUMS` (`{}` is the path) and still works without `--sign`.
+`RVP_WINDOWS_SIGN_CMD` is a signtool or `osslsigncode` command line with `$f` for the file; `dist windows` signs `rvp.exe` with it and `dist installer`
+passes it to Inno Setup (`/DSign=1 /Srvpsign=...`), which signs the installer and the uninstaller. In CI it is set when the `WINDOWS_CERT_PFX_BASE64` and
+`WINDOWS_CERT_PASSWORD` secrets exist. There is no Windows code-signing certificate yet: unsigned Windows files show SmartScreen's "More info > Run
+anyway". Flathub signs its own builds. The GPG key does not replace a Windows certificate.
+
+Testing every package by hand: [`release-testing.md`](release-testing.md).
 
 ## Verification record (2026-10-05, Fedora 44 host)
 
@@ -127,4 +160,5 @@ No keys or secrets are in the repository. Hooks:
 | Windows exe | cross-built (`x86_64-pc-windows-gnu`, MinGW-w64); ran under Wine 11 on Xvfb: H.264 video at 1.00x, screenshot correct | Real Windows (WASAPI, SMTC, DPI, SmartScreen), the MSVC build (CI only) |
 | Installer | built with Inno Setup 6.7.3 under Wine; silent install: files, Start menu and desktop shortcuts, `OpenWithProgids` and Capabilities registry entries, installed program ran, uninstall removed registry entries and shortcuts | Real Windows' Default apps page, signing, the dialog flow |
 | PWA | Playwright (Chromium): valid manifest, every icon exists with the declared size, service worker precache, reload and play a local file with the network off, update flow | Install prompt UI, file handlers and share target on real OSes, Firefox and Safari |
+| Signing (release key `E13F...3CEE`) | `dist ... --sign` for deb, rpm, AppImage, Flatpak repo and bundle, apt repo, checksums; `dist verify` (19 checks, throwaway keyring); `.deb` and rpm tamper tests; installed from the signed apt repo in a clean Ubuntu 22.04 container (a modified `InRelease` is refused) and the signed rpm in Fedora 44 (`rpm --import`, `rpm -K`, a modified rpm is refused); AppImage embedded signature checked and the AppImage still runs; Flatpak installed `--user` from the signed local repo (`.flatpakrepo`), from the `.flatpakref` and from the bundle, ran under Xvfb at 1.00x; a remote with another key is refused | rpm below 4.14 (no EdDSA), Flathub, signing from CI, a Windows certificate |
 | Workflows | `actionlint` clean; never run (they must not be triggered from here) | A real run |

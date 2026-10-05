@@ -1,11 +1,14 @@
 //! `cargo xtask dist <target>`: release packages of the desktop app and the PWA. See `docs/packaging.md`.
 //!
 //! Everything here shells out to the packaging tools (cargo-deb, cargo-generate-rpm, appimagetool, flatpak-builder, podman, wine, Inno
-//! Setup); there are no secrets in it, and signing is a hook (`RVP_SIGN_CMD`, `RVP_WINDOWS_SIGN_CMD`). Nothing is deleted recursively:
+//! Setup); there are no secrets in it, and signing is `--sign` (the GPG release key in the user's keyring, see `sign.rs`) or a hook
+//! (`RVP_SIGN_CMD`, `RVP_WINDOWS_SIGN_CMD`). Nothing is deleted recursively:
 //! staging directories are overwritten in place.
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod sign;
 
 const APP_ID: &str = "io.github.idometeor.RustyVideoPlayer";
 const PKG: &str = "rusty-video-player";
@@ -34,7 +37,9 @@ targets:
   windows      rvp.exe (x86_64-pc-windows-gnu in the wine image on Linux; the host toolchain on Windows) and the portable zip
   installer    the Inno Setup installer around it (ISCC.exe on Windows, wine in the image on Linux)
   pwa          the web app (cargo xtask web) as rusty-video-player-web-<ver>.zip
-  checksums    SHA256SUMS over everything in target/dist/release (and signatures if RVP_SIGN_CMD is set)
+  apt-repo     a signed apt repository of the .deb in target/dist/apt-repo (needs --sign)
+  checksums    SHA256SUMS over everything in target/dist/release (and signatures if --sign or RVP_SIGN_CMD is set)
+  verify       check every signature in target/dist against packaging/keys/rvp-release.asc in a throwaway keyring
   check        validate the metadata (desktop file, AppStream, man page) without building anything
   linux        stage, tarball, deb, rpm, appimage and flatpak
   all          linux, windows, installer, pwa and checksums
@@ -42,9 +47,14 @@ targets:
 --version V   stamp V instead of the version in Cargo.toml (a dry run: `0.0.0-ci1`); the deb and rpm keep Cargo's version
 --container   build the Linux binary in the Ubuntu 22.04 image (needs podman); CI builds on an ubuntu-22.04 runner instead
 --no-build    use the binary and stage that are already there
+--sign        sign with the release key: rpm (rpmsign), AppImage (embedded), the Flatpak repo and its commit, the apt repo's Release,
+              and a detached .asc next to every artifact and SHA256SUMS. The key is RVP_GPG_KEY (a fingerprint) or the one in
+              packaging/keys/rvp-release.asc; its secret half must be in your gpg keyring.
+--sign-key K  like --sign with the key K
+--repo-url U  the URL the Flatpak repo will be served from, written into the .flatpakrepo and .flatpakref (default file://<local repo>)
 
-Outputs go to target/dist/release. Signing: RVP_SIGN_CMD (run once per Linux artifact with {} replaced by its path),
-RVP_WINDOWS_SIGN_CMD (an Inno Setup SignTool command, with $f for the file). No keys live in the repository.";
+Outputs go to target/dist/release. Other signing hooks: RVP_SIGN_CMD (run once per Linux artifact with {} replaced by its path),
+RVP_WINDOWS_SIGN_CMD (an Inno Setup SignTool command, with $f for the file). No secret keys live in the repository.";
 
 struct Ctx {
     prepare_only: bool,
@@ -53,6 +63,9 @@ struct Ctx {
     date: String,
     container: bool,
     no_build: bool,
+    /// The fingerprint to sign with (`--sign`), already checked to be in the keyring.
+    sign: Option<String>,
+    repo_url: Option<String>,
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -60,6 +73,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().map_err(|e| e.to_string())?;
     let mut version = None;
     let (mut container, mut no_build, mut prepare_only) = (false, false, false);
+    let (mut want_sign, mut sign_key, mut repo_url) = (false, None, None);
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -67,6 +81,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--container" => container = true,
             "--no-build" => no_build = true,
             "--prepare-only" => prepare_only = true,
+            "--sign" => want_sign = true,
+            "--sign-key" => {
+                want_sign = true;
+                sign_key = Some(it.next().ok_or("--sign-key needs a value")?.clone());
+            }
+            "--repo-url" => repo_url = Some(it.next().ok_or("--repo-url needs a value")?.clone()),
             other => return Err(format!("unknown option `{other}`\n\n{USAGE}")),
         }
     }
@@ -75,7 +95,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .or_else(|| std::env::var("RVP_VERSION").ok().filter(|v| !v.is_empty()))
         .unwrap_or(cargo_version);
     let date = release_date(&root);
-    let cx = Ctx { root, version, date, container, no_build, prepare_only };
+    let sign = if want_sign { Some(sign::resolve_key(&root, sign_key)?) } else { None };
+    let cx = Ctx { root, version, date, container, no_build, prepare_only, sign, repo_url };
     fs::create_dir_all(cx.out()).map_err(|e| e.to_string())?;
     match target.as_str() {
         "linux-bin" => cx.linux_bin().map(|_| ()),
@@ -90,6 +111,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "installer" => cx.installer(),
         "pwa" => cx.pwa(),
         "checksums" => cx.checksums(),
+        "apt-repo" => cx.apt_repo(),
+        "verify" => cx.verify(),
         "check" => cx.check(),
         "linux" => {
             cx.stage()?;
@@ -97,7 +120,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
             cx.deb()?;
             cx.rpm()?;
             cx.appimage()?;
-            cx.flatpak()
+            cx.flatpak()?;
+            if cx.sign.is_some() {
+                cx.apt_repo()?;
+            }
+            Ok(())
         }
         "all" => {
             cx.stage()?;
@@ -109,6 +136,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             cx.windows()?;
             cx.installer()?;
             cx.pwa()?;
+            if cx.sign.is_some() {
+                cx.apt_repo()?;
+            }
             cx.checksums()
         }
         other => Err(format!("unknown dist target `{other}`\n\n{USAGE}")),
@@ -408,7 +438,11 @@ impl Ctx {
             .arg(self.out().join(format!("{PKG}_{}_amd64.deb", self.deb_version())));
         // The stamp may differ from Cargo's version on a dry run; the deb carries what it is told.
         c.arg("--deb-version").arg(self.deb_version());
-        sh(&mut c)
+        sh(&mut c)?;
+        if self.sign.is_some() {
+            self.sign_deb(&self.out().join(format!("{PKG}_{}_amd64.deb", self.deb_version())))?;
+        }
+        Ok(())
     }
 
     /// Debian does not like `-rc1` style tags to sort after the release: `0.1.0-rc1` becomes `0.1.0~rc1`.
@@ -426,14 +460,16 @@ impl Ctx {
             Some((v, pre)) => (v.to_string(), format!("0.{}", pre.replace('-', "."))),
             None => (self.version.clone(), "1".to_string()),
         };
+        let rpm = self.out().join(format!("{PKG}-{ver}-{rel}.x86_64.rpm"));
         let mut c = self.cargo_cmd();
         c.args(["generate-rpm", "-p", "crates/rvp-host-desktop", "--profile", "dist", "-o"])
-            .arg(self.out().join(format!("{PKG}-{ver}-{rel}.x86_64.rpm")))
+            .arg(&rpm)
             .arg("--set-metadata")
             .arg(format!("version = \"{ver}\""))
             .arg("--set-metadata")
             .arg(format!("release = \"{rel}\""));
-        sh(&mut c)
+        sh(&mut c)?;
+        self.sign_rpm(&rpm)
     }
 
     // ---- AppImage ----------------------------------------------------------------------------------------------------------------
@@ -494,13 +530,16 @@ impl Ctx {
         )?;
         set_mode(&dir.join("AppRun"), 0o755)?;
         let out = self.out().join(format!("RustyVideoPlayer-{}-x86_64.AppImage", self.version));
-        sh(Command::new(&tool)
-            .env("ARCH", "x86_64")
+        let mut c = Command::new(&tool);
+        c.env("ARCH", "x86_64")
             .env("VERSION", &self.version)
             .arg("--appimage-extract-and-run")
-            .arg("--no-appstream")
-            .arg(&dir)
-            .arg(&out))?;
+            .arg("--no-appstream");
+        if let Some(key) = &self.sign {
+            // appimagetool embeds the signature and the public key in the ELF (.sha256_sig, .sig_key); checked by `dist verify`.
+            c.args(["--sign", "--sign-key", key]);
+        }
+        sh(c.arg(&dir).arg(&out))?;
         println!("{}", out.display());
         Ok(())
     }
@@ -557,6 +596,14 @@ impl Ctx {
         let repo = work.join("repo");
         let build = work.join("build");
         let state = work.join("state");
+        if repo.join("refs").exists() && have("ostree") {
+            // A repo left by an earlier build may hold an unsigned ref on another branch; drop it (best effort).
+            let _ = Command::new("ostree")
+                .arg(format!("--repo={}", repo.display()))
+                .args(["refs", "--delete", &format!("app/{APP_ID}/x86_64/master")])
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
         let mut c = Command::new("flatpak-builder");
         c.env("XDG_DATA_HOME", home().join(".local/share"))
             .env("XDG_CONFIG_HOME", home().join(".config"))
@@ -566,23 +613,33 @@ impl Ctx {
                 "--install-deps-from=flathub",
                 "--force-clean",
                 "--disable-rofiles-fuse",
+                "--default-branch=stable",
                 "--state-dir",
             ])
             .arg(&state)
             .arg("--repo")
-            .arg(&repo)
-            .arg(&build)
-            .arg(&mpath);
+            .arg(&repo);
+        if let Some(key) = &self.sign {
+            c.arg(format!("--gpg-sign={key}"));
+        }
+        c.arg(&build).arg(&mpath);
         sh(&mut c)?;
+        if self.sign.is_some() {
+            // Signed summary, appstream branch, static deltas, the default key; then the .flatpakrepo and .flatpakref.
+            self.flatpak_publish(&repo)?;
+        }
         let bundle = self.out().join(format!("{APP_ID}-{}.flatpak", self.version));
-        sh(Command::new("flatpak")
-            .env("XDG_DATA_HOME", home().join(".local/share"))
+        let mut c = Command::new("flatpak");
+        c.env("XDG_DATA_HOME", home().join(".local/share"))
             .env("XDG_CONFIG_HOME", home().join(".config"))
             .env("XDG_CACHE_HOME", home().join(".cache"))
-            .arg("build-bundle")
-            .arg(&repo)
-            .arg(&bundle)
-            .arg(APP_ID))?;
+            .arg("build-bundle");
+        if self.sign.is_some() {
+            // The bundle carries the public key, so installing it verifies the signed commit; the runtime comes from Flathub.
+            c.arg(format!("--gpg-keys={}", self.root.join("packaging/keys/rvp-release.gpg").display()));
+            c.arg("--runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo");
+        }
+        sh(c.arg(&repo).arg(&bundle).arg(APP_ID).arg("stable"))?;
         println!("{}", bundle.display());
         Ok(())
     }
@@ -846,6 +903,12 @@ impl Ctx {
             sums.push_str(&format!("{}  {}\n", sha256(f)?, f.file_name().unwrap().to_string_lossy()));
         }
         write(&out.join("SHA256SUMS"), sums.as_bytes())?;
+        if self.sign.is_some() {
+            // A detached .asc next to every artifact and the sums (the rpm and AppImage carry embedded signatures as well).
+            for f in files.iter().chain(std::iter::once(&out.join("SHA256SUMS"))) {
+                self.gpg_detach(f)?;
+            }
+        }
         if let Ok(cmd) = std::env::var("RVP_SIGN_CMD") {
             // Signing hook: run once per artifact and for the sums, `{}` is the path (for example `gpg --batch --yes --armor --detach-sign {}`).
             for f in files.iter().chain(std::iter::once(&out.join("SHA256SUMS"))) {

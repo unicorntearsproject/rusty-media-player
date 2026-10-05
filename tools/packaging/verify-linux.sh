@@ -5,6 +5,8 @@
 #   tools/packaging/verify-linux.sh deb       [image]   default public.ecr.aws/ubuntu/ubuntu:22.04 (docker.io/library/ubuntu:22.04 in CI)
 #   tools/packaging/verify-linux.sh rpm       [image]   default registry.fedoraproject.org/fedora:44
 #   tools/packaging/verify-linux.sh appimage  [image]   default public.ecr.aws/ubuntu/ubuntu:22.04
+#   tools/packaging/verify-linux.sh apt-signed [image]  install from the signed apt repo (`cargo xtask dist apt-repo --sign`); a tampered copy must be refused
+#   tools/packaging/verify-linux.sh rpm-signed [image]  import only the public key, `rpm -K`, install with signature checking on; an unsigned rpm must be refused
 #
 # Needs podman (or docker with DOCKER=docker), the package in target/dist/release and the fixtures (`cargo xtask fixtures`).
 # Prints a report and exits non-zero if anything fails.
@@ -76,6 +78,45 @@ case "$kind" in
       xvfb-run -a /tmp/rvp.AppImage --appimage-extract-and-run --no-audio --no-media-keys --data-dir /out/data --exit-after 6 --screenshot /out/shot.png --screenshot-after 5 --report /out/report.json /fixtures/$fixture
       grep -E '\"(state|saw_playing|clock_ratio|video_frames|frames_presented|version)\"' /out/report.json
     " ;;
+  apt-signed)
+    image=${2:-public.ecr.aws/ubuntu/ubuntu:22.04}
+    [ -f "$root/target/dist/apt-repo/dists/stable/InRelease" ] || { echo "no signed apt repo: cargo xtask dist apt-repo --sign"; exit 1; }
+    "$engine" run --rm --security-opt label=disable -v "$root/target/dist/apt-repo:/repo:ro" "$image" bash -c '
+      set -e; export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq >/dev/null 2>&1
+      apt-get install -y -qq --no-install-recommends ca-certificates >/dev/null 2>&1
+      # The public key is the only trust anchor: it goes where signed-by points, no apt-key.
+      install -Dm644 /repo/rvp-release.gpg /usr/share/keyrings/rvp-release.gpg
+      echo "deb [signed-by=/usr/share/keyrings/rvp-release.gpg] file:/repo stable main" > /etc/apt/sources.list.d/rvp.list
+      echo "== update from the signed repo"; apt-get update 2>&1 | grep -E "rvp|repo|stable|Err|W:|E:" || true
+      apt-cache policy rusty-video-player | head -4
+      apt-get install -y -qq --no-install-recommends rusty-video-player >/dev/null 2>&1
+      rvp --version && echo "installed from the signed repo: ok"
+      apt-get remove -y -qq rusty-video-player >/dev/null 2>&1; test ! -e /usr/bin/rvp && echo removed
+      echo "== a tampered repo must be refused"
+      mkdir -p /tmp/bad && cp -r /repo/. /tmp/bad/
+      sed -i "s/^Description: .*/Description: tampered/" /tmp/bad/dists/stable/InRelease
+      echo "deb [signed-by=/usr/share/keyrings/rvp-release.gpg] file:/tmp/bad stable main" > /etc/apt/sources.list.d/rvp.list
+      if apt-get update 2>&1 | tee /tmp/bad.log | grep -qE "not signed|BAD|invalid|signature"; then echo "tampered repo refused: ok"; else cat /tmp/bad.log; echo "TAMPERED REPO ACCEPTED"; exit 1; fi
+    ' ;;
+  rpm-signed)
+    image=${2:-registry.fedoraproject.org/fedora:44}
+    rpm=$(basename "$(ls "$rel"/rusty-video-player-*.x86_64.rpm | head -1)")
+    "$engine" run --rm --security-opt label=disable -e RPM="$rpm" -v "$rel:/pkgs:ro" -v "$root/packaging/keys:/keys:ro" "$image" bash -c '
+      set -e
+      echo "== before the key is imported"; rpm -K "/pkgs/$RPM" || true
+      rpm --import /keys/rvp-release.asc
+      echo "== after"; rpm -Kv "/pkgs/$RPM"
+      rpm -K "/pkgs/$RPM" | grep -q "signatures OK" && echo "signature ok"
+      cp "/pkgs/$RPM" /tmp/rvp.rpm
+      dnf install -y -q --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /tmp/rvp.rpm >/dev/null 2>&1
+      rvp --version && echo "installed (localpkg_gpgcheck=1)"
+      dnf remove -y -q rusty-video-player >/dev/null 2>&1; test ! -e /usr/bin/rvp && echo removed
+      echo "== a modified rpm must fail"
+      cp /tmp/rvp.rpm /tmp/bad.rpm
+      printf x | dd of=/tmp/bad.rpm bs=1 seek=$(( $(stat -c %s /tmp/bad.rpm) - 100 )) conv=notrunc 2>/dev/null
+      if rpm -K /tmp/bad.rpm; then echo "TAMPERED RPM ACCEPTED"; exit 1; else echo "tampered rpm refused: ok"; fi
+    ' ;;
   *) echo "unknown kind $kind"; exit 2 ;;
 esac
 echo "== screenshot: $out/shot.png"
