@@ -23,7 +23,7 @@ milestone list, and [`CLAUDE.md`](CLAUDE.md) for project rules.
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
 | `crates/rvp-ui`, `crates/theme` | the UI and the generated design tokens |
 | `crates/rvp-host-{headless,web,rb}` | hosts: native test harness, browser, Rusty Bucket |
-| `xtask`, `tools/` | `cargo xtask theme | check | fixtures` |
+| `xtask`, `tools/` | `cargo xtask theme`, `check`, `fixtures` |
 
 ## Build and test
 
