@@ -1,10 +1,11 @@
 # rusty-video-player — rules
 
 - Commit & push after each substantial milestone.
-- Use at most TWO sub-agents at a time (user, 2026-10-05, until further notice; was one): the `coder` agent (`.claude/agents/coder.md`, Sonnet 5.5, effort high). It does all coding, docs and tests; the main session only orchestrates.
+- Use at most ONE sub-agent at a time (user, 2026-10-05; briefly allowed two, now back to one): the `coder` agent (`.claude/agents/coder.md`, Sonnet 5.5, effort high). It does all coding, docs and tests; the main session only orchestrates.
 - Be efficient: minimal reporting, no superfluous output. Ask the user only when genuinely blocked.
 - Never use `rm -rf` or other recursive deletes (user rule). Put scratch/build output in fresh `/tmp` dirs (`mktemp -d /tmp/rvp-XXXX`) and overwrite in place.
 - Never run artificial CPU load generators (`yes`, busy loops, stress) on this machine (user rule).
+- Run all tests headless (user rule): Playwright headless, desktop/Wine under `xvfb-run -a` with DISPLAY/WAYLAND_DISPLAY overridden. Never open windows or steal focus on the user's session.
 
 ## Context
 - Goal: a VLC-derived media player in Rust, compiled to WebAssembly, as an app for Rusty Bucket (`../rust-os`, plan index: `docs/planning/README.md`).
@@ -22,3 +23,4 @@
 - **Standalone (user, 2026-10-05):** RVP is Rusty Bucket's built-in Media app (audio + video), but it must remain a shippable independent app that never requires Rusty Bucket. Targets: an installable web app (PWA) and a native desktop app (Linux first). Rusty Bucket is just one more host; nothing in core/ui/app may depend on it. Separate builds/editions per target are fine (user OK); prefer one shared codebase with per-host crates.
 - **Packaging (user, 2026-10-05), at the end (M11):** Flatpak, AppImage, .deb, .rpm, and a Windows .exe with an Inno Setup installer. Full app polish: logo, icon set at every size (.ico/.icns/hicolor PNG+SVG), .desktop file, AppStream metainfo, MIME/file associations, signing hooks. Reference: `../unicorn-viz` packaging. The desktop host must therefore support Windows as well as Linux.
 - **Name (user, 2026-10-05): the official product name is "Rusty Wave".** Official icon master: `../rust-os/assets/images/icons/Rusty Wave app icon.png` (1254px RGBA; copy it into `assets/brand/`, never edit ../rust-os). Internal crate prefix `rvp-` stays as the codename; everything user-facing (app name, binary, app ID, packages, installer, PWA, docs) says Rusty Wave.
+- **Distribution (user, 2026-10-05):** every time new installers build and verify, copy them (with SHA256SUMS and .asc signatures) to `/home/jj/projects/_software-dist/rusty-wave/` and to `s3://ut-software-dist/` (bucket root, as Unicorn Viz does). Name the files with the version (`rusty-wave-<ver>-...`) and never overwrite an existing version.
