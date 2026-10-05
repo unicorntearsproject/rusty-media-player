@@ -49,6 +49,6 @@ modules:
       # @APP-SOURCE@
       - type: git
         url: https://github.com/iDoMeteor/rusty-video-player.git
-        tag: v0.0.1
+        tag: v0.0.2
       # @END-APP-SOURCE@
       - cargo-sources.json

@@ -353,7 +353,7 @@ within the first release; **nice** = polish.
 
 Reviewed 2026-10-05 against rvp commit `183c214` (crossfade and auto-level merged) and `../rust-os` `6817f60` (App API draft v0.2 is `cd1ce44`). Read:
 `app-api.md`, `app-api-events.md`, `app-api-reference.md`, `app-api-media.md`, `app-api-files.md`, `bucket-format.md`. Nothing in `../rust-os` was edited.
-**Result: 24 of the 28 items are fully resolved, 3 are resolved apart from a small leftover each (items 4, 5, 12; items 2, 7, 13 and 21 also carry a
+**Result: 23 of the 28 items are resolved, 3 are partly resolved (items 4, 5 and 12; many resolved items also carry a
 nit, listed in the delta), 1 is deferred by agreement (26), and item 28 is ours.** No blocker is left. The new draft is a faithful and careful
 adoption; the leftovers below are clarifications, not redesigns.
 

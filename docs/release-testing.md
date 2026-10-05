@@ -5,7 +5,7 @@ browsers. Nothing here is public yet; build and sign locally, test, then decide.
 end. See [`packaging.md`](packaging.md) for how the files are built and signed.
 
 Release key: `E13F F843 723D 5406 8E45  A3FF 54BF 2FA4 0709 3CEE` (key ID `54BF2FA407093CEE`, "Rusty Wave Release", expires 2028-10-04).
-Version below: `0.0.1` (replace with what you built).
+Version below: `0.0.2` (replace with what you built).
 
 ## 0. Build and collect the files (on the dev machine)
 
@@ -48,7 +48,7 @@ gpg --verify <file>.asc <file>              # any single file
 Windows (PowerShell; the signature check needs Gpg4win, the checksum does not):
 
 ```powershell
-Get-FileHash .\rusty-wave-0.0.1-x64-Setup.exe -Algorithm SHA256     # compare with the line in SHA256SUMS
+Get-FileHash .\rusty-wave-0.0.2-x64-Setup.exe -Algorithm SHA256     # compare with the line in SHA256SUMS
 gpg --import rusty-wave-release.asc; gpg --verify SHA256SUMS.asc SHA256SUMS      # optional, needs Gpg4win
 ```
 
@@ -56,7 +56,7 @@ gpg --import rusty-wave-release.asc; gpg --verify SHA256SUMS.asc SHA256SUMS     
 
 Do this once per package type on each machine, with real speakers or headphones.
 
-- [ ] **Starts**: `rusty-wave --version` prints `rusty-wave 0.0.1`; the window opens in about a second with the right icon and title; no console window on Windows.
+- [ ] **Starts**: `rusty-wave --version` prints `rusty-wave 0.0.2`; the window opens in about a second with the right icon and title; no console window on Windows.
 - [ ] **Video**: play an H.264 MP4, an AV1 WebM and a VP9 WebM. Smooth, no tearing, lip sync right (a clapper or a speaking face), seeking with the arrows
   and by clicking the bar lands where it should; full screen (`F` / `F11`) and back; `Space` pauses; `[` `]` change speed with pitch preserved.
 - [ ] **Audio**: sound comes out of the default device at the right pitch and speed (no chipmunk or slow-motion, no crackle when the window is dragged or the
@@ -92,8 +92,8 @@ Test on at least: Ubuntu 22.04 and 24.04, Debian 12 (and 13), Fedora (current), 
 Direct install:
 
 ```sh
-gpg --verify rusty-wave_0.0.1_amd64.deb.asc rusty-wave_0.0.1_amd64.deb
-sudo apt install ./rusty-wave_0.0.1_amd64.deb          # pulls the dependencies; apt may warn that ./file is "not sandboxed", that is normal
+gpg --verify rusty-wave_0.0.2_amd64.deb.asc rusty-wave_0.0.2_amd64.deb
+sudo apt install ./rusty-wave_0.0.2_amd64.deb          # pulls the dependencies; apt may warn that ./file is "not sandboxed", that is normal
 dpkg -s rusty-wave | grep -E 'Version|Depends'
 dpkg -L rusty-wave | head -30                          # /usr/bin/rusty-wave, desktop file, metainfo, icons, man page, licences
 rusty-wave --version && man rusty-wave
@@ -124,8 +124,8 @@ sudo apt install rusty-wave
 ```sh
 sudo rpm --import rusty-wave-release.asc                 # once; rpm now trusts the key (this is system-wide: remove it again below)
 rpm -q gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}  %{SUMMARY}\n' | grep -i 'Rusty Video'
-rpm -Kv rusty-wave-0.0.1-1.x86_64.rpm     # "EdDSA/SHA512 signature, key fingerprint: e13ff843...3cee: OK", header and payload digests OK
-sudo dnf install ./rusty-wave-0.0.1-1.x86_64.rpm          # openSUSE: sudo zypper install ./rusty-wave-0.0.1-1.x86_64.rpm
+rpm -Kv rusty-wave-0.0.2-1.x86_64.rpm     # "EdDSA/SHA512 signature, key fingerprint: e13ff843...3cee: OK", header and payload digests OK
+sudo dnf install ./rusty-wave-0.0.2-1.x86_64.rpm          # openSUSE: sudo zypper install ./rusty-wave-0.0.2-1.x86_64.rpm
 rpm -qi rusty-wave; rpm -ql rusty-wave | head -30
 rusty-wave --version
 ```
@@ -140,12 +140,12 @@ rusty-wave --version
 ### 3.3 AppImage (any distro; the Arch / immutable-distro case)
 
 ```sh
-gpg --verify rusty-wave-0.0.1-x86_64.AppImage.asc rusty-wave-0.0.1-x86_64.AppImage
-python3 tools/packaging/verify-appimage-sig.py rusty-wave-0.0.1-x86_64.AppImage E13FF843723D54068E45A3FF54BF2FA407093CEE packaging/keys/rusty-wave-release.asc   # the embedded signature
-chmod +x rusty-wave-0.0.1-x86_64.AppImage
-./rusty-wave-0.0.1-x86_64.AppImage --version
-./rusty-wave-0.0.1-x86_64.AppImage ~/Videos/some.mp4
-./rusty-wave-0.0.1-x86_64.AppImage --appimage-extract-and-run --version     # where FUSE 2 is missing (Fedora 40+, Ubuntu 22.04+ without libfuse2)
+gpg --verify rusty-wave-0.0.2-x86_64.AppImage.asc rusty-wave-0.0.2-x86_64.AppImage
+python3 tools/packaging/verify-appimage-sig.py rusty-wave-0.0.2-x86_64.AppImage E13FF843723D54068E45A3FF54BF2FA407093CEE packaging/keys/rusty-wave-release.asc   # the embedded signature
+chmod +x rusty-wave-0.0.2-x86_64.AppImage
+./rusty-wave-0.0.2-x86_64.AppImage --version
+./rusty-wave-0.0.2-x86_64.AppImage ~/Videos/some.mp4
+./rusty-wave-0.0.2-x86_64.AppImage --appimage-extract-and-run --version     # where FUSE 2 is missing (Fedora 40+, Ubuntu 22.04+ without libfuse2)
 ```
 
 - [ ] Runs from `~/Downloads` and from a path with spaces; with FUSE missing it prints the usual "libfuse.so.2" error and `--appimage-extract-and-run` works.
@@ -177,7 +177,7 @@ flatpak run io.github.idometeor.RustyWave ~/Videos/some.mp4
 b) From the `.flatpakref` (installs the app and adds the remote named `rusty-wave`): `flatpak install --user --from io.github.idometeor.RustyWave.flatpakref`
 (its `Url=` must be reachable, as above). GNOME Software opens `.flatpakref` files directly.
 
-c) From the single-file bundle (works offline except for the runtime): `flatpak install --user --bundle io.github.idometeor.RustyWave-0.0.1.flatpak`.
+c) From the single-file bundle (works offline except for the runtime): `flatpak install --user --bundle io.github.idometeor.RustyWave-0.0.2.flatpak`.
 
 - [ ] All three routes install; the app appears in the menu with its icon; `flatpak run` starts it.
 - [ ] Sandbox: `flatpak info --show-permissions io.github.idometeor.RustyWave` lists Wayland, fallback X11, PulseAudio, `xdg-music:ro`, `xdg-videos:ro`, the MPRIS names, and no network, no home, no GPU.
@@ -192,7 +192,7 @@ c) From the single-file bundle (works offline except for the runtime): `flatpak 
 
 ### 3.5 Tarball
 
-`rvp-0.0.1-linux-x86_64.tar.gz`: unpack to a temp folder, `./usr/bin/rusty-wave --version` (needs the runtime libraries of section 3); the tree mirrors `/usr`.
+`rvp-0.0.2-linux-x86_64.tar.gz`: unpack to a temp folder, `./usr/bin/rusty-wave --version` (needs the runtime libraries of section 3); the tree mirrors `/usr`.
 
 ## 4. Quick container checks (dev machine, no hardware)
 
@@ -206,7 +206,7 @@ tools/packaging/verify-linux.sh rpm-signed   # import only the public key, rpm -
 
 ## 5. Windows (a real PC: Windows 10 22H2 and Windows 11; ideally one laptop with a touch/HiDPI screen and one desktop with two monitors at different scales)
 
-Files: `rusty-wave-0.0.1-x64-Setup.exe` (installer) and `rvp-0.0.1-windows-x64.zip` (portable). Both are **unsigned** (no code-signing certificate yet; the GPG
+Files: `rusty-wave-0.0.2-x64-Setup.exe` (installer) and `rvp-0.0.2-windows-x64.zip` (portable). Both are **unsigned** (no code-signing certificate yet; the GPG
 signature of the checksums is the only proof). Take a snapshot or use a throwaway user/VM as well as the real machine.
 
 **SmartScreen and Defender** (what an unsigned download looks like):
@@ -214,7 +214,7 @@ signature of the checksums is the only proof). Take a snapshot or use a throwawa
 - [ ] Download the Setup.exe through a browser (so it gets the Mark of the Web). Running it shows "Windows protected your PC" with publisher "Unknown publisher"; "More info" reveals
   "Run anyway". Record the exact text and whether it appears for a file copied from a USB stick or a network share (usually not).
 - [ ] Defender / SmartScreen does not quarantine or delete `rusty-wave.exe` (a Rust GUI exe can trip heuristics): if it does, record the detection name and submit the file to Microsoft as a false positive.
-- [ ] Right-click the exe, Properties: no digital-signature tab (expected); Details tab shows product name, version 0.0.1, file description, copyright, the icon.
+- [ ] Right-click the exe, Properties: no digital-signature tab (expected); Details tab shows product name, version 0.0.2, file description, copyright, the icon.
 
 **Installer** (`Setup.exe`):
 
@@ -259,7 +259,7 @@ signature of the checksums is the only proof). Take a snapshot or use a throwawa
 
 ## 6. Web app (PWA)
 
-Build and serve it: `cargo xtask web && cargo xtask serve` (http://127.0.0.1:8080, with the COOP/COEP headers for the threaded decoder), or unzip `rusty-wave-web-0.0.1.zip` on any HTTPS host.
+Build and serve it: `cargo xtask web && cargo xtask serve` (http://127.0.0.2:8080, with the COOP/COEP headers for the threaded decoder), or unzip `rusty-wave-web-0.0.2.zip` on any HTTPS host.
 A service worker and installing need a secure context: `localhost` counts, a plain `http://<lan-ip>:8080` does not. To test from another machine use a tunnel that gives HTTPS
 (`ssh -L 8080:localhost:8080 dev-machine` makes `localhost:8080` secure on the test machine) or deploy the zip to an HTTPS host. Without COOP/COEP the page runs the single-threaded decoder
 (fine for 720p, slower for 1080p); serve with the headers (`cargo xtask serve` does) to test the threaded decoder.
