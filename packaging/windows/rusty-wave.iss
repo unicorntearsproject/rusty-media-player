@@ -1,24 +1,24 @@
-; Rusty Video Player: Windows installer (Inno Setup 6.3 or newer).
+; Rusty Wave: Windows installer (Inno Setup 6.3 or newer).
 ;
-; Packages the tree `cargo xtask dist windows` stages (rvp.exe, the licences, the icon). Build it by hand with
+; Packages the tree `cargo xtask dist windows` stages (rusty-wave.exe, the licences, the icon). Build it by hand with
 ;
-;   ISCC.exe /DAppVersion=0.1.0 /DStageDir=..\..\target\dist\windows\stage packaging\windows\rvp.iss
+;   ISCC.exe /DAppVersion=0.1.0 /DStageDir=..\..\target\dist\windows\stage packaging\windows\rusty-wave.iss
 ;
 ; or let `cargo xtask dist installer` do it (it passes the version from Cargo.toml).
 ;
 ; What it installs: the program for the current user (no administrator needed) or for all users (the wizard offers it), a Start menu
 ; entry, an optional desktop shortcut, an optional "add to PATH", and file associations. The associations are *registered*, not forced:
-; Rusty Video Player shows up under "Open with" and in Settings > Default apps for each media type, and the user picks the default
+; Rusty Wave shows up under "Open with" and in Settings > Default apps for each media type, and the user picks the default
 ; (Windows 10 and 11 do not let an installer take over a default). The uninstaller removes all of it and, if the user says so, the
-; settings and the library index under %APPDATA%\rvp.
+; settings and the library index under %APPDATA%\rusty-wave.
 ;
 ; Signing: pass /S"rvpsign=<command with $f>" to ISCC and /DSign=1 (CI does this when a code-signing certificate is available;
-; see docs/packaging.md). Until then the installer and rvp.exe are unsigned and SmartScreen asks for "More info > Run anyway".
+; see docs/packaging.md). Until then the installer and rusty-wave.exe are unsigned and SmartScreen asks for "More info > Run anyway".
 
-#define AppName "Rusty Video Player"
-#define AppExe "rvp.exe"
-#define AppId "io.github.idometeor.RustyVideoPlayer"
-#define AppPublisher "Rusty Video Player contributors"
+#define AppName "Rusty Wave"
+#define AppExe "rusty-wave.exe"
+#define AppId "io.github.idometeor.RustyWave"
+#define AppPublisher "Rusty Wave contributors"
 #define AppURL "https://github.com/iDoMeteor/rusty-video-player"
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -33,7 +33,7 @@
 #define NumVersion Copy(AppVersion, 1, Pos("-", AppVersion + "-") - 1) + ".0"
 
 [Setup]
-AppId={{D79C1CAA-7471-4519-9D40-4C0DB70B0FE1}
+AppId={{90E0797D-8D93-4AD7-BA82-6B097C228228}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -48,8 +48,8 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 LicenseFile={#StageDir}\LICENSE.txt
 OutputDir={#OutDir}
-OutputBaseFilename=RustyVideoPlayer-{#AppVersion}-x64-Setup
-SetupIconFile=..\icons\rvp.ico
+OutputBaseFilename=rusty-wave-{#AppVersion}-x64-Setup
+SetupIconFile=..\icons\rusty-wave.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 WizardStyle=modern
@@ -77,14 +77,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "assoc"; Description: "Show {#AppName} under ""Open with"" and in Default apps for audio and video files"; GroupDescription: "File types:"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
-Name: "addtopath"; Description: "Add rvp to PATH (run it from any terminal)"; GroupDescription: "Command line:"; Flags: unchecked
+Name: "addtopath"; Description: "Add rusty-wave to PATH (run it from any terminal)"; GroupDescription: "Command line:"; Flags: unchecked
 
 [Files]
 Source: "{#StageDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\THIRD_PARTY_LICENSES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
-Source: "..\icons\rvp.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\icons\rusty-wave.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppId}"
@@ -96,65 +96,65 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
-Root: HKA; Subkey: "Software\Classes\{#AppId}.Media"; ValueType: string; ValueData: "Media file (Rusty Video Player)"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\{#AppId}.Media"; ValueType: string; ValueData: "Media file (Rusty Wave)"; Flags: uninsdeletekey; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\{#AppId}.Media\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\{#AppId}.Media\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
-Root: HKA; Subkey: "Software\Classes\{#AppId}.Media\shell\enqueue"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Add to Rusty Video Player queue"; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\{#AppId}.Media\shell\enqueue"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Add to Rusty Wave queue"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\{#AppId}.Media\shell\enqueue\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Plays video and music, with a library, a queue and a visualizer."; Tasks: assoc
-Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "RustyVideoPlayer"; ValueData: "Software\RustyVideoPlayer\Capabilities"; Flags: uninsdeletevalue; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Plays video and music, with a library, a queue and a visualizer."; Tasks: assoc
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "RustyWave"; ValueData: "Software\RustyWave\Capabilities"; Flags: uninsdeletevalue; Tasks: assoc
 ; Three entries per file type: the capability (what Default apps lists), the type's OpenWithProgids, the program's SupportedTypes.
 ; (Generated from the list in docs/packaging.md; keep the two in step with MimeType= in the .desktop file.)
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp4"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp4"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.mp4\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".mp4"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4v"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4v"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.m4v\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".m4v"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mkv"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mkv"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.mkv\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".mkv"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".webm"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".webm"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.webm\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".webm"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mka"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mka"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.mka\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".mka"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp3"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp3"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.mp3\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".mp3"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".flac"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".flac"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.flac\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".flac"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ogg"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ogg"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.ogg\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".ogg"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".oga"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".oga"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.oga\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".oga"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".opus"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".opus"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.opus\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".opus"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".wav"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".wav"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.wav\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".wav"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4a"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4a"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.m4a\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".m4a"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4b"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4b"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.m4b\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".m4b"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".aac"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".aac"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.aac\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".aac"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m3u"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m3u"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.m3u\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".m3u"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m3u8"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m3u8"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.m3u8\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".m3u8"; ValueData: ""; Tasks: assoc
-Root: HKA; Subkey: "Software\RustyVideoPlayer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".pls"; ValueData: "{#AppId}.Media"; Tasks: assoc
+Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".pls"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.pls\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".pls"; ValueData: ""; Tasks: assoc
 Root: HKA; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
@@ -199,7 +199,7 @@ begin
     RemoveFromPath();
   if CurUninstallStep = usPostUninstall then
   begin
-    Data := ExpandConstant('{userappdata}\rvp');
+    Data := ExpandConstant('{userappdata}\rusty-wave');
     if DirExists(Data) and not UninstallSilent then
       if MsgBox('Also remove your settings, library index and saved queue?' + #13#10 + Data, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
         DelTree(Data, True, True, True);

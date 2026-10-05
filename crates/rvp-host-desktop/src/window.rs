@@ -21,9 +21,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{CursorIcon, Fullscreen, Icon, Window, WindowId};
 
 /// The application id: the desktop file, the icon, the Wayland app id, the MPRIS name and the Flatpak id.
-pub const APP_ID: &str = "io.github.idometeor.RustyVideoPlayer";
+pub const APP_ID: &str = "io.github.idometeor.RustyWave";
 /// What the window's title bar says when nothing plays.
-pub const APP_NAME: &str = "Rusty Video Player";
+pub const APP_NAME: &str = "Rusty Wave";
 
 const WINDOW_KEY: &str = "desktop/window";
 const ROOTS_KEY: &str = "desktop/roots";
@@ -35,7 +35,7 @@ pub fn run(opts: Options, data_dir: PathBuf) -> i32 {
     let event_loop = match EventLoop::new() {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("rvp: cannot open a window: {e}");
+            eprintln!("rusty-wave: cannot open a window: {e}");
             return 1;
         }
     };
@@ -68,7 +68,7 @@ pub fn run(opts: Options, data_dir: PathBuf) -> i32 {
         quitting: false,
     };
     if let Err(e) = event_loop.run_app(&mut handler) {
-        eprintln!("rvp: {e}");
+        eprintln!("rusty-wave: {e}");
         return 1;
     }
     handler.exit_code
@@ -124,8 +124,8 @@ impl Handler {
         {
             use winit::platform::wayland::WindowAttributesExtWayland;
             use winit::platform::x11::WindowAttributesExtX11;
-            attrs = WindowAttributesExtWayland::with_name(attrs, APP_ID, "rvp");
-            attrs = WindowAttributesExtX11::with_name(attrs, APP_ID, "rvp");
+            attrs = WindowAttributesExtWayland::with_name(attrs, APP_ID, "rusty-wave");
+            attrs = WindowAttributesExtX11::with_name(attrs, APP_ID, "rusty-wave");
         }
         if self.opts.fullscreen {
             attrs = attrs.with_fullscreen(Some(Fullscreen::Borderless(None)));
@@ -133,7 +133,7 @@ impl Handler {
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {
-                eprintln!("rvp: cannot create the window: {e}");
+                eprintln!("rusty-wave: cannot create the window: {e}");
                 self.exit_code = 1;
                 el.exit();
                 return;
@@ -163,14 +163,14 @@ impl Handler {
         let ctx = match softbuffer::Context::new(window.clone()) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("rvp: cannot draw to the window: {e}");
+                eprintln!("rusty-wave: cannot draw to the window: {e}");
                 return;
             }
         };
         let mut sb = match softbuffer::Surface::new(&ctx, window.clone()) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("rvp: cannot draw to the window: {e}");
+                eprintln!("rusty-wave: cannot draw to the window: {e}");
                 return;
             }
         };
@@ -211,7 +211,7 @@ impl Handler {
         let cache = self.host.storage.dir().join("cache");
         match DesktopNowPlaying::new(APP_NAME, &dbus_name, hwnd, cache) {
             Ok(m) => self.host.media = Some(m),
-            Err(e) => eprintln!("rvp: media controls are not available: {e}"),
+            Err(e) => eprintln!("rusty-wave: media controls are not available: {e}"),
         }
     }
 
@@ -539,7 +539,7 @@ impl ApplicationHandler for Handler {
 /// The window icon from the embedded PNG.
 fn window_icon() -> Option<Icon> {
     static ICON: &[u8] = include_bytes!(
-        "../../../packaging/icons/hicolor/256x256/apps/io.github.idometeor.RustyVideoPlayer.png"
+        "../../../packaging/icons/hicolor/256x256/apps/io.github.idometeor.RustyWave.png"
     );
     let img = rvp_library::art::decode(ICON, 256)?;
     Icon::from_rgba(img.rgba, img.w, img.h).ok()
@@ -564,8 +564,8 @@ pub fn data_dir(opts: &Options) -> PathBuf {
     if let Some(d) = &opts.data_dir {
         return d.clone();
     }
-    directories::ProjectDirs::from("", "", "rvp")
-        .map_or_else(|| std::env::temp_dir().join("rvp"), |d| d.data_dir().to_path_buf())
+    directories::ProjectDirs::from("", "", "rusty-wave")
+        .map_or_else(|| std::env::temp_dir().join("rusty-wave"), |d| d.data_dir().to_path_buf())
 }
 
 // `Storage` is used through `host.storage` in sync helpers above.

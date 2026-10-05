@@ -550,6 +550,46 @@ impl FrameBuffer {
         }
     }
 
+    /// Draw premultiplied-alpha RGBA art (`n * n` pixels) scaled bilinearly into `dst` and blended over what is there.
+    /// The art is clamped at its edges (its border is transparent), `opacity` scales all of it.
+    pub fn blit_premul(&mut self, dst: RectF, src: &[u8], n: u32, opacity: f32) {
+        if n < 2 || dst.w < 1.0 || dst.h < 1.0 || src.len() < n as usize * n as usize * 4 {
+            return;
+        }
+        let x0 = (floorf(dst.x) as i32).max(0);
+        let y0 = (floorf(dst.y) as i32).max(0);
+        let x1 = (libm::ceilf(dst.right()) as i32).min(self.width as i32);
+        let y1 = (libm::ceilf(dst.bottom()) as i32).min(self.height as i32);
+        let last = (n - 1) as f32;
+        let texel = |x: usize, y: usize, c: usize| src[(y * n as usize + x) * 4 + c] as f32;
+        for y in y0..y1 {
+            let fy = ((y as f32 + 0.5 - dst.y) * (n as f32 / dst.h) - 0.5).clamp(0.0, last);
+            let (j0, wy) = (fy as usize, fy - floorf(fy));
+            let j1 = (j0 + 1).min(n as usize - 1);
+            for x in x0..x1 {
+                let fx = ((x as f32 + 0.5 - dst.x) * (n as f32 / dst.w) - 0.5).clamp(0.0, last);
+                let (i0, wx) = (fx as usize, fx - floorf(fx));
+                let i1 = (i0 + 1).min(n as usize - 1);
+                let mut p = [0.0f32; 4];
+                for (c, v) in p.iter_mut().enumerate() {
+                    let top = texel(i0, j0, c) * (1.0 - wx) + texel(i1, j0, c) * wx;
+                    let bot = texel(i0, j1, c) * (1.0 - wx) + texel(i1, j1, c) * wx;
+                    *v = (top * (1.0 - wy) + bot * wy) * opacity;
+                }
+                let a = p[3] * (1.0 / 255.0);
+                if a <= 0.002 {
+                    continue;
+                }
+                let i = (y as usize * self.width as usize + x as usize) * 4;
+                for c in 0..3 {
+                    let d = self.pixels[i + c] as f32;
+                    self.pixels[i + c] = (p[c] + d * (1.0 - a) + 0.5).min(255.0) as u8;
+                }
+                self.pixels[i + 3] = 255;
+            }
+        }
+    }
+
     /// Copy another buffer of the same size over this one.
     pub fn copy_from(&mut self, other: &FrameBuffer) {
         if self.pixels.len() == other.pixels.len() {

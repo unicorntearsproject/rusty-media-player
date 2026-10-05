@@ -1,12 +1,12 @@
-.TH RVP 1 "@DATE@" "Rusty Video Player @VERSION@" "User Commands"
+.TH RUSTY-WAVE 1 "@DATE@" "Rusty Wave @VERSION@" "User Commands"
 .SH NAME
-rvp \- play video and music
+rusty-wave \- play video and music
 .SH SYNOPSIS
-.B rvp
+.B rusty-wave
 [\fIOPTIONS\fR] [\fIFILE\fR|\fIFOLDER\fR|\fBfile://\fR\fIURI\fR]...
 .SH DESCRIPTION
-.B rvp
-is Rusty Video Player: a standalone player for video and music with a library, a queue and a visualizer. It decodes H.264, AV1 and
+.B rusty-wave
+is Rusty Wave: a standalone player for video and music with a library, a queue and a visualizer. It decodes H.264, AV1 and
 VP9 video and AAC, MP3, FLAC, Opus, Vorbis and PCM audio in MP4, Matroska, WebM, Ogg, WAV and raw audio files with its own decoders,
 so no codec packages are needed.
 .PP
@@ -86,9 +86,9 @@ In the library: albums, artists, tracks, playlists, queue, now playing, the visu
 Right-click anything for a menu with every action. See the project README for the complete list.
 .SH FILES
 .TP
-.I ~/.local/share/rvp/
+.I ~/.local/share/rusty-wave/
 Settings, the library index, cover thumbnails, the saved queue and resume positions (on Windows
-.I %APPDATA%\\rvp\\data\fR).
+.I %APPDATA%\\rusty-wave\\data\fR).
 .SH ENVIRONMENT
 .TP
 .B RVP_REDUCE_MOTION=1

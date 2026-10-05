@@ -1,4 +1,4 @@
-# Cross-builds rvp.exe (x86_64-pc-windows-gnu, MinGW-w64) and runs Inno Setup under wine, on a Linux machine. `cargo xtask dist windows`
+# Cross-builds rusty-wave.exe (x86_64-pc-windows-gnu, MinGW-w64) and runs Inno Setup under wine, on a Linux machine. `cargo xtask dist windows`
 # and `cargo xtask dist installer` build this image on first use and mount the repository, the Rust toolchain and a wine prefix.
 # CI does not use it: the Windows job runs on a windows-latest runner with the MSVC toolchain and a native Inno Setup.
 ARG BASE=registry.fedoraproject.org/fedora:44

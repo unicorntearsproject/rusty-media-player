@@ -1,7 +1,7 @@
 {
-  "id": "io.github.idometeor.RustyVideoPlayer",
-  "name": "Rusty Video Player",
-  "short_name": "RVP",
+  "id": "io.github.idometeor.RustyWave",
+  "name": "Rusty Wave",
+  "short_name": "Rusty Wave",
   "description": "Play video and music: a library, a queue, subtitles and a visualizer. Works offline.",
   "lang": "en",
   "dir": "ltr",
@@ -16,8 +16,7 @@
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "file_handlers": [
     {

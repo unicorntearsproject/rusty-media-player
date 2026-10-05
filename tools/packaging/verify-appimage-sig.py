@@ -4,7 +4,7 @@
     tools/packaging/verify-appimage-sig.py <file.AppImage> <fingerprint> [public-key.asc]
 
 The signature is over the hex SHA-256 of the file with those two sections zeroed. It is checked with `gpg` in a throwaway keyring that holds
-only the given public key (default: packaging/keys/rvp-release.asc), so it proves the file was signed by that key, not merely by the key
+only the given public key (default: packaging/keys/rusty-wave-release.asc), so it proves the file was signed by that key, not merely by the key
 embedded in the file. Exit status 0 only when gpg reports a valid signature by the fingerprint and the embedded key is the same key.
 """
 import hashlib, os, re, subprocess, sys, tempfile
@@ -12,7 +12,7 @@ import hashlib, os, re, subprocess, sys, tempfile
 def main():
     path, fpr = sys.argv[1], sys.argv[2].replace(" ", "").upper()
     here = os.path.dirname(os.path.abspath(__file__))
-    pub = sys.argv[3] if len(sys.argv) > 3 else os.path.join(here, "../../packaging/keys/rvp-release.asc")
+    pub = sys.argv[3] if len(sys.argv) > 3 else os.path.join(here, "../../packaging/keys/rusty-wave-release.asc")
     data = open(path, "rb").read()
     out = subprocess.check_output(["readelf", "-S", "-W", path]).decode()
     def section(name):

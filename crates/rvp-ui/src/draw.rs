@@ -131,16 +131,13 @@ impl Ui {
 
         let cx = card.cx();
         let mut y = card.y + 36.0 * s;
-        let kicker = "RUSTY VIDEO PLAYER";
+        let kicker = "RUSTY WAVE";
         let kw = self.text_w(Face::SansBold, 11.0, kicker, 3.0);
         self.text(fb, Face::SansBold, 11.0, cx - kw * 0.5, y, kicker, t::VIOLET_400, 1.0, 3.0);
-        y += 48.0 * s;
-        // Icon medallion.
-        let ring = RectF::new(cx - 32.0 * s, y - 32.0 * s, 64.0 * s, 64.0 * s);
-        fb.fill_rrect(ring, 32.0 * s, Paint::Solid(t::INK_700), 1.0);
-        fb.stroke_rrect(ring, 32.0 * s, 1.5 * s, fade(t::CYAN_500, 0.55), 1.0);
-        self.icon(fb, Icon::Film, cx, y, 28.0, t::CYAN_500, 1.0, false);
-        y += 58.0 * s;
+        y += 54.0 * s;
+        // The logo.
+        crate::logo::draw(fb, RectF::new(cx - 44.0 * s, y - 44.0 * s, 88.0 * s, 88.0 * s), 1.0);
+        y += 60.0 * s;
         let head = if over { "Let go to play" } else { "Drop a video here" };
         let hw = self.text_w(Face::SansBold, 26.0, head, -0.3);
         self.text(fb, Face::SansBold, 26.0, cx - hw * 0.5, y, head, t::TEXT_STRONG, 1.0, -0.3);

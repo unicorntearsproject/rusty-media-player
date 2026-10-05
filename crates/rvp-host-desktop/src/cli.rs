@@ -1,12 +1,12 @@
 //! The command line.
 use std::path::PathBuf;
 
-/// What `rvp --help` says.
+/// What `rusty-wave --help` says.
 pub const HELP: &str = "\
-Rusty Video Player: a standalone media player for video and music.
+Rusty Wave: a standalone media player for video and music.
 
 USAGE:
-    rvp [OPTIONS] [FILE|FOLDER|file:// URI]...
+    rusty-wave [OPTIONS] [FILE|FOLDER|file:// URI]...
 
 Files open as the queue and the first one plays (subtitle files join the video that is playing, playlist files are imported).
 A folder is added to the music library and scanned.

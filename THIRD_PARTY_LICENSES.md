@@ -27,7 +27,7 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 
 ## Desktop host and packaging (M11)
 
-Linked into `rvp` (`rvp-host-desktop`) only; the browser build and the `no_std` crates do not have them. Checked with `cargo metadata` for
+Linked into `rusty-wave` (`rvp-host-desktop`) only; the browser build and the `no_std` crates do not have them. Checked with `cargo metadata` for
 `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu` on 2026-10-05: 188 crates on Linux, 141 on Windows, nothing outside MIT, Apache-2.0,
 Zlib, BSD-2/3-Clause, ISC, 0BSD, Unlicense, CC0-1.0, Unicode-3.0 and MPL-2.0.
 
@@ -42,16 +42,17 @@ Zlib, BSD-2/3-Clause, ISC, 0BSD, Unlicense, CC0-1.0, Unicode-3.0 and MPL-2.0.
 | `fontdb` 0.24 and `ttf-parser` 0.25 (finding system fonts for scripts the bundled fonts lack) | MIT; MIT OR Apache-2.0 | Fonts are only *read* from where the system keeps them, never copied into a package. |
 | `png` 0.18 (the `--screenshot` option) | MIT OR Apache-2.0 | |
 | `windows-sys` 0.61 (`AttachConsole`) and the `windows` crates (Windows only) | MIT OR Apache-2.0 | |
-| `embed-resource` 3 (build script: the icon, version information and manifest in `rvp.exe`) | MIT | A build tool; uses `windres` (MinGW-w64) or `rc.exe`. |
+| `embed-resource` 3 (build script: the icon, version information and manifest in `rusty-wave.exe`) | MIT | A build tool; uses `windres` (MinGW-w64) or `rc.exe`. |
 
 Packaging tools, run by `cargo xtask dist` and the release workflow; none of them is linked into or shipped with the program: `cargo-deb`
 (MIT), `cargo-generate-rpm` (MIT), `appimagetool` (MIT) and the AppImage runtime it embeds in the `.AppImage` (MIT), `flatpak-builder`
 (LGPL-2.1+), `flatpak-cargo-generator.py` (MIT, `tools/flatpak-cargo-generator.py`), Inno Setup 6 (its own licence, free for this use; the
-generated installer carries Inno Setup's small stub, which its licence allows without a notice), `resvg` (MPL-2.0, only to draw the icons,
+generated installer carries Inno Setup's small stub, which its licence allows without a notice), Pillow and numpy (only to size the icons,
 `tools/gen-brand.py`), `appstreamcli`, `desktop-file-validate`, Wine and MinGW-w64 (the Windows cross build and installer test).
 
-Brand: the Rusty Video Player logo and icons (`assets/brand`, `packaging/icons`, `web/icons`) are original work made with Unicorn Tears
-design-system colours (`tools/gen-brand.py`); they contain no traced or copied art, no VLC cone, and no part of the mascot.
+Brand: the Rusty Wave icon is the project's official artwork (`assets/brand/rusty-wave-icon-master.png`, from Rusty Bucket's icon set, same owner).
+The logo, the icon sizes, the installer bitmaps and the PWA icons (`assets/brand`, `packaging/icons`, `packaging/windows`, `web/icons`,
+`crates/rvp-ui/assets/logo-*.rgba`) are resized or cropped from it with `tools/gen-brand.py` on the Unicorn Tears night background; no VLC art is used.
 
 ## Planned (see `docs/PLAN.md` section 8)
 

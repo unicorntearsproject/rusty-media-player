@@ -37,7 +37,9 @@ fn have(tool: &str) -> bool {
 
 /// True (after saying so) when the tools for a test are missing.
 fn skip(what: &str, tools: &[&str]) -> bool {
-    let missing: Vec<&&str> = tools.iter().filter(|t| !have(t)).collect();
+    // The virtual display is needed unless the run is headed on purpose.
+    let virt: &[&str] = if headed() { &[] } else { &["xvfb-run"] };
+    let missing: Vec<&&str> = virt.iter().chain(tools).filter(|t| !have(t)).collect();
     if missing.is_empty() {
         return false;
     }
@@ -78,11 +80,28 @@ fn scratch(name: &str) -> PathBuf {
     d
 }
 
-/// `rvp` on a virtual display.
+/// `rusty-wave` on a virtual display. Headless is the default and nothing may reach the real session: Wayland and the session type are
+/// removed from the environment (winit would pick Wayland over the X display of Xvfb), and `xvfb-run` sets its own `DISPLAY`.
+/// `RVP_HEADED=1` opts in to a visible window on the real display (it then needs no `xvfb-run`).
 fn rvp(args: &[&str]) -> Command {
-    let mut c = Command::new("xvfb-run");
-    c.args(["-a", "-s", "-screen 0 1280x800x24", env!("CARGO_BIN_EXE_rvp")]).args(args);
+    let bin = env!("CARGO_BIN_EXE_rusty-wave");
+    let mut c = if headed() {
+        Command::new(bin)
+    } else {
+        let mut c = Command::new("xvfb-run");
+        c.args(["-a", "-s", "-screen 0 1280x800x24", bin]);
+        c
+    };
+    if !headed() {
+        c.env_remove("WAYLAND_DISPLAY").env_remove("XDG_SESSION_TYPE").env("GDK_BACKEND", "x11");
+    }
+    c.args(args);
     c
+}
+
+/// `RVP_HEADED=1`: let the app open real windows (for looking at it by hand). Off by default.
+fn headed() -> bool {
+    std::env::var("RVP_HEADED").is_ok_and(|v| v == "1")
 }
 
 /// A number from the report (`"key": 123`).
@@ -100,8 +119,8 @@ fn text(report: &str, key: &str) -> Option<String> {
 }
 
 fn run_ok(mut c: Command) {
-    let out = c.output().expect("start xvfb-run and rvp");
-    assert!(out.status.success(), "rvp failed: {}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
+    let out = c.output().expect("start xvfb-run and rusty-wave");
+    assert!(out.status.success(), "rusty-wave failed: {}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
 }
 
 fn read_png(path: &Path) -> (u32, u32, Vec<u8>) {
@@ -118,7 +137,7 @@ fn read_png(path: &Path) -> (u32, u32, Vec<u8>) {
 #[test]
 fn it_plays_a_fixture_shows_frames_and_keeps_time() {
     let _turn = one_at_a_time();
-    if skip("the playback smoke test", &["xvfb-run", "ffmpeg"]) {
+    if skip("the playback smoke test", &["ffmpeg"]) {
         return;
     }
     let fx = core_fixtures();
@@ -171,7 +190,7 @@ fn it_plays_a_fixture_shows_frames_and_keeps_time() {
 #[test]
 fn the_library_face_scans_a_folder_and_shows_it() {
     let _turn = one_at_a_time();
-    if skip("the library smoke test", &["xvfb-run", "ffmpeg"]) {
+    if skip("the library smoke test", &["ffmpeg"]) {
         return;
     }
     let music = library_fixtures();
@@ -217,7 +236,7 @@ fn the_library_face_scans_a_folder_and_shows_it() {
 #[test]
 fn the_queue_and_the_position_come_back_after_a_restart() {
     let _turn = one_at_a_time();
-    if skip("the restart test", &["xvfb-run", "ffmpeg"]) {
+    if skip("the restart test", &["ffmpeg"]) {
         return;
     }
     let dir = scratch("restore");
@@ -287,7 +306,7 @@ fn playerctl(player: &str, args: &[&str]) -> String {
 #[test]
 fn playerctl_reads_and_drives_it_over_mpris() {
     let _turn = one_at_a_time();
-    if skip("the MPRIS test", &["xvfb-run", "ffmpeg", "playerctl"]) {
+    if skip("the MPRIS test", &["ffmpeg", "playerctl"]) {
         return;
     }
     let session_bus = std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
@@ -330,7 +349,7 @@ fn playerctl_reads_and_drives_it_over_mpris() {
     );
     let deadline = Instant::now() + Duration::from_secs(20);
     let name = loop {
-        if let Some(n) = players().into_iter().find(|p| p.contains("RustyVideoPlayer") && !before.contains(p))
+        if let Some(n) = players().into_iter().find(|p| p.contains("RustyWave") && !before.contains(p))
         {
             break n;
         }

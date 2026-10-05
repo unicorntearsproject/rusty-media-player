@@ -130,11 +130,11 @@ async function recover(err) {
   recoverStamps = recoverStamps.filter((t) => now - t < 60_000);
   if (recoverStamps.length >= 3) {
     statusEl.textContent = "The player stopped after repeated crashes. Reload the page.";
-    console.error("rvp: giving up after repeated crashes", err);
+    console.error("rusty-wave: giving up after repeated crashes", err);
     return undefined;
   }
   recoverStamps.push(now);
-  console.error("rvp: the player crashed, restarting it:", err);
+  console.error("rusty-wave: the player crashed, restarting it:", err);
   wasmCrashed = true;
   recovering = (async () => {
     try {
@@ -149,7 +149,7 @@ async function recover(err) {
       player.toast("The player crashed and was restarted.");
       statusEl.textContent = "The player crashed and was restarted.";
     } catch (e) {
-      console.error("rvp: could not restart after the crash", e);
+      console.error("rusty-wave: could not restart after the crash", e);
     } finally {
       recovering = null;
     }
@@ -257,7 +257,7 @@ async function rescan(id) {
         return;
       }
     } catch (err) {
-      console.warn("rvp: could not read the folder again:", err);
+      console.warn("rusty-wave: could not read the folder again:", err);
     }
   }
   addFolder(); // no handle, or no permission: ask for the folder again
@@ -309,7 +309,7 @@ function openFiles(files, append = false) {
   openedFiles = append ? openedFiles.concat(files) : files;
   player.open_files(files, append);
   const first = files.find((f) => !/\.(srt|vtt|ass|ssa)$/i.test(f.name)) || files[0];
-  document.title = `${first.name} – Rusty Video Player`;
+  document.title = `${first.name} – Rusty Wave`;
   statusEl.textContent = files.length > 1 ? `Opened ${files.length} files` : `Opened ${first.name}`;
   if (audio.suspended) player.toast("Click anywhere to turn the sound on.");
 }

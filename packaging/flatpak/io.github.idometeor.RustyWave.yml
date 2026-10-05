@@ -1,16 +1,16 @@
-# Flatpak manifest for Rusty Video Player.
+# Flatpak manifest for Rusty Wave.
 #
 # The crates are vendored offline: `cargo-sources.json` lists every crate of Cargo.lock with its checksum (regenerate it with
 # `cargo xtask dist flatpak-sources` whenever Cargo.lock changes) and the build runs `cargo --offline`, as Flathub requires.
 # The program source is the release tag below; `cargo xtask dist flatpak` swaps it for a tarball of the working tree (between the
 # APP-SOURCE markers) to build what you have locally. See docs/packaging.md.
-app-id: io.github.idometeor.RustyVideoPlayer
+app-id: io.github.idometeor.RustyWave
 runtime: org.freedesktop.Platform
 runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: rvp
+command: rusty-wave
 finish-args:
   # A window: Wayland, falling back to X11. The picture is drawn on the CPU, so no GPU access is requested.
   - --socket=wayland
@@ -22,30 +22,29 @@ finish-args:
   - --filesystem=xdg-music:ro
   - --filesystem=xdg-videos:ro
   # MPRIS: playerctl, the desktop's media widget and the media keys talk to org.mpris.MediaPlayer2.<name>.
-  - --own-name=org.mpris.MediaPlayer2.io.github.idometeor.RustyVideoPlayer
-  - --own-name=org.mpris.MediaPlayer2.io.github.idometeor.RustyVideoPlayer.*
+  - --own-name=org.mpris.MediaPlayer2.io.github.idometeor.RustyWave
+  - --own-name=org.mpris.MediaPlayer2.io.github.idometeor.RustyWave.*
 cleanup:
   - /share/man
 modules:
-  - name: rvp
+  - name: rusty-wave
     buildsystem: simple
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
       env:
-        CARGO_HOME: /run/build/rvp/cargo
+        CARGO_HOME: /run/build/rusty-wave/cargo
         CARGO_NET_OFFLINE: 'true'
     build-commands:
       - cargo --offline build --profile dist --locked -p rvp-host-desktop
-      - install -Dm755 target/dist/rvp /app/bin/rvp
-      - install -Dm644 packaging/shared/io.github.idometeor.RustyVideoPlayer.desktop /app/share/applications/io.github.idometeor.RustyVideoPlayer.desktop
+      - install -Dm755 target/dist/rusty-wave /app/bin/rusty-wave
+      - install -Dm644 packaging/shared/io.github.idometeor.RustyWave.desktop /app/share/applications/io.github.idometeor.RustyWave.desktop
       # Stamp the AppStream file with the version of Cargo.toml (RVP_VERSION overrides it) and the date of the source.
-      - V=${RVP_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}; D=$(date -u -d "@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%F); sed -e "s/@VERSION@/$V/" -e "s/@DATE@/$D/" packaging/shared/io.github.idometeor.RustyVideoPlayer.metainfo.xml.in > rvp.metainfo.xml
-      - install -Dm644 rvp.metainfo.xml /app/share/metainfo/io.github.idometeor.RustyVideoPlayer.metainfo.xml
-      - for s in 16 22 24 32 48 64 96 128 192 256 512; do install -Dm644 packaging/icons/hicolor/${s}x${s}/apps/io.github.idometeor.RustyVideoPlayer.png /app/share/icons/hicolor/${s}x${s}/apps/io.github.idometeor.RustyVideoPlayer.png; done
-      - install -Dm644 packaging/icons/hicolor/scalable/apps/io.github.idometeor.RustyVideoPlayer.svg /app/share/icons/hicolor/scalable/apps/io.github.idometeor.RustyVideoPlayer.svg
-      - install -Dm644 LICENSE-MIT /app/share/licenses/io.github.idometeor.RustyVideoPlayer/LICENSE-MIT
-      - install -Dm644 LICENSE-APACHE /app/share/licenses/io.github.idometeor.RustyVideoPlayer/LICENSE-APACHE
-      - install -Dm644 THIRD_PARTY_LICENSES.md /app/share/licenses/io.github.idometeor.RustyVideoPlayer/THIRD_PARTY_LICENSES.md
+      - V=${RVP_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}; D=$(date -u -d "@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%F); sed -e "s/@VERSION@/$V/" -e "s/@DATE@/$D/" packaging/shared/io.github.idometeor.RustyWave.metainfo.xml.in > rusty-wave.metainfo.xml
+      - install -Dm644 rusty-wave.metainfo.xml /app/share/metainfo/io.github.idometeor.RustyWave.metainfo.xml
+      - for s in 16 22 24 32 48 64 96 128 192 256 512; do install -Dm644 packaging/icons/hicolor/${s}x${s}/apps/io.github.idometeor.RustyWave.png /app/share/icons/hicolor/${s}x${s}/apps/io.github.idometeor.RustyWave.png; done
+      - install -Dm644 LICENSE-MIT /app/share/licenses/io.github.idometeor.RustyWave/LICENSE-MIT
+      - install -Dm644 LICENSE-APACHE /app/share/licenses/io.github.idometeor.RustyWave/LICENSE-APACHE
+      - install -Dm644 THIRD_PARTY_LICENSES.md /app/share/licenses/io.github.idometeor.RustyWave/THIRD_PARTY_LICENSES.md
     sources:
       # @APP-SOURCE@
       - type: git

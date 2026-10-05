@@ -1,15 +1,15 @@
 //! GPG signing and signature checks for `cargo xtask dist --sign` / `dist verify`.
 //!
-//! The release key ("Rusty Video Player Release", ed25519, sign-only) lives in the maintainer's own gpg keyring; only its public half is in the
-//! repository (`packaging/keys/rvp-release.asc` and the binary `.gpg`). Nothing here reads or writes a secret key. What gets signed:
+//! The release key ("Rusty Wave Release", ed25519, sign-only) lives in the maintainer's own gpg keyring; only its public half is in the
+//! repository (`packaging/keys/rusty-wave-release.asc` and the binary `.gpg`). Nothing here reads or writes a secret key. What gets signed:
 //! rpm (rpmsign, embedded), AppImage (appimagetool, embedded), the apt repo (`InRelease` and `Release.gpg`), the Flatpak repo (commit, summary),
 //! and a detached `.asc` for every artifact and `SHA256SUMS`. `verify` checks all of it against the public key in a throwaway keyring.
 use super::*;
 
-const KEY_ASC: &str = "packaging/keys/rvp-release.asc";
-const KEY_GPG: &str = "packaging/keys/rvp-release.gpg";
+const KEY_ASC: &str = "packaging/keys/rusty-wave-release.asc";
+const KEY_GPG: &str = "packaging/keys/rusty-wave-release.gpg";
 
-/// The full fingerprint to sign with: `explicit`, else `RVP_GPG_KEY`, else the key in `packaging/keys/rvp-release.asc`. Its secret half must be in
+/// The full fingerprint to sign with: `explicit`, else `RVP_GPG_KEY`, else the key in `packaging/keys/rusty-wave-release.asc`. Its secret half must be in
 /// the keyring (a missing key is an error here, not in the middle of a long build).
 pub(super) fn resolve_key(root: &Path, explicit: Option<String>) -> Result<String, String> {
     let wanted = match explicit.or_else(|| std::env::var("RVP_GPG_KEY").ok().filter(|k| !k.is_empty())) {
@@ -87,8 +87,8 @@ impl Ctx {
             .args(["--batch", "--yes", "--armor", "--detach-sign", "--local-user", &key, "--output"])
             .arg(repo.join("dists/stable/Release.gpg"))
             .arg(&release))?;
-        copy(&self.root.join(KEY_GPG), &repo.join("rvp-release.gpg"))?;
-        copy(&self.root.join(KEY_ASC), &repo.join("rvp-release.asc"))?;
+        copy(&self.root.join(KEY_GPG), &repo.join("rusty-wave-release.gpg"))?;
+        copy(&self.root.join(KEY_ASC), &repo.join("rusty-wave-release.asc"))?;
         println!("{}", repo.display());
         Ok(())
     }
@@ -114,8 +114,8 @@ impl Ctx {
             .env("XDG_CONFIG_HOME", home().join(".config"))
             .env("XDG_CACHE_HOME", home().join(".cache"))
             .arg("build-update-repo")
-            .arg("--title=Rusty Video Player")
-            .arg("--comment=Rusty Video Player (signed Flatpak repository)")
+            .arg("--title=Rusty Wave")
+            .arg("--comment=Rusty Wave (signed Flatpak repository)")
             .arg("--default-branch=stable")
             .arg(format!("--gpg-import={}", pubkey.display()))
             .arg(format!("--gpg-sign={key}"))
@@ -128,14 +128,14 @@ impl Ctx {
         write(
             &self.out().join(format!("{APP_ID}.flatpakrepo")),
             format!(
-                "[Flatpak Repo]\nTitle=Rusty Video Player\nComment=Rusty Video Player (signed Flatpak repository)\nUrl={url}\nHomepage={home_page}\nDefaultBranch=stable\nGPGKey={gpg_b64}\n"
+                "[Flatpak Repo]\nTitle=Rusty Wave\nComment=Rusty Wave (signed Flatpak repository)\nUrl={url}\nHomepage={home_page}\nDefaultBranch=stable\nGPGKey={gpg_b64}\n"
             )
             .as_bytes(),
         )?;
         write(
             &self.out().join(format!("{APP_ID}.flatpakref")),
             format!(
-                "[Flatpak Ref]\nTitle=Rusty Video Player\nName={APP_ID}\nBranch=stable\nUrl={url}\nHomepage={home_page}\nIsRuntime=false\nSuggestRemoteName=rvp\nRuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo\nGPGKey={gpg_b64}\n"
+                "[Flatpak Ref]\nTitle=Rusty Wave\nName={APP_ID}\nBranch=stable\nUrl={url}\nHomepage={home_page}\nIsRuntime=false\nSuggestRemoteName=rusty-wave\nRuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo\nGPGKey={gpg_b64}\n"
             )
             .as_bytes(),
         )?;

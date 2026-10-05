@@ -262,7 +262,7 @@ impl AudioSink for DesktopAudio {
             Ok(p) => p,
             Err(e) => {
                 if !self.force_silent {
-                    eprintln!("rvp: no sound ({e}); playing silently");
+                    eprintln!("rusty-wave: no sound ({e}); playing silently");
                 }
                 self.ring_sized(want.sample_rate as usize, want.channels as usize);
                 self.out = Output::Silent { last: Instant::now() };

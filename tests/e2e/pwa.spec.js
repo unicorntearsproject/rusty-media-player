@@ -20,7 +20,7 @@ test("the manifest is valid, its icons exist and the page links the favicon", as
   expect(res.ok()).toBe(true);
   expect(res.headers()["content-type"]).toContain("manifest+json");
   const m = await res.json();
-  expect(m.name).toBe("Rusty Video Player");
+  expect(m.name).toBe("Rusty Wave");
   expect(m.short_name.length).toBeLessThanOrEqual(12);
   expect(m.display).toBe("standalone");
   expect(m.start_url).toBeTruthy();
@@ -50,7 +50,7 @@ test("the manifest is valid, its icons exist and the page links the favicon", as
   expect(m.share_target.method).toBe("POST");
   expect(m.share_target.params.files[0].name).toBe("files");
   // The tab icon and the Apple touch icon.
-  for (const sel of ['link[rel="icon"][type="image/svg+xml"]', 'link[rel="apple-touch-icon"]']) {
+  for (const sel of ['link[rel="icon"][type="image/png"]', 'link[rel="apple-touch-icon"]']) {
     const h = await page.locator(sel).first().getAttribute("href");
     expect((await page.request.get(new URL(h, page.url()).toString())).ok(), sel).toBe(true);
   }

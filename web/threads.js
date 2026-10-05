@@ -35,7 +35,7 @@ export class Threads {
       };
       w.onerror = (e) => {
         this.failed = e.message || String(e);
-        console.error("rvp worker failed:", this.failed);
+        console.error("rusty-wave worker failed:", this.failed);
       };
       w.postMessage({ init: true, module: this.module, memory: this.memory, glueUrl: this.glueUrl });
       this.all.push(w);

@@ -10,8 +10,8 @@ use std::process::Command;
 
 mod sign;
 
-const APP_ID: &str = "io.github.idometeor.RustyVideoPlayer";
-const PKG: &str = "rusty-video-player";
+const APP_ID: &str = "io.github.idometeor.RustyWave";
+const PKG: &str = "rusty-wave";
 /// The image the Linux binary is built in (Ubuntu 22.04: glibc 2.35, so it runs on that and anything newer).
 const LINUX_IMAGE: &str = "localhost/rvp-build-linux:1";
 /// The image that cross-builds the Windows exe and runs Inno Setup under wine.
@@ -27,19 +27,19 @@ pub const USAGE: &str = "usage: cargo xtask dist <target> [--version V] [--conta
 targets:
   linux-bin    build the Linux binary (profile `dist`); --container builds it in the Ubuntu 22.04 image (portable glibc)
   stage        the installed tree (usr/...) with the stamped metadata, in target/dist/linux/stage
-  tarball      rvp-<ver>-linux-x86_64.tar.gz of that tree (and the source tarball the Flatpak builds from)
-  deb          rusty-video-player_<ver>_amd64.deb (cargo-deb)
-  rpm          rusty-video-player-<ver>-1.x86_64.rpm (cargo-generate-rpm)
-  appimage     RustyVideoPlayer-<ver>-x86_64.AppImage (appimagetool)
+  tarball      rusty-wave-<ver>-linux-x86_64.tar.gz of that tree (and the source tarball the Flatpak builds from)
+  deb          rusty-wave_<ver>_amd64.deb (cargo-deb)
+  rpm          rusty-wave-<ver>-1.x86_64.rpm (cargo-generate-rpm)
+  appimage     rusty-wave-<ver>-x86_64.AppImage (appimagetool)
   flatpak-sources   regenerate packaging/flatpak/cargo-sources.json from Cargo.lock (flatpak-cargo-generator)
   flatpak      build the Flatpak with flatpak-builder from the working tree and bundle it (.flatpak);
                --prepare-only just writes the manifest and the source tarball (CI builds it with the flatpak-builder action)
-  windows      rvp.exe (x86_64-pc-windows-gnu in the wine image on Linux; the host toolchain on Windows) and the portable zip
+  windows      rusty-wave.exe (x86_64-pc-windows-gnu in the wine image on Linux; the host toolchain on Windows) and the portable zip
   installer    the Inno Setup installer around it (ISCC.exe on Windows, wine in the image on Linux)
-  pwa          the web app (cargo xtask web) as rusty-video-player-web-<ver>.zip
+  pwa          the web app (cargo xtask web) as rusty-wave-web-<ver>.zip
   apt-repo     a signed apt repository of the .deb in target/dist/apt-repo (needs --sign)
   checksums    SHA256SUMS over everything in target/dist/release (and signatures if --sign or RVP_SIGN_CMD is set)
-  verify       check every signature in target/dist against packaging/keys/rvp-release.asc in a throwaway keyring
+  verify       check every signature in target/dist against packaging/keys/rusty-wave-release.asc in a throwaway keyring
   check        validate the metadata (desktop file, AppStream, man page) without building anything
   linux        stage, tarball, deb, rpm, appimage and flatpak
   all          linux, windows, installer, pwa and checksums
@@ -49,7 +49,7 @@ targets:
 --no-build    use the binary and stage that are already there
 --sign        sign with the release key: rpm (rpmsign), AppImage (embedded), the Flatpak repo and its commit, the apt repo's Release,
               and a detached .asc next to every artifact and SHA256SUMS. The key is RVP_GPG_KEY (a fingerprint) or the one in
-              packaging/keys/rvp-release.asc; its secret half must be in your gpg keyring.
+              packaging/keys/rusty-wave-release.asc; its secret half must be in your gpg keyring.
 --sign-key K  like --sign with the key K
 --repo-url U  the URL the Flatpak repo will be served from, written into the .flatpakrepo and .flatpakref (default file://<local repo>)
 
@@ -287,7 +287,7 @@ impl Ctx {
     // ---- Linux binary and the installed tree -----------------------------------------------------------------------------------
 
     fn linux_bin(&self) -> Result<PathBuf, String> {
-        let out = self.dist().join("linux/rvp");
+        let out = self.dist().join("linux/rusty-wave");
         if self.no_build && out.exists() {
             return Ok(out);
         }
@@ -334,10 +334,10 @@ impl Ctx {
                 "/work/target/dist-linux",
                 "--locked",
             ]))?;
-            self.root.join("target/dist-linux/dist/rvp")
+            self.root.join("target/dist-linux/dist/rusty-wave")
         } else {
             sh(self.cargo_cmd().args(["build", "--profile", "dist", "-p", "rvp-host-desktop", "--locked"]))?;
-            self.root.join("target/dist/rvp")
+            self.root.join("target/dist/rusty-wave")
         };
         copy(&built, &out)?;
         Ok(out)
@@ -348,8 +348,8 @@ impl Ctx {
         let bin = self.linux_bin()?;
         let s = self.stage_dir().join("usr");
         let shared = self.root.join("packaging/shared");
-        copy(&bin, &s.join("bin/rvp"))?;
-        set_mode(&s.join("bin/rvp"), 0o755)?;
+        copy(&bin, &s.join("bin/rusty-wave"))?;
+        set_mode(&s.join("bin/rusty-wave"), 0o755)?;
         copy(
             &shared.join(format!("{APP_ID}.desktop")),
             &s.join(format!("share/applications/{APP_ID}.desktop")),
@@ -362,13 +362,9 @@ impl Ctx {
             let rel = format!("hicolor/{size}x{size}/apps/{APP_ID}.png");
             copy(&icons.join(format!("{size}x{size}/apps/{APP_ID}.png")), &s.join("share/icons").join(rel))?;
         }
-        copy(
-            &icons.join(format!("scalable/apps/{APP_ID}.svg")),
-            &s.join(format!("share/icons/hicolor/scalable/apps/{APP_ID}.svg")),
-        )?;
         // The man page, gzipped (-n: no timestamp, so the package is reproducible).
-        let man = fs::read_to_string(shared.join("rvp.1.in")).map_err(|e| e.to_string())?;
-        let man_path = s.join("share/man/man1/rvp.1");
+        let man = fs::read_to_string(shared.join("rusty-wave.1.in")).map_err(|e| e.to_string())?;
+        let man_path = s.join("share/man/man1/rusty-wave.1");
         write(&man_path, self.stamp(&man).as_bytes())?;
         sh(Command::new("gzip").args(["-n", "-9", "-f"]).arg(&man_path))?;
         let doc = s.join("share/doc").join(PKG);
@@ -384,10 +380,10 @@ impl Ctx {
     }
 
     fn tarball(&self) -> Result<(), String> {
-        if !self.no_build || !self.stage_dir().join("usr/bin/rvp").exists() {
+        if !self.no_build || !self.stage_dir().join("usr/bin/rusty-wave").exists() {
             self.stage()?;
         }
-        let name = format!("rvp-{}-linux-x86_64", self.version);
+        let name = format!("rusty-wave-{}-linux-x86_64", self.version);
         let out = self.out().join(format!("{name}.tar.gz"));
         sh(Command::new("tar")
             .current_dir(self.stage_dir())
@@ -427,7 +423,7 @@ impl Ctx {
     // ---- .deb and .rpm -----------------------------------------------------------------------------------------------------------
 
     fn ensure_stage(&self) -> Result<(), String> {
-        if self.no_build && self.stage_dir().join("usr/bin/rvp").exists() {
+        if self.no_build && self.stage_dir().join("usr/bin/rusty-wave").exists() {
             return Ok(());
         }
         self.stage()
@@ -501,18 +497,17 @@ impl Ctx {
         let tool = self.appimagetool()?;
         let dir = self.dist().join("appimage/AppDir");
         let stage = self.stage_dir().join("usr");
-        copy(&stage.join("bin/rvp"), &dir.join("usr/bin/rvp"))?;
-        set_mode(&dir.join("usr/bin/rvp"), 0o755)?;
+        copy(&stage.join("bin/rusty-wave"), &dir.join("usr/bin/rusty-wave"))?;
+        set_mode(&dir.join("usr/bin/rusty-wave"), 0o755)?;
         for rel in [
             format!("share/applications/{APP_ID}.desktop"),
-            format!("share/icons/hicolor/scalable/apps/{APP_ID}.svg"),
             format!("share/icons/hicolor/256x256/apps/{APP_ID}.png"),
             format!("share/icons/hicolor/128x128/apps/{APP_ID}.png"),
             format!("share/icons/hicolor/64x64/apps/{APP_ID}.png"),
             format!("share/icons/hicolor/48x48/apps/{APP_ID}.png"),
             format!("share/icons/hicolor/32x32/apps/{APP_ID}.png"),
             format!("share/metainfo/{APP_ID}.metainfo.xml"),
-            "share/man/man1/rvp.1.gz".to_string(),
+            "share/man/man1/rusty-wave.1.gz".to_string(),
             format!("share/doc/{PKG}/THIRD_PARTY_LICENSES.md"),
             format!("share/doc/{PKG}/LICENSE-MIT"),
             format!("share/doc/{PKG}/LICENSE-APACHE"),
@@ -531,10 +526,10 @@ impl Ctx {
         copy(&stage.join(format!("share/icons/hicolor/256x256/apps/{APP_ID}.png")), &dir.join(".DirIcon"))?;
         write(
             &dir.join("AppRun"),
-            b"#!/bin/sh\n# Rusty Video Player AppImage entry point.\nHERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\nexport XDG_DATA_DIRS=\"$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\"\nexec \"$HERE/usr/bin/rvp\" \"$@\"\n",
+            b"#!/bin/sh\n# Rusty Wave AppImage entry point.\nHERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\nexport XDG_DATA_DIRS=\"$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\"\nexec \"$HERE/usr/bin/rusty-wave\" \"$@\"\n",
         )?;
         set_mode(&dir.join("AppRun"), 0o755)?;
-        let out = self.out().join(format!("RustyVideoPlayer-{}-x86_64.AppImage", self.version));
+        let out = self.out().join(format!("rusty-wave-{}-x86_64.AppImage", self.version));
         let mut c = Command::new(&tool);
         c.env("ARCH", "x86_64")
             .env("VERSION", &self.version)
@@ -641,7 +636,7 @@ impl Ctx {
             .arg("build-bundle");
         if self.sign.is_some() {
             // The bundle carries the public key, so installing it verifies the signed commit; the runtime comes from Flathub.
-            c.arg(format!("--gpg-keys={}", self.root.join("packaging/keys/rvp-release.gpg").display()));
+            c.arg(format!("--gpg-keys={}", self.root.join("packaging/keys/rusty-wave-release.gpg").display()));
             c.arg("--runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo");
         }
         sh(c.arg(&repo).arg(&bundle).arg(APP_ID).arg("stable"))?;
@@ -656,7 +651,7 @@ impl Ctx {
     }
 
     fn windows(&self) -> Result<(), String> {
-        let exe = self.dist().join("windows/rvp.exe");
+        let exe = self.dist().join("windows/rusty-wave.exe");
         if !(self.no_build && exe.exists()) {
             let built = if cfg!(windows) {
                 sh(self.cargo_cmd().args([
@@ -667,17 +662,17 @@ impl Ctx {
                     "rvp-host-desktop",
                     "--locked",
                 ]))?;
-                self.root.join("target/dist/rvp.exe")
+                self.root.join("target/dist/rusty-wave.exe")
             } else {
                 self.win_container_build()?;
-                self.root.join("target/win/x86_64-pc-windows-gnu/dist/rvp.exe")
+                self.root.join("target/win/x86_64-pc-windows-gnu/dist/rusty-wave.exe")
             };
             copy(&built, &exe)?;
         }
         let stage = self.win_stage();
-        copy(&exe, &stage.join("rvp.exe"))?;
+        copy(&exe, &stage.join("rusty-wave.exe"))?;
         let license = format!(
-            "Rusty Video Player is licensed under either of the Apache License, Version 2.0 or the MIT license, at your option.\r\n\r\n===== MIT =====\r\n{}\r\n===== Apache-2.0 =====\r\n{}",
+            "Rusty Wave is licensed under either of the Apache License, Version 2.0 or the MIT license, at your option.\r\n\r\n===== MIT =====\r\n{}\r\n===== Apache-2.0 =====\r\n{}",
             fs::read_to_string(self.root.join("LICENSE-MIT")).map_err(|e| e.to_string())?,
             fs::read_to_string(self.root.join("LICENSE-APACHE")).map_err(|e| e.to_string())?
         );
@@ -686,18 +681,18 @@ impl Ctx {
         write(
             &stage.join("README.txt"),
             format!(
-                "Rusty Video Player {}\r\n\r\nPlays video and music. Run rvp.exe, or use Open with on a media file.\r\nrvp --help lists the options.\r\nSettings and the library index are kept in %APPDATA%\\rvp\\data.\r\nhttps://github.com/iDoMeteor/rusty-video-player\r\n",
+                "Rusty Wave {}\r\n\r\nPlays video and music. Run rusty-wave.exe, or use Open with on a media file.\r\nrusty-wave --help lists the options.\r\nSettings and the library index are kept in %APPDATA%\\rusty-wave\\data.\r\nhttps://github.com/iDoMeteor/rusty-video-player\r\n",
                 self.version
             )
             .as_bytes(),
         )?;
         if let Ok(cmd) = std::env::var("RVP_WINDOWS_SIGN_CMD") {
             // Signing hook for the exe itself (osslsigncode or signtool); the installer is signed by Inno Setup's SignTool.
-            let line = cmd.replace("$f", &stage.join("rvp.exe").to_string_lossy());
+            let line = cmd.replace("$f", &stage.join("rusty-wave.exe").to_string_lossy());
             sh(Command::new("sh").arg("-c").arg(line))?;
         }
         // The portable zip.
-        let zip = self.out().join(format!("rvp-{}-windows-x64.zip", self.version));
+        let zip = self.out().join(format!("rusty-wave-{}-windows-x64.zip", self.version));
         zip_dir(&stage, &zip)?;
         println!("{}", zip.display());
         Ok(())
@@ -757,7 +752,7 @@ impl Ctx {
 
     fn installer(&self) -> Result<(), String> {
         let stage = self.win_stage();
-        if !stage.join("rvp.exe").exists() || !self.no_build {
+        if !stage.join("rusty-wave.exe").exists() || !self.no_build {
             self.windows()?;
         }
         let out = self.dist().join("windows");
@@ -771,7 +766,7 @@ impl Ctx {
             if let Ok(cmd) = std::env::var("RVP_WINDOWS_SIGN_CMD") {
                 c.arg("/DSign=1").arg(format!("/Srvpsign={cmd}"));
             }
-            c.arg("rvp.iss");
+            c.arg("rusty-wave.iss");
             sh(&mut c)?;
         } else {
             self.ensure_win_image()?;
@@ -794,7 +789,7 @@ impl Ctx {
                    xvfb-run -a bash -c 'wineboot -u; wine reg add \"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\" /v ProgramW6432Dir /t REG_SZ /d \"C:\\Program Files\" /f; \
                    wine /dl/innosetup-{INNO_VERSION}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER' >/dev/null 2>&1; fi; \
                  cd /work/packaging/windows; \
-                 xvfb-run -a wine \"$ISCC\" /DAppVersion={} /DStageDir=Z:\\\\work\\\\target\\\\dist\\\\windows\\\\stage /DOutDir=Z:\\\\work\\\\target\\\\dist\\\\windows {} rvp.iss",
+                 xvfb-run -a wine \"$ISCC\" /DAppVersion={} /DStageDir=Z:\\\\work\\\\target\\\\dist\\\\windows\\\\stage /DOutDir=Z:\\\\work\\\\target\\\\dist\\\\windows {} rusty-wave.iss",
                 self.version,
                 if sign { "/DSign=1" } else { "" }
             );
@@ -815,7 +810,7 @@ impl Ctx {
                 &script,
             ]))?;
         }
-        let name = format!("RustyVideoPlayer-{}-x64-Setup.exe", self.version);
+        let name = format!("rusty-wave-{}-x64-Setup.exe", self.version);
         copy(&out.join(&name), &self.out().join(&name))?;
         println!("{}", self.out().join(&name).display());
         Ok(())
@@ -867,8 +862,8 @@ impl Ctx {
         } else {
             println!("(appstreamcli is not installed: skipped)");
         }
-        let man = fs::read_to_string(shared.join("rvp.1.in")).map_err(|e| e.to_string())?;
-        let man_path = tmp.join("rvp.1");
+        let man = fs::read_to_string(shared.join("rusty-wave.1.in")).map_err(|e| e.to_string())?;
+        let man_path = tmp.join("rusty-wave.1");
         write(&man_path, self.stamp(&man).as_bytes())?;
         if have("mandoc") {
             sh(Command::new("mandoc").args(["-T", "lint"]).arg(&man_path))?;
@@ -889,10 +884,10 @@ impl Ctx {
             }
         }
         let iss =
-            fs::read_to_string(self.root.join("packaging/windows/rvp.iss")).map_err(|e| e.to_string())?;
+            fs::read_to_string(self.root.join("packaging/windows/rusty-wave.iss")).map_err(|e| e.to_string())?;
         for ext in ["mp4", "mkv", "webm", "mp3", "flac", "ogg", "opus", "wav", "m4a", "m3u8", "pls"] {
             if !iss.contains(&format!("\"Software\\Classes\\.{ext}\\OpenWithProgids\"")) {
-                return Err(format!(".{ext} is not associated in rvp.iss"));
+                return Err(format!(".{ext} is not associated in rusty-wave.iss"));
             }
         }
         println!("metadata ok ({} media types)", types.len());

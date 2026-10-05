@@ -17,7 +17,7 @@ use rvp_host::{FileEntry, Source};
 
 /// File name extensions of what the library indexes.
 pub const AUDIO_EXTENSIONS: &[&str] =
-    &["mp3", "flac", "ogg", "oga", "opus", "wav", "m4a", "m4b", "aac", "mka"];
+    &["mp3", "mp2", "flac", "ogg", "oga", "opus", "wav", "m4a", "m4b", "aac", "mka"];
 /// Names (without extension) of pictures that stand for a folder's cover, best first.
 const COVER_NAMES: &[&str] = &["cover", "folder", "front", "albumart", "album", "art"];
 const COVER_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png"];

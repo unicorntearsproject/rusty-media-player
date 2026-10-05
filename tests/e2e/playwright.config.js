@@ -21,6 +21,8 @@ module.exports = defineConfig({
       process.env.RVP_E2E_THREADS === "0"
         ? { cookies: [{ name: "rvp_threads", value: "0", domain: "127.0.0.1", path: "/", expires: -1, httpOnly: false, secure: false, sameSite: "Lax" }], origins: [] }
         : undefined,
+    // Headless always, so a run never opens a window on the user's display; RVP_HEADED=1 opts in to a visible browser.
+    headless: process.env.RVP_HEADED !== "1",
     viewport: { width: 1280, height: 720 },
     deviceScaleFactor: 1,
     trace: "retain-on-failure",

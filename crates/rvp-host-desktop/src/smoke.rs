@@ -147,11 +147,11 @@ impl Smoke {
         let Some(path) = &self.shot else { return };
         let (w, h, _) = host.surface.size;
         if host.surface.last.len() != w as usize * h as usize * 4 {
-            eprintln!("rvp: no picture to save yet");
+            eprintln!("rusty-wave: no picture to save yet");
             return;
         }
         if let Err(e) = write_png(path, w, h, &host.surface.last) {
-            eprintln!("rvp: could not write {}: {e}", path.display());
+            eprintln!("rusty-wave: could not write {}: {e}", path.display());
         }
     }
 
@@ -205,7 +205,7 @@ impl Smoke {
             app.library().albums().len(),
         );
         if let Err(e) = std::fs::write(path, json) {
-            eprintln!("rvp: could not write {}: {e}", path.display());
+            eprintln!("rusty-wave: could not write {}: {e}", path.display());
         }
     }
 }

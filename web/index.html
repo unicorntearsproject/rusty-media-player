@@ -5,10 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#07060d">
-  <title>Rusty Video Player</title>
+  <title>Rusty Wave</title>
   <meta name="description" content="Play video and music in your browser or as an installed app: a library, a queue, subtitles and a visualizer. Works offline.">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon.ico" sizes="48x48">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -19,7 +18,7 @@
 <body>
   <!-- The whole player (picture, controls, menus) is drawn by the Rust UI into this canvas. -->
   <canvas id="screen" tabindex="0" role="application"
-    aria-label="Rusty Video Player. Press O to open a file, B to switch between the library and the player, Space to play or pause, F for fullscreen."></canvas>
+    aria-label="Rusty Wave. Press O to open a file, B to switch between the library and the player, Space to play or pause, F for fullscreen."></canvas>
   <div id="status" class="sr-only" role="status" aria-live="polite"></div>
   <input id="file" type="file" hidden multiple
     accept="video/mp4,video/webm,video/x-matroska,audio/*,text/vtt,.mp4,.m4v,.mkv,.webm,.mka,.mp3,.flac,.ogg,.oga,.opus,.wav,.aac,.m4a,.srt,.vtt,.ass,.ssa,.mp2,.m3u,.m3u8,.pls">
@@ -28,7 +27,7 @@
   <input id="playlist-file" type="file" hidden multiple accept=".m3u,.m3u8,.pls,audio/x-mpegurl,audio/mpegurl,audio/x-scpls">
   <input id="file-add" type="file" hidden multiple
     accept="video/mp4,video/webm,video/x-matroska,audio/*,.mp4,.m4v,.mkv,.webm,.mka,.mp3,.flac,.ogg,.oga,.opus,.wav,.aac,.m4a">
-  <noscript>Rusty Video Player needs JavaScript and WebAssembly.</noscript>
+  <noscript>Rusty Wave needs JavaScript and WebAssembly.</noscript>
   <script type="module" src="main.js"></script>
 </body>
 </html>

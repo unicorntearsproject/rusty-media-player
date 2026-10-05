@@ -1,4 +1,4 @@
-//! The desktop host (Linux and Windows) and the `rvp` application: a `winit` window, `softbuffer` pixels, `cpal` audio, `rfd`
+//! The desktop host (Linux and Windows) and the `rusty-wave` application: a `winit` window, `softbuffer` pixels, `cpal` audio, `rfd`
 //! dialogs, drag and drop, full screen, HiDPI, the system media controls (MPRIS, SMTC), real files for the library and settings, and
 //! decoding on worker threads.
 //!
@@ -26,7 +26,7 @@ pub fn main_with_args(args: Vec<String>) -> i32 {
     let opts = match cli::parse(args) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("rvp: {e}");
+            eprintln!("rusty-wave: {e}");
             return 2;
         }
     };
@@ -35,7 +35,7 @@ pub fn main_with_args(args: Vec<String>) -> i32 {
         return 0;
     }
     if opts.version {
-        println!("rvp {}", env!("CARGO_PKG_VERSION"));
+        println!("rusty-wave {}", env!("CARGO_PKG_VERSION"));
         return 0;
     }
     let dir = window::data_dir(&opts);

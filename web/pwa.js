@@ -32,7 +32,7 @@ export function isInstalled() {
  * @param {{ openFiles: (files: File[], append?: boolean) => void, status: (text: string) => void }} api
  */
 export function setupPwa(api) {
-  // Files the installed app was opened with ("Open with Rusty Video Player" on a media file).
+  // Files the installed app was opened with ("Open with Rusty Wave" on a media file).
   if ("launchQueue" in window) {
     window.launchQueue.setConsumer(async (params) => {
       if (!params.files || !params.files.length) return;
@@ -77,7 +77,7 @@ export function setupPwa(api) {
   });
   window.addEventListener("appinstalled", () => {
     if (installButton) installButton.hidden = true;
-    api.status("Rusty Video Player was installed");
+    api.status("Rusty Wave was installed");
   });
 
   // The service worker, and its update flow.
@@ -100,7 +100,7 @@ export function setupPwa(api) {
           worker.postMessage({ type: "SKIP_WAITING" });
         });
         b.classList.add("pwa-pill-update");
-        api.status("A new version of Rusty Video Player is ready");
+        api.status("A new version of Rusty Wave is ready");
       };
       if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
       reg.addEventListener("updatefound", () => {
@@ -113,5 +113,5 @@ export function setupPwa(api) {
       // Look for a new version when the app comes back to the foreground.
       document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
     })
-    .catch((err) => console.warn("rvp: no service worker:", err));
+    .catch((err) => console.warn("rusty-wave: no service worker:", err));
 }

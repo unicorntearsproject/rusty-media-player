@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install a Linux package in a clean container and smoke-test the installed program: `rvp --version`, then a headless run on a
+# Install a Linux package in a clean container and smoke-test the installed program: `rusty-wave --version`, then a headless run on a
 # virtual display that opens a fixture, plays it for a few seconds, takes its own screenshot and writes a report.
 #
 #   tools/packaging/verify-linux.sh deb       [image]   default public.ecr.aws/ubuntu/ubuntu:22.04 (docker.io/library/ubuntu:22.04 in CI)
@@ -34,9 +34,9 @@ smoke() {
   cat <<EOS
 echo "== version"; $1 --version
 echo "== desktop file, AppStream, icon"
-test -f /usr/share/applications/io.github.idometeor.RustyVideoPlayer.desktop && echo desktop ok
-test -f /usr/share/metainfo/io.github.idometeor.RustyVideoPlayer.metainfo.xml && echo metainfo ok
-test -f /usr/share/icons/hicolor/256x256/apps/io.github.idometeor.RustyVideoPlayer.png && echo icon ok
+test -f /usr/share/applications/io.github.idometeor.RustyWave.desktop && echo desktop ok
+test -f /usr/share/metainfo/io.github.idometeor.RustyWave.metainfo.xml && echo metainfo ok
+test -f /usr/share/icons/hicolor/256x256/apps/io.github.idometeor.RustyWave.png && echo icon ok
 echo "== run (virtual display, no sound card)"
 xvfb-run -a $1 --no-audio --no-media-keys --data-dir /out/data --exit-after 6 --screenshot /out/shot.png --screenshot-after 5 --report /out/report.json /fixtures/$fixture
 grep -E '"(state|saw_playing|clock_ratio|video_frames|frames_presented|version)"' /out/report.json
@@ -46,36 +46,36 @@ EOS
 case "$kind" in
   deb)
     image=${2:-public.ecr.aws/ubuntu/ubuntu:22.04}
-    deb=$(ls "$rel"/rusty-video-player_*_amd64.deb | head -1)
+    deb=$(ls "$rel"/rusty-wave_*_amd64.deb | head -1)
     run "$image" "
       set -e; export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq >/dev/null
       apt-get install -y -qq --no-install-recommends /pkgs/$(basename "$deb") xvfb xauth libwayland-client0 libx11-6 libxcursor1 libxi6 libxrandr2 fonts-noto-cjk >/dev/null 2>&1
-      dpkg -s rusty-video-player | grep -E '^(Version|Depends)'
-      $(smoke rvp)
-      apt-get remove -y -qq rusty-video-player >/dev/null 2>&1; test ! -e /usr/bin/rvp && echo removed
+      dpkg -s rusty-wave | grep -E '^(Version|Depends)'
+      $(smoke rusty-wave)
+      apt-get remove -y -qq rusty-wave >/dev/null 2>&1; test ! -e /usr/bin/rusty-wave && echo removed
     " ;;
   rpm)
     image=${2:-registry.fedoraproject.org/fedora:44}
-    rpm=$(ls "$rel"/rusty-video-player-*.x86_64.rpm | head -1)
+    rpm=$(ls "$rel"/rusty-wave-*.x86_64.rpm | head -1)
     run "$image" "
       set -e
       dnf install -y -q --setopt=install_weak_deps=False /pkgs/$(basename "$rpm") xorg-x11-server-Xvfb xauth libX11 libXcursor libXi libXrandr libwayland-client >/dev/null 2>&1
-      rpm -q rusty-video-player
-      $(smoke rvp)
-      dnf remove -y -q rusty-video-player >/dev/null 2>&1; test ! -e /usr/bin/rvp && echo removed
+      rpm -q rusty-wave
+      $(smoke rusty-wave)
+      dnf remove -y -q rusty-wave >/dev/null 2>&1; test ! -e /usr/bin/rusty-wave && echo removed
     " ;;
   appimage)
     image=${2:-public.ecr.aws/ubuntu/ubuntu:22.04}
-    ai=$(ls "$rel"/RustyVideoPlayer-*-x86_64.AppImage | head -1)
+    ai=$(ls "$rel"/rusty-wave-*-x86_64.AppImage | head -1)
     run "$image" "
       set -e; export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq >/dev/null
       apt-get install -y -qq --no-install-recommends xvfb xauth libasound2 libdbus-1-3 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-6 libxcursor1 libxi6 libxrandr2 fonts-noto-cjk >/dev/null 2>&1
-      cp /pkgs/$(basename "$ai") /tmp/rvp.AppImage; chmod +x /tmp/rvp.AppImage
-      echo '== version'; /tmp/rvp.AppImage --appimage-extract-and-run --version
+      cp /pkgs/$(basename "$ai") /tmp/rusty-wave.AppImage; chmod +x /tmp/rusty-wave.AppImage
+      echo '== version'; /tmp/rusty-wave.AppImage --appimage-extract-and-run --version
       echo '== run (virtual display, no sound card)'
-      xvfb-run -a /tmp/rvp.AppImage --appimage-extract-and-run --no-audio --no-media-keys --data-dir /out/data --exit-after 6 --screenshot /out/shot.png --screenshot-after 5 --report /out/report.json /fixtures/$fixture
+      xvfb-run -a /tmp/rusty-wave.AppImage --appimage-extract-and-run --no-audio --no-media-keys --data-dir /out/data --exit-after 6 --screenshot /out/shot.png --screenshot-after 5 --report /out/report.json /fixtures/$fixture
       grep -E '\"(state|saw_playing|clock_ratio|video_frames|frames_presented|version)\"' /out/report.json
     " ;;
   apt-signed)
@@ -86,34 +86,34 @@ case "$kind" in
       apt-get update -qq >/dev/null 2>&1
       apt-get install -y -qq --no-install-recommends ca-certificates >/dev/null 2>&1
       # The public key is the only trust anchor: it goes where signed-by points, no apt-key.
-      install -Dm644 /repo/rvp-release.gpg /usr/share/keyrings/rvp-release.gpg
-      echo "deb [signed-by=/usr/share/keyrings/rvp-release.gpg] file:/repo stable main" > /etc/apt/sources.list.d/rvp.list
-      echo "== update from the signed repo"; apt-get update 2>&1 | grep -E "rvp|repo|stable|Err|W:|E:" || true
-      apt-cache policy rusty-video-player | head -4
-      apt-get install -y -qq --no-install-recommends rusty-video-player >/dev/null 2>&1
-      rvp --version && echo "installed from the signed repo: ok"
-      apt-get remove -y -qq rusty-video-player >/dev/null 2>&1; test ! -e /usr/bin/rvp && echo removed
+      install -Dm644 /repo/rusty-wave-release.gpg /usr/share/keyrings/rusty-wave-release.gpg
+      echo "deb [signed-by=/usr/share/keyrings/rusty-wave-release.gpg] file:/repo stable main" > /etc/apt/sources.list.d/rusty-wave.list
+      echo "== update from the signed repo"; apt-get update 2>&1 | grep -E "rusty-wave|repo|stable|Err|W:|E:" || true
+      apt-cache policy rusty-wave | head -4
+      apt-get install -y -qq --no-install-recommends rusty-wave >/dev/null 2>&1
+      rusty-wave --version && echo "installed from the signed repo: ok"
+      apt-get remove -y -qq rusty-wave >/dev/null 2>&1; test ! -e /usr/bin/rusty-wave && echo removed
       echo "== a tampered repo must be refused"
       mkdir -p /tmp/bad && cp -r /repo/. /tmp/bad/
       sed -i "s/^Description: .*/Description: tampered/" /tmp/bad/dists/stable/InRelease
-      echo "deb [signed-by=/usr/share/keyrings/rvp-release.gpg] file:/tmp/bad stable main" > /etc/apt/sources.list.d/rvp.list
+      echo "deb [signed-by=/usr/share/keyrings/rusty-wave-release.gpg] file:/tmp/bad stable main" > /etc/apt/sources.list.d/rusty-wave.list
       if apt-get update 2>&1 | tee /tmp/bad.log | grep -qE "not signed|BAD|invalid|signature"; then echo "tampered repo refused: ok"; else cat /tmp/bad.log; echo "TAMPERED REPO ACCEPTED"; exit 1; fi
     ' ;;
   rpm-signed)
     image=${2:-registry.fedoraproject.org/fedora:44}
-    rpm=$(basename "$(ls "$rel"/rusty-video-player-*.x86_64.rpm | head -1)")
+    rpm=$(basename "$(ls "$rel"/rusty-wave-*.x86_64.rpm | head -1)")
     "$engine" run --rm --security-opt label=disable -e RPM="$rpm" -v "$rel:/pkgs:ro" -v "$root/packaging/keys:/keys:ro" "$image" bash -c '
       set -e
       echo "== before the key is imported"; rpm -K "/pkgs/$RPM" || true
-      rpm --import /keys/rvp-release.asc
+      rpm --import /keys/rusty-wave-release.asc
       echo "== after"; rpm -Kv "/pkgs/$RPM"
       rpm -K "/pkgs/$RPM" | grep -q "signatures OK" && echo "signature ok"
-      cp "/pkgs/$RPM" /tmp/rvp.rpm
-      dnf install -y -q --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /tmp/rvp.rpm >/dev/null 2>&1
-      rvp --version && echo "installed (localpkg_gpgcheck=1)"
-      dnf remove -y -q rusty-video-player >/dev/null 2>&1; test ! -e /usr/bin/rvp && echo removed
+      cp "/pkgs/$RPM" /tmp/rusty-wave.rpm
+      dnf install -y -q --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=1 /tmp/rusty-wave.rpm >/dev/null 2>&1
+      rusty-wave --version && echo "installed (localpkg_gpgcheck=1)"
+      dnf remove -y -q rusty-wave >/dev/null 2>&1; test ! -e /usr/bin/rusty-wave && echo removed
       echo "== a modified rpm must fail"
-      cp /tmp/rvp.rpm /tmp/bad.rpm
+      cp /tmp/rusty-wave.rpm /tmp/bad.rpm
       printf x | dd of=/tmp/bad.rpm bs=1 seek=$(( $(stat -c %s /tmp/bad.rpm) - 100 )) conv=notrunc 2>/dev/null
       if rpm -K /tmp/bad.rpm; then echo "TAMPERED RPM ACCEPTED"; exit 1; else echo "tampered rpm refused: ok"; fi
     ' ;;

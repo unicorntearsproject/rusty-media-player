@@ -92,7 +92,7 @@ jobs:
           path: |
             target/dist/release/*.deb
             target/dist/release/*.AppImage
-            target/dist/release/rvp-*-linux-x86_64.tar.gz
+            target/dist/release/rusty-wave-*-linux-x86_64.tar.gz
 
   rpm:
     name: .rpm
@@ -111,12 +111,12 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           cargo install --locked cargo-generate-rpm
-          chmod +x target/dist/linux/stage/usr/bin/rvp
+          chmod +x target/dist/linux/stage/usr/bin/rusty-wave
           RVP_TOOLCHAIN='' cargo xtask dist rpm --version "${{ needs.version.outputs.version }}" --no-build
       - name: Install it in this clean Fedora and run it
         run: |
           dnf install -y ./target/dist/release/*.rpm xorg-x11-server-Xvfb xauth libX11 libXcursor libXi libXrandr libwayland-client
-          rvp --version
+          rusty-wave --version
       - uses: actions/upload-artifact@v4
         with:
           name: rpm
@@ -161,8 +161,8 @@ jobs:
           sed -i "s#/home/runner/work/[^/]*/[^/]*#$GITHUB_WORKSPACE#g" target/dist/flatpak/*.yml
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: io.github.idometeor.RustyVideoPlayer-${{ needs.version.outputs.version }}.flatpak
-          manifest-path: target/dist/flatpak/io.github.idometeor.RustyVideoPlayer.yml
+          bundle: io.github.idometeor.RustyWave-${{ needs.version.outputs.version }}.flatpak
+          manifest-path: target/dist/flatpak/io.github.idometeor.RustyWave.yml
           cache-key: flatpak-builder-${{ github.sha }}
           arch: x86_64
       - uses: actions/upload-artifact@v4
@@ -200,7 +200,7 @@ jobs:
           fi
       - name: Unit tests of the desktop host
         run: cargo test -p rvp-host-desktop --lib
-      - name: Build rvp.exe, the zip and the installer
+      - name: Build rusty-wave.exe, the zip and the installer
         env:
           ISCC: C:\Program Files (x86)\Inno Setup 6\ISCC.exe
         run: |
@@ -210,12 +210,12 @@ jobs:
       - name: Try the installer silently and start the installed program
         continue-on-error: true   # a window on a hosted runner is best effort; the build above is what counts
         run: |
-          setup=$(find target/dist/release -name 'RustyVideoPlayer-*-Setup.exe' | head -1)
-          "$setup" //VERYSILENT //SUPPRESSMSGBOXES //CURRENTUSER "//DIR=$RUNNER_TEMP/rvp" //TASKS=assoc
-          test -f "$RUNNER_TEMP/rvp/rvp.exe"
-          "$RUNNER_TEMP/rvp/rvp.exe" --no-audio --no-media-keys --data-dir "$RUNNER_TEMP/rvpdata" --exit-after 4 --report "$RUNNER_TEMP/report.json"
+          setup=$(find target/dist/release -name 'rusty-wave-*-Setup.exe' | head -1)
+          "$setup" //VERYSILENT //SUPPRESSMSGBOXES //CURRENTUSER "//DIR=$RUNNER_TEMP/rusty-wave" //TASKS=assoc
+          test -f "$RUNNER_TEMP/rusty-wave/rusty-wave.exe"
+          "$RUNNER_TEMP/rusty-wave/rusty-wave.exe" --no-audio --no-media-keys --data-dir "$RUNNER_TEMP/rvpdata" --exit-after 4 --report "$RUNNER_TEMP/report.json"
           cat "$RUNNER_TEMP/report.json"
-          "$RUNNER_TEMP/rvp/unins000.exe" //VERYSILENT //SUPPRESSMSGBOXES
+          "$RUNNER_TEMP/rusty-wave/unins000.exe" //VERYSILENT //SUPPRESSMSGBOXES
       - uses: actions/upload-artifact@v4
         with:
           name: windows

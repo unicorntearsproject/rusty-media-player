@@ -958,8 +958,9 @@ M11 notes (what was built, what was checked, what is not there):
   finds a system font for other scripts (CJK, Arabic, ...) on first use, once per character, with a cap on failed searches; thumbnails sit in a byte-budgeted LRU
   (`rvp-library::thumbs`, evicted ones are read back on demand, unsaved ones are never dropped); the queue and position are restored (`rvp-app::restore`, tests in
   `m11_restore.rs`: positions, shuffle and repeat, command-line files win, damaged blobs, browser-like ids).
-- **Brand:** an original mark (a tear drop that points right, so it reads as play, with three level bars) in Unicorn Tears tokens, drawn as geometry by `tools/gen-brand.py`
-  into SVG sources, hicolor PNGs 16 to 512, `.ico`, `.icns`, installer bitmaps, PWA icons and favicon. No VLC cone, no mascot.
+- **Brand:** the app is **Rusty Wave** (renamed from "Rusty Video Player" on 2026-10-05). The official icon master (a rusted-metal play triangle with neon waves,
+  `assets/brand/rusty-wave-icon-master.png`) is sized by `tools/gen-brand.py` into hicolor PNGs 16 to 512, `.ico`, `.icns`, installer bitmaps, PWA icons (maskable
+  on the night background), the favicon and the in-app logo; 32 px and below use a tighter crop. No scalable SVG (no vector source). No VLC cone.
 - **Packaging** is described in [`packaging.md`](packaging.md): `cargo xtask dist`, Flatpak, AppImage, .deb, .rpm, Windows exe and Inno Setup installer, PWA, signing hooks,
   release workflows (tag or manual only), and the verification record.
 - **Findings along the way:** winit's X11 backend panics when `libxkbcommon-x11` is missing, so packages depend on it; `cargo-deb` ignores its own copyright asset when a

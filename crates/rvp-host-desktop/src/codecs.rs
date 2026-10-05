@@ -4,7 +4,7 @@
 //! reconstruction side on two threads, and the pixel kernels spread over a pool; the UI thread never blocks on any of it.
 use rvp_core::{AudioDecoder, CodecFactory, Error, Result as CoreResult, StreamInfo, VideoDecoder};
 
-/// The decoders linked into `rvp`.
+/// The decoders linked into `rusty-wave`.
 pub struct DesktopCodecs;
 
 impl CodecFactory for DesktopCodecs {

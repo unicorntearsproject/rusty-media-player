@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="io.github.idometeor.RustyVideoPlayer" version="1.0.0.0"/>
-  <description>Rusty Video Player</description>
+  <assemblyIdentity type="win32" name="io.github.idometeor.RustyWave" version="1.0.0.0"/>
+  <description>Rusty Wave</description>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>

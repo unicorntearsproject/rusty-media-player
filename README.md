@@ -1,4 +1,4 @@
-# rusty-video-player
+# Rusty Wave
 
 A standalone media app for **audio and video**, written in Rust, with a portable core that compiles to WebAssembly.
 One codebase, two editions:
@@ -18,7 +18,7 @@ One codebase, two editions:
 - A portable `no_std + alloc` core behind a small host trait; no threads required.
 - Playlist, gapless playback, subtitles and a host-neutral now-playing model (Media Session in the browser) are in, and so is the
   audio-first Library face: a scanned and indexed music library (albums, artists, tracks, search, cover art, saved playlists with
-  M3U/M3U8/PLS import and export, a queue) and a full-window visualizer; the desktop app (`rvp`) adds MPRIS and Windows media controls.
+  M3U/M3U8/PLS import and export, a queue) and a full-window visualizer; the desktop app (`rusty-wave`) adds MPRIS and Windows media controls.
 - Its own UI, drawn with the Unicorn Tears design-system tokens (`crates/theme`).
 - Clean-room: VLC is an architecture reference only; no VLC code is used.
 
@@ -40,12 +40,12 @@ Status: milestones 0 to 11 done.
   playback, cover art, a now-playing screen and a visualizer view with five effects (reduced-motion safe), all with keyboard and pointer parity and
   context menus. See the [screenshots](docs/screenshots) and the M10 notes in [`docs/PLAN.md`](docs/PLAN.md).
 
-- M11: the native desktop app `rvp` for Linux and Windows (winit window, CPU-drawn pixels, cpal audio, native dialogs, drag and drop, full screen, HiDPI,
+- M11: the native desktop app `rusty-wave` for Linux and Windows (winit window, CPU-drawn pixels, cpal audio, native dialogs, drag and drop, full screen, HiDPI,
   MPRIS and the Windows media controls, system fonts for CJK, decoding on worker threads), the queue and playback position restored after a restart (all
   hosts), bounded cover memory, an original logo and icon set, and packaging: Flatpak, AppImage, .deb, .rpm, a Windows installer, the PWA, release
   workflows. See [`docs/packaging.md`](docs/packaging.md).
 
-Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Run the desktop app with `cargo run --release -p rvp-host-desktop -- <files or folders>` (`rvp --help`). Read [`docs/PLAN.md`](docs/PLAN.md)
+Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Run the desktop app with `cargo run --release -p rvp-host-desktop -- <files or folders>` (`rusty-wave --help`). Read [`docs/PLAN.md`](docs/PLAN.md)
 for the architecture and the milestone list (M10 audio-first view, M11 desktop app and packaging, M12 Rusty
 Bucket adapter), [`docs/host-api.md`](docs/host-api.md) for the host-neutral media interfaces, and [`CLAUDE.md`](CLAUDE.md)
 for project rules.
@@ -65,7 +65,7 @@ for project rules.
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
 | `crates/rvp-ui`, `crates/theme` | the UI (the Player and the Library faces, drawn into a pixel surface) and the generated design tokens |
 | `crates/rvp-app` | session + UI + input glue behind the host trait |
-| `crates/rvp-host-{headless,web,desktop,rb}` | hosts: native test harness, browser, desktop (Linux and Windows, binary `rvp`), Rusty Bucket |
+| `crates/rvp-host-{headless,web,desktop,rb}` | hosts: native test harness, browser, desktop (Linux and Windows, binary `rusty-wave`), Rusty Bucket |
 | `packaging/`, `assets/brand/`, `.github/workflows/` | metadata, icons, Flatpak, Windows installer; the logo; release workflows (tag or manual only) |
 | `web/`, `tests/e2e/` | the page (canvas, audio worklet, glue) and its Playwright tests |
 | `xtask`, `tools/` | `cargo xtask theme`, `check`, `fixtures` (also the 200-track test library, `tools/gen-library.py`), `web`, `serve`, `e2e`, `perf-web`, `fuzz`, `dist` (packages) |

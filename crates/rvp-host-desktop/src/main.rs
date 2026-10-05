@@ -1,4 +1,4 @@
-//! `rvp`: Rusty Video Player.
+//! `rusty-wave`: Rusty Wave.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 fn main() {
@@ -7,7 +7,7 @@ fn main() {
     std::process::exit(code);
 }
 
-/// A Windows GUI program has no console; when started from one, print to it (`rvp --help`, errors).
+/// A Windows GUI program has no console; when started from one, print to it (`rusty-wave --help`, errors).
 #[cfg(windows)]
 fn attach_console() {
     // SAFETY: a plain Win32 call with no pointers; failing (no parent console) is fine.

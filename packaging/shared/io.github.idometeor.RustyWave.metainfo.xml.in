@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- @VERSION@ and @DATE@ are stamped by `cargo xtask dist` from Cargo.toml and the commit date. -->
 <component type="desktop-application">
-  <id>io.github.idometeor.RustyVideoPlayer</id>
-  <name>Rusty Video Player</name>
+  <id>io.github.idometeor.RustyWave</id>
+  <name>Rusty Wave</name>
   <summary>Play video and music with a library, a queue and a visualizer</summary>
   <developer id="io.github.idometeor">
-    <name>Rusty Video Player contributors</name>
+    <name>Rusty Wave contributors</name>
   </developer>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
   <description>
     <p>
-      Rusty Video Player plays video and music. It is written in Rust, decodes H.264, AV1, VP9, AAC, MP3, FLAC, Opus and
+      Rusty Wave plays video and music. It is written in Rust, decodes H.264, AV1, VP9, AAC, MP3, FLAC, Opus and
       Vorbis with its own portable decoders, and needs no codec packs, no account and no network.
     </p>
     <p>It has two faces that you switch between with one key:</p>
@@ -24,8 +24,8 @@
       control it through MPRIS. It remembers your queue and where you stopped.
     </p>
   </description>
-  <launchable type="desktop-id">io.github.idometeor.RustyVideoPlayer.desktop</launchable>
-  <icon type="stock">io.github.idometeor.RustyVideoPlayer</icon>
+  <launchable type="desktop-id">io.github.idometeor.RustyWave.desktop</launchable>
+  <icon type="stock">io.github.idometeor.RustyWave</icon>
   <url type="homepage">https://github.com/iDoMeteor/rusty-video-player</url>
   <url type="bugtracker">https://github.com/iDoMeteor/rusty-video-player/issues</url>
   <url type="vcs-browser">https://github.com/iDoMeteor/rusty-video-player</url>
@@ -45,7 +45,7 @@
     <keyword>visualizer</keyword>
   </keywords>
   <provides>
-    <binary>rvp</binary>
+    <binary>rusty-wave</binary>
     <mediatype>video/mp4</mediatype>
     <mediatype>video/x-m4v</mediatype>
     <mediatype>video/x-matroska</mediatype>

@@ -22,6 +22,7 @@ pub mod gfx;
 pub mod icon;
 mod icon_data;
 pub mod lib_ui;
+mod logo;
 pub mod model;
 mod subs;
 pub mod ui;

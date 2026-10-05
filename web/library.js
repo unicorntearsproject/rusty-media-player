@@ -33,7 +33,7 @@ export class RvpStore {
       await this.each(KV, (k, v) => this.mem.set(k, v instanceof Uint8Array ? v : new Uint8Array(v)));
       await this.each(HANDLES, (k, v) => this.handles.set(k, v));
     } catch (err) {
-      console.warn("rvp: no IndexedDB, the library will not be kept between visits:", err);
+      console.warn("rusty-wave: no IndexedDB, the library will not be kept between visits:", err);
       this.db = null;
     }
     return this;

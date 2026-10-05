@@ -1,4 +1,4 @@
-// Service worker of Rusty Video Player: keeps the app (the wasm, the scripts, the icons) in a versioned cache so it starts offline, and
+// Service worker of Rusty Wave: keeps the app (the wasm, the scripts, the icons) in a versioned cache so it starts offline, and
 // receives files shared to the installed app (the manifest's share target).
 //
 // `cargo xtask web` replaces the two placeholders below: VERSION is the Cargo version plus a hash of every file of the page, so any

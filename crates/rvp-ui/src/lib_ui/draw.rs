@@ -250,17 +250,16 @@ impl Ui {
         fb.fill_rect_paint(RectF::new(r.right() - 1.0 * s, r.y, 1.0 * s, r.h), Paint::Solid(t::WHITE), 0.07);
         let px = if compact { 10.0 * s } else { 16.0 * s };
         if !compact {
-            // The brand: a small tears-gradient mark and the kicker.
-            let mark = RectF::new(px, 24.0 * s, 30.0 * s, 30.0 * s);
-            fb.fill_rrect(mark, 9.0 * s, Paint::Gradient(&t::GRADIENT_TEARS), 1.0);
-            self.icon(fb, Icon::Music, mark.cx(), mark.cy(), 16.0, t::WHITE, 1.0, false);
+            // The brand: the logo and the kicker.
+            let mark = RectF::new(px - 2.0 * s, 20.0 * s, 38.0 * s, 38.0 * s);
+            crate::logo::draw(fb, mark, 1.0);
             self.text(
                 fb,
                 Face::SansBold,
                 10.5,
-                mark.right() + 12.0 * s,
+                mark.right() + 8.0 * s,
                 mark.cy() - 7.0 * s,
-                "RUSTY VIDEO PLAYER",
+                "RUSTY WAVE",
                 t::VIOLET_400,
                 1.0,
                 1.6,
@@ -269,7 +268,7 @@ impl Ui {
                 fb,
                 Face::SansMedium,
                 13.0,
-                mark.right() + 12.0 * s,
+                mark.right() + 8.0 * s,
                 mark.cy() + 8.0 * s,
                 "Media",
                 t::TEXT_MUTED,
@@ -836,17 +835,22 @@ impl Ui {
         let s = self.scale;
         let cx = rect.cx();
         let mut y = rect.y + 70.0 * s;
-        let ring = RectF::new(cx - 34.0 * s, y - 34.0 * s, 68.0 * s, 68.0 * s);
-        fb.fill_rrect(ring, 34.0 * s, Paint::Solid(t::INK_800), 1.0);
-        fb.stroke_rrect(ring, 34.0 * s, 1.5 * s, fade(t::VIOLET_500, 0.6), 1.0);
-        let icon = match self.lib.view {
-            View::Search => Icon::Search,
-            View::Queue => Icon::List,
-            View::Playlists => Icon::ListMusic,
-            View::Artists => Icon::MicVocal,
-            _ => Icon::Disc3,
-        };
-        self.icon(fb, icon, cx, y, 30.0, t::VIOLET_400, 1.0, false);
+        if ctx.lib.track_count() == 0 && matches!(self.lib.view, View::Albums | View::Artists | View::Tracks) {
+            // The empty library: the logo.
+            crate::logo::draw(fb, RectF::new(cx - 46.0 * s, y - 46.0 * s, 92.0 * s, 92.0 * s), 1.0);
+        } else {
+            let ring = RectF::new(cx - 34.0 * s, y - 34.0 * s, 68.0 * s, 68.0 * s);
+            fb.fill_rrect(ring, 34.0 * s, Paint::Solid(t::INK_800), 1.0);
+            fb.stroke_rrect(ring, 34.0 * s, 1.5 * s, fade(t::VIOLET_500, 0.6), 1.0);
+            let icon = match self.lib.view {
+                View::Search => Icon::Search,
+                View::Queue => Icon::List,
+                View::Playlists => Icon::ListMusic,
+                View::Artists => Icon::MicVocal,
+                _ => Icon::Disc3,
+            };
+            self.icon(fb, icon, cx, y, 30.0, t::VIOLET_400, 1.0, false);
+        }
         y += 62.0 * s;
         let hw = self.text_w(Face::SansBold, 24.0, head, -0.2);
         self.text(fb, Face::SansBold, 24.0, cx - hw * 0.5, y, head, t::TEXT_STRONG, 1.0, -0.2);
