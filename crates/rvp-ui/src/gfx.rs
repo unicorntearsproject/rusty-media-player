@@ -438,6 +438,47 @@ impl FrameBuffer {
         });
     }
 
+    /// Like [`FrameBuffer::blit_scaled`], with rounded corners (`radius` = half the size makes a circle): the corners are
+    /// blended back over what was there before.
+    pub fn blit_scaled_rounded(&mut self, dst: RectF, radius: f32, src: &[u8], sw: u32, sh: u32) {
+        let r = radius.min(dst.w * 0.5).min(dst.h * 0.5).max(0.0);
+        if r < 0.75 {
+            self.blit_scaled(dst, src, sw, sh);
+            return;
+        }
+        let x0 = (floorf(dst.x) as i32).max(0);
+        let y0 = (floorf(dst.y) as i32).max(0);
+        let x1 = (libm::ceilf(dst.right()) as i32).min(self.width as i32);
+        let y1 = (libm::ceilf(dst.bottom()) as i32).min(self.height as i32);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let k = libm::ceilf(r) as i32 + 1;
+        // The four corner squares (clipped), with their pixels as they were.
+        let squares =
+            [(x0, y0), ((x1 - k).max(x0), y0), (x0, (y1 - k).max(y0)), ((x1 - k).max(x0), (y1 - k).max(y0))];
+        let mut saved: Vec<(i32, i32, [u8; 3])> = Vec::new();
+        for (sx, sy) in squares {
+            for y in sy..(sy + k).min(y1) {
+                for x in sx..(sx + k).min(x1) {
+                    let i = (y as usize * self.width as usize + x as usize) * 4;
+                    saved.push((x, y, [self.pixels[i], self.pixels[i + 1], self.pixels[i + 2]]));
+                }
+            }
+        }
+        self.blit_scaled(dst, src, sw, sh);
+        for (x, y, bg) in saved {
+            let cov = (0.5 - sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &dst, r)).clamp(0.0, 1.0);
+            if cov < 1.0 {
+                let i = (y as usize * self.width as usize + x as usize) * 4;
+                for c in 0..3 {
+                    self.pixels[i + c] =
+                        (bg[c] as f32 + (self.pixels[i + c] as f32 - bg[c] as f32) * cov + 0.5) as u8;
+                }
+            }
+        }
+    }
+
     /// Copy another buffer of the same size over this one.
     pub fn copy_from(&mut self, other: &FrameBuffer) {
         if self.pixels.len() == other.pixels.len() {

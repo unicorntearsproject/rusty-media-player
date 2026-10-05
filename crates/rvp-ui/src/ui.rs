@@ -11,8 +11,8 @@ use rvp_host::{InputEvent, Key, Modifiers, PointerButton};
 
 /// How long the controls stay up after the last pointer or key activity while playing.
 pub const HIDE_AFTER_US: i64 = 2_500_000;
-const DOUBLE_CLICK_US: i64 = 350_000;
-const TOOLTIP_DELAY_US: i64 = 450_000;
+pub(crate) const DOUBLE_CLICK_US: i64 = 350_000;
+pub(crate) const TOOLTIP_DELAY_US: i64 = 450_000;
 const TOAST_US: i64 = 1_400_000;
 const SCRUB_THROTTLE_US: i64 = 180_000;
 
@@ -59,10 +59,24 @@ pub enum Btn {
     Fullscreen,
     /// The big button on the empty screen.
     Welcome,
+    /// Previous track (library bar).
+    Prev,
+    /// Next track (library bar).
+    Next,
+    /// Shuffle (library bar).
+    Shuffle,
+    /// Repeat (library bar).
+    Repeat,
+    /// The queue view (library bar).
+    QueueView,
+    /// The visualizer view (library bar).
+    VizView,
+    /// Switch to the player (library bar), or to the library (player bar).
+    ModeSwitch,
 }
 
 /// Tab order of the transport bar.
-const FOCUS_ORDER: [Btn; 9] = [
+const FOCUS_ORDER: [Btn; 10] = [
     Btn::Play,
     Btn::Back,
     Btn::Fwd,
@@ -71,6 +85,7 @@ const FOCUS_ORDER: [Btn; 9] = [
     Btn::Tracks,
     Btn::Playlist,
     Btn::Open,
+    Btn::ModeSwitch,
     Btn::Fullscreen,
 ];
 
@@ -90,7 +105,7 @@ pub enum Target {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Drag {
+pub(crate) enum Drag {
     Seek,
     Volume,
 }
@@ -158,29 +173,33 @@ pub struct Ui {
     pub(crate) h: u32,
     pub(crate) scale: f32,
     pub(crate) pointer: Option<(f32, f32)>,
-    drag: Option<Drag>,
+    pub(crate) drag: Option<Drag>,
     pub(crate) pressed: Option<Target>,
     pub(crate) hover: Target,
-    hover_since: i64,
-    last_activity: i64,
+    pub(crate) hover_since: i64,
+    pub(crate) last_activity: i64,
     pub(crate) controls_alpha: f32,
-    last_update: i64,
+    pub(crate) last_update: i64,
     pub(crate) menu: Vec<Panel>,
     pub(crate) focus: Option<Btn>,
     pub(crate) toast: Option<(String, i64)>,
-    last_click: Option<(i64, f32, f32)>,
-    wheel_acc: f32,
+    pub(crate) last_click: Option<(i64, f32, f32)>,
+    pub(crate) wheel_acc: f32,
     pub(crate) drag_over: bool,
     pub(crate) scrub: Option<f32>,
-    last_scrub_emit: i64,
+    pub(crate) last_scrub_emit: i64,
     pub(crate) now: i64,
     pub(crate) hover_seek: Option<f32>,
-    dirty: bool,
+    pub(crate) dirty: bool,
     /// True once a key press has been seen; focus rings only show then.
     pub(crate) keyboard_mode: bool,
     pub(crate) win_focused: bool,
-    media_active: bool,
-    key_used: bool,
+    pub(crate) media_active: bool,
+    pub(crate) key_used: bool,
+    /// The library face's state.
+    pub(crate) lib: crate::lib_ui::LibUi,
+    /// What the primary button went down on in library mode.
+    pub(crate) pressed_lib: Option<crate::lib_ui::LibHit>,
 }
 
 impl Default for Ui {
@@ -222,6 +241,8 @@ impl Ui {
             win_focused: true,
             media_active: false,
             key_used: false,
+            lib: crate::lib_ui::LibUi::default(),
+            pressed_lib: None,
         }
     }
 
@@ -290,6 +311,23 @@ impl Ui {
 
     /// The cursor the host should show.
     pub fn cursor(&self, model: &UiModel) -> Cursor {
+        if self.lib.mode == crate::lib_ui::Mode::Library {
+            use crate::lib_ui::{LibDrag, LibHit};
+            if matches!(self.lib.drag, Some(LibDrag::Scroll { .. } | LibDrag::Seek | LibDrag::Volume)) {
+                return Cursor::Grabbing;
+            }
+            if self.lib.view == crate::lib_ui::View::Visualizer
+                && model.state.is_active()
+                && self.controls_alpha < 0.05
+                && self.menu.is_empty()
+            {
+                return Cursor::Hidden;
+            }
+            return match self.lib.hover {
+                LibHit::None => Cursor::Default,
+                _ => Cursor::Pointer,
+            };
+        }
         if self.drag.is_some() {
             return Cursor::Grabbing;
         }
@@ -307,12 +345,16 @@ impl Ui {
 
     /// True if anything is drawn over the picture right now (controls, a menu, a toast, the drop outline).
     pub fn has_overlay(&self) -> bool {
-        self.controls_alpha > 0.005 || !self.menu.is_empty() || self.toast.is_some() || self.drag_over
+        self.lib.mode == crate::lib_ui::Mode::Library
+            || self.controls_alpha > 0.005
+            || !self.menu.is_empty()
+            || self.toast.is_some()
+            || self.drag_over
     }
 
     /// Whether the transport bar is (becoming) visible.
     pub fn controls_visible(&self) -> bool {
-        self.controls_alpha > 0.01
+        self.lib.mode == crate::lib_ui::Mode::Library || self.controls_alpha > 0.01
     }
 
     /// Current controls opacity (0.0..=1.0), for tests and screenshots.
@@ -378,6 +420,8 @@ impl Ui {
         l.buttons.push((Btn::Tracks, RectF::new(rx - b, cy - b * 0.5, b, b)));
         rx -= b + 2.0 * s;
         l.buttons.push((Btn::Playlist, RectF::new(rx - b, cy - b * 0.5, b, b)));
+        rx -= b + 2.0 * s;
+        l.buttons.push((Btn::ModeSwitch, RectF::new(rx - b, cy - b * 0.5, b, b)));
         rx -= b + 6.0 * s;
         let pw = 56.0 * s;
         l.buttons.push((Btn::Speed, RectF::new(rx - pw, cy - 14.0 * s, pw, 28.0 * s)));
@@ -476,10 +520,40 @@ impl Ui {
         {
             redraw = true; // the spinner
         }
+        if self.lib.mode == crate::lib_ui::Mode::Library {
+            // The equaliser bars and the text caret.
+            if self.lib.animated && !self.config.reduce_motion && now_us - self.lib.anim_at >= 120_000 {
+                self.lib.anim_at = now_us;
+                redraw = true;
+            }
+            let typing = self.lib.zone == crate::lib_ui::Zone::Search || self.lib.prompt.is_some();
+            let blink = (now_us / 530_000) % 2 == 0;
+            if typing && blink != self.lib.blink {
+                redraw = true;
+            }
+            self.lib.blink = blink;
+        }
         redraw
     }
 
     fn controls_wanted(&self, model: &UiModel) -> bool {
+        if self.lib.mode == crate::lib_ui::Mode::Library {
+            // The library's bar is always there; the visualizer's floats and hides like the player's.
+            if self.lib.view != crate::lib_ui::View::Visualizer {
+                return true;
+            }
+            return !model.state.is_active()
+                || !self.menu.is_empty()
+                || self.lib.drag.is_some()
+                || matches!(
+                    self.lib.hover,
+                    crate::lib_ui::LibHit::Bar(_)
+                        | crate::lib_ui::LibHit::Seek
+                        | crate::lib_ui::LibHit::Volume
+                        | crate::lib_ui::LibHit::Viz(_)
+                )
+                || self.now - self.last_activity < HIDE_AFTER_US;
+        }
         if !model.has_media() {
             return false;
         }
@@ -715,6 +789,8 @@ impl Ui {
                 }
             }
             Btn::Playlist => self.open_playlist_popup(model),
+            Btn::ModeSwitch => out.push(Action::SetMode(crate::lib_ui::Mode::Library)),
+            Btn::Prev | Btn::Next | Btn::Shuffle | Btn::Repeat | Btn::QueueView | Btn::VizView => {}
         }
     }
 
@@ -882,7 +958,7 @@ impl Ui {
         }
     }
 
-    fn open_menu_at(&mut self, items: Vec<MenuItem>, x: f32, y: f32, hover: Option<usize>) {
+    pub(crate) fn open_menu_at(&mut self, items: Vec<MenuItem>, x: f32, y: f32, hover: Option<usize>) {
         let mut p = self.panel_for(items);
         self.place(&mut p, x, y);
         p.hover = hover;
@@ -913,7 +989,7 @@ impl Ui {
     }
 
     /// Highlight row `ri` of panel `pi`, closing deeper panels and opening its submenu if it has one.
-    fn menu_hover(&mut self, pi: usize, ri: usize) {
+    pub(crate) fn menu_hover(&mut self, pi: usize, ri: usize) {
         if pi >= self.menu.len() {
             return;
         }
@@ -944,7 +1020,7 @@ impl Ui {
         self.menu.push(child);
     }
 
-    fn menu_key(&mut self, key: &Key, out: &mut Vec<Action>) {
+    pub(crate) fn menu_key(&mut self, key: &Key, out: &mut Vec<Action>) {
         let last = self.menu.len() - 1;
         let n = self.menu[last].items.len();
         let step = |p: &Panel, from: Option<usize>, dir: isize| -> Option<usize> {

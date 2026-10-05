@@ -568,6 +568,12 @@ pub struct Session {
     item_no: u32,
     viz: Option<rvp_viz::Analyzer>,
     viz_reset: bool,
+    /// The application wants the analysis for its own visualizer view (in addition to a host tap).
+    viz_capture: bool,
+    /// Summaries made since the application last took them.
+    viz_out: Vec<rvp_host::VizSummary>,
+    /// The mono waveform of the audio heard last (for an oscilloscope), newest samples at the end.
+    scope: Vec<f32>,
     next: Option<NextItem>,
     /// The audio feed has moved on to the next item; the current one is only being heard out.
     feed_next: bool,
@@ -608,7 +614,25 @@ impl Session {
             feed_next: false,
             viz: None,
             viz_reset: false,
+            viz_capture: false,
+            viz_out: Vec::new(),
+            scope: Vec::new(),
         }
+    }
+
+    /// Switch the analysis for the application's own visualizer on or off. While on, [`Session::take_viz`] returns what the
+    /// audio being heard looked like (the host's tap, if it has one, gets the same numbers).
+    pub fn set_viz_capture(&mut self, on: bool) {
+        self.viz_capture = on;
+        if !on {
+            self.viz_out.clear();
+            self.scope.clear();
+        }
+    }
+
+    /// The summaries computed since the last call, oldest first, and the latest mono samples heard (up to 2048).
+    pub fn take_viz(&mut self) -> (Vec<rvp_host::VizSummary>, &[f32]) {
+        (core::mem::take(&mut self.viz_out), &self.scope)
     }
 
     /// Give the current item a caller-chosen tag (reported back in [`SessionEvent::ItemStarted`] for later ones).
@@ -1268,7 +1292,7 @@ impl Session {
 impl Session {
     /// Feed the host's visualizer tap (if it has one) the audio heard since the last call.
     fn feed_visualizer<H: Host>(&mut self, host: &mut H) {
-        let want = host.visualizer().is_some();
+        let want = host.visualizer().is_some() || self.viz_capture;
         let Some(out) = &mut self.audio else { return };
         out.set_tap(want);
         if !want {
@@ -1288,6 +1312,19 @@ impl Session {
         let mut summaries = Vec::new();
         if let Some(a) = &mut self.viz {
             a.process(&pcm, params.channels as usize, pts, &mut summaries);
+        }
+        if self.viz_capture {
+            self.viz_out.extend_from_slice(&summaries);
+            if self.viz_out.len() > 512 {
+                let drop = self.viz_out.len() - 512;
+                self.viz_out.drain(..drop);
+            }
+            let ch = params.channels.max(1) as usize;
+            self.scope.extend(pcm.chunks_exact(ch).map(|f| f.iter().sum::<f32>() / ch as f32));
+            if self.scope.len() > 2048 {
+                let drop = self.scope.len() - 2048;
+                self.scope.drain(..drop);
+            }
         }
         if let Some(tap) = host.visualizer() {
             tap.push_block(&rvp_host::VizBlock {

@@ -348,8 +348,10 @@ version = "0.0.1"
 dependencies = [
  "rvp-core",
  "rvp-host",
+ "rvp-library",
  "rvp-player",
  "rvp-ui",
+ "rvp-viz",
 ]
 
 [[package]]
@@ -509,6 +511,8 @@ dependencies = [
  "libm",
  "rvp-core",
  "rvp-host",
+ "rvp-library",
+ "rvp-viz",
  "theme",
 ]
 
@@ -519,6 +523,7 @@ dependencies = [
  "libm",
  "rvp-core",
  "rvp-host",
+ "theme",
 ]
 
 [[package]]

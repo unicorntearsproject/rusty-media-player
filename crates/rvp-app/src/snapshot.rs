@@ -169,6 +169,23 @@ impl App {
             p.present_us as f64 / 1000.0,
             p.max_tick_us as f64 / 1000.0
         );
+        let ctx = Self::lib_ctx(&self.lib, None);
+        j += &format!("\"lib\":{},", ui.lib_snapshot_json(&ctx, m));
+        j += &format!(
+            "\"now\":{{\"title\":{},\"artist\":{},\"album\":{},\"has_art\":{},\"track\":{}}},",
+            esc(&m.title),
+            esc(&m.artist),
+            esc(&m.album),
+            self.lib.now.art.is_some(),
+            m.now_track.map_or("null".to_string(), |t| t.to_string()),
+        );
+        let v = self.viz();
+        j += &format!(
+            "\"viz\":{{\"effect\":{},\"palette\":{},\"frames\":{}}},",
+            esc(v.effect.name()),
+            esc(v.palette.name()),
+            v.frames()
+        );
         j += &format!("\"frames_drawn\":{}}}", self.frames_drawn());
         Snapshot { json: j }
     }

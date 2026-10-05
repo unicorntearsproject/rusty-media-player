@@ -17,6 +17,10 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod effects;
+
+pub use effects::{EFFECTS, Effect, FrameInput, PALETTES, Palette, Viz};
+
 use alloc::vec::Vec;
 use rvp_core::Timestamp;
 use rvp_host::{VIZ_BANDS, VizSummary};

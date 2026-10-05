@@ -68,7 +68,7 @@ impl Ui {
 
     // ---- small helpers ---------------------------------------------------------------------------------
 
-    fn text(
+    pub(crate) fn text(
         &mut self,
         fb: &mut FrameBuffer,
         face: Face,
@@ -84,12 +84,12 @@ impl Ui {
         self.fonts.draw(fb, face, size * s, x, cy + size * s * 0.36, text, c, a, tracking * s)
     }
 
-    fn text_w(&mut self, face: Face, size: f32, text: &str, tracking: f32) -> f32 {
+    pub(crate) fn text_w(&mut self, face: Face, size: f32, text: &str, tracking: f32) -> f32 {
         let s = self.scale;
         self.fonts.measure(face, size * s, text, tracking * s)
     }
 
-    fn icon(
+    pub(crate) fn icon(
         &mut self,
         fb: &mut FrameBuffer,
         icon: Icon,
@@ -104,7 +104,7 @@ impl Ui {
         self.icons.draw(fb, icon, cx, cy, size * s, c, a, filled);
     }
 
-    fn focus_ring(&mut self, fb: &mut FrameBuffer, r: RectF, radius: f32, a: f32) {
+    pub(crate) fn focus_ring(&mut self, fb: &mut FrameBuffer, r: RectF, radius: f32, a: f32) {
         let s = self.scale;
         fb.glow_rrect(r.inflate(1.0 * s), radius, 12.0 * s, t::CYAN_500, 0.35 * a);
         fb.stroke_rrect(r.inflate(2.0 * s), radius + 2.0 * s, 2.0 * s, t::FOCUS_RING, a);
@@ -234,7 +234,14 @@ impl Ui {
     }
 
     /// Greedy word wrap into at most `max_lines` lines (the last is ellipsised if text remains).
-    fn wrap(&mut self, face: Face, size: f32, text: &str, max_w: f32, max_lines: usize) -> Vec<String> {
+    pub(crate) fn wrap(
+        &mut self,
+        face: Face,
+        size: f32,
+        text: &str,
+        max_w: f32,
+        max_lines: usize,
+    ) -> Vec<String> {
         let s = self.scale;
         let mut lines: Vec<String> = Vec::new();
         let mut cur = String::new();
@@ -513,6 +520,7 @@ impl Ui {
                     Btn::Tracks => Icon::Subtitles,
                     Btn::Playlist => Icon::List,
                     Btn::Open => Icon::FolderOpen,
+                    Btn::ModeSwitch => Icon::Music,
                     Btn::Fullscreen => {
                         if model.fullscreen {
                             Icon::Minimize
@@ -578,7 +586,7 @@ impl Ui {
         }
     }
 
-    fn draw_toast(&mut self, fb: &mut FrameBuffer, l: &Layout) {
+    pub(crate) fn draw_toast(&mut self, fb: &mut FrameBuffer, l: &Layout) {
         let Some((text, until)) = self.toast.clone() else { return };
         let s = l.s;
         let left = until - self.now;
@@ -612,7 +620,14 @@ impl Ui {
             Btn::Playlist => ("Playlist", "Q"),
             Btn::Open => ("Open file", "O"),
             Btn::Fullscreen => (if model.fullscreen { "Leave fullscreen" } else { "Fullscreen" }, "F"),
-            Btn::Welcome => return None,
+            Btn::ModeSwitch => ("Library", "B"),
+            Btn::Welcome
+            | Btn::Prev
+            | Btn::Next
+            | Btn::Shuffle
+            | Btn::Repeat
+            | Btn::QueueView
+            | Btn::VizView => return None,
         };
         Some((label.into(), key))
     }
@@ -652,7 +667,7 @@ impl Ui {
         self.text(fb, Face::MonoBold, 11.0, chip.x + 6.0 * s, chip.cy(), key, t::CYAN_400, 1.0, 0.0);
     }
 
-    fn draw_drop_outline(&mut self, fb: &mut FrameBuffer, l: &Layout) {
+    pub(crate) fn draw_drop_outline(&mut self, fb: &mut FrameBuffer, l: &Layout) {
         // On the empty screen the card itself lights up; over a playing picture, outline the window.
         if self.pointer.is_none() && l.card.w <= 0.0 {
             return;
@@ -663,7 +678,7 @@ impl Ui {
         fb.stroke_rrect(r.inflate(-3.0 * s), 21.0 * s, 8.0 * s, t::MAGENTA_500, 0.12);
     }
 
-    fn draw_panel(&mut self, fb: &mut FrameBuffer, l: &Layout, p: &Panel) {
+    pub(crate) fn draw_panel(&mut self, fb: &mut FrameBuffer, l: &Layout, p: &Panel) {
         let s = l.s;
         fb.shadow_rrect(p.rect, 14.0 * s, 8.0 * s, 28.0 * s, Rgba::new(5, 2, 15, 150), 1.0);
         fb.fill_rrect(p.rect, 14.0 * s, Paint::Solid(t::INK_800), 1.0);

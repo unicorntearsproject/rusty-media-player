@@ -94,26 +94,90 @@ impl InputEvents for WebInput {
     }
 }
 
-/// Settings in `localStorage` (hex encoded).
-pub struct WebStorage(Option<web_sys::Storage>);
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    /// The page's store for big values (IndexedDB, `web/library.js`): the library index and its thumbnails.
+    pub type JsStore;
+
+    /// Keep `data` under `key`; an empty `data` deletes it.
+    #[wasm_bindgen::prelude::wasm_bindgen(method)]
+    fn put(this: &JsStore, key: &str, data: &[u8]);
+}
+
+/// Settings in `localStorage` (hex encoded); the library's data (keys under `library/`) is too big for it and goes to the
+/// page's IndexedDB store: reads come from a copy the page loaded before the player started, writes go to both.
+pub struct WebStorage {
+    local: Option<web_sys::Storage>,
+    big: HashMap<String, Vec<u8>>,
+    js: Option<JsStore>,
+}
 
 impl WebStorage {
     pub fn new() -> Self {
-        Self(web_sys::window().and_then(|w| w.local_storage().ok().flatten()))
+        Self {
+            local: web_sys::window().and_then(|w| w.local_storage().ok().flatten()),
+            big: HashMap::new(),
+            js: None,
+        }
     }
+
+    /// Hand over the page's IndexedDB bridge.
+    pub fn set_js(&mut self, js: JsStore) {
+        self.js = Some(js);
+    }
+
+    /// A value the page loaded from IndexedDB at start-up (not written back).
+    pub fn preload(&mut self, key: &str, data: &[u8]) {
+        self.big.insert(key.to_string(), data.to_vec());
+    }
+}
+
+fn is_big(key: &str) -> bool {
+    key.starts_with("library/")
 }
 
 impl Storage for WebStorage {
     async fn load(&mut self, key: &str) -> Option<Vec<u8>> {
-        let s = self.0.as_ref()?.get_item(&format!("rvp:{key}")).ok().flatten()?;
+        if is_big(key) {
+            return self.big.get(key).cloned();
+        }
+        let s = self.local.as_ref()?.get_item(&format!("rvp:{key}")).ok().flatten()?;
         (0..s.len() / 2).map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()).collect()
     }
 
     async fn store(&mut self, key: &str, value: &[u8]) {
-        if let Some(s) = &self.0 {
+        if is_big(key) {
+            if value.is_empty() {
+                self.big.remove(key);
+            } else {
+                self.big.insert(key.to_string(), value.to_vec());
+            }
+            if let Some(js) = &self.js {
+                js.put(key, value);
+            }
+            return;
+        }
+        if let Some(s) = &self.local {
             let hex: String = value.iter().map(|b| format!("{b:02x}")).collect();
             let _ = s.set_item(&format!("rvp:{key}"), &hex);
         }
+    }
+}
+
+/// Folder listings the page walked (File System Access directory handles, or a `webkitdirectory` input), waiting for the app.
+#[derive(Default)]
+pub struct WebLibrary {
+    pub listings: VecDeque<rvp_host::Listing>,
+    pub connected: Vec<String>,
+}
+
+impl rvp_host::Library for WebLibrary {
+    fn take_listing(&mut self) -> Option<rvp_host::Listing> {
+        self.listings.pop_front()
+    }
+
+    fn connected_roots(&self) -> Vec<String> {
+        self.connected.clone()
     }
 }
 
@@ -148,6 +212,12 @@ pub struct WebHost {
     pub input: WebInput,
     pub storage: WebStorage,
     pub files: HashMap<String, web_sys::File>,
+    /// The ids of the files of each library folder (dropped again when the folder is listed anew).
+    pub root_files: HashMap<String, Vec<String>>,
+    /// Directory access for the library.
+    pub library: WebLibrary,
+    /// Files the app wants the page to hand to the user (exported playlists): name, media type, bytes.
+    pub downloads: Vec<(String, String, Vec<u8>)>,
     /// The Media Session adapter, once the page has set one.
     pub media: Option<crate::media::WebNowPlaying>,
     /// The visualizer tap, while the page has it switched on.
@@ -191,6 +261,9 @@ impl Host for WebHost {
     }
     fn visualizer(&mut self) -> Option<&mut dyn rvp_host::VisualizerTap> {
         self.tap.as_mut().map(|t| t as &mut dyn rvp_host::VisualizerTap)
+    }
+    fn library(&mut self) -> Option<&mut dyn rvp_host::Library> {
+        Some(&mut self.library)
     }
     fn now_playing(&mut self) -> Option<&mut dyn rvp_host::NowPlaying> {
         self.media.as_mut().map(|m| m as &mut dyn rvp_host::NowPlaying)

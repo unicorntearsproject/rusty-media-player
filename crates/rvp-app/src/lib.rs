@@ -11,6 +11,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+mod library;
 mod snapshot;
 
 pub use snapshot::Snapshot;
@@ -19,15 +20,14 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use library::{LibState, RESUME_MIN_AUDIO_US, is_playlist_name};
 use rvp_core::{CodecFactory, Error, Timestamp};
 use rvp_host::{
     FrameSink, Host, InputEvent, NowPlayingMeta, OpenRequest, PlayState, Playback, Rect, Storage,
     TransportCommand,
 };
 use rvp_player::{Playlist, Repeat, Session, SessionEvent, SessionState};
-use rvp_ui::{
-    Action, Cursor, FrameBuffer, MediaState, PlaylistEntry, SPEEDS, TrackItem, Ui, UiConfig, UiModel,
-};
+use rvp_ui::{Action, Cursor, FrameBuffer, MediaState, Mode, SPEEDS, TrackItem, Ui, UiConfig, UiModel};
 
 /// A saved resume position is only used when the file is longer than this past it, microseconds.
 const RESUME_MIN_REMAINING_US: Timestamp = 10_000_000;
@@ -40,14 +40,38 @@ const PREV_RESTART_US: Timestamp = 3_000_000;
 
 /// Granularity at which a moving position triggers a redraw (20 Hz).
 const LIVE_REDRAW_US: Timestamp = 50_000;
+/// Granularity of the position in the library face's bar (4 Hz).
+const LIB_LIVE_REDRAW_US: Timestamp = 250_000;
 
 /// Something the host has to do on the app's behalf.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// Show the file picker (in a browser this must happen inside the user's input event).
     PickFile,
     /// Show the file picker to add files to the playlist.
     AddFiles,
+    /// Let the user pick a folder to add to the library; the host walks it and hands back a `rvp_host::Listing`.
+    AddFolder,
+    /// Walk a library folder (by root id) again and hand back a listing.
+    Rescan(String),
+    /// A folder left the library: the host can forget its handle.
+    Forget(String),
+    /// Show the file picker for playlist files (M3U, M3U8, PLS).
+    ImportPlaylist,
+    /// Give the user a file (an exported playlist).
+    Download {
+        /// Suggested file name.
+        name: String,
+        /// Media type.
+        mime: String,
+        /// The bytes.
+        data: Vec<u8>,
+    },
+}
+
+/// `n word` with the right number.
+pub(crate) fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// The application.
@@ -71,6 +95,7 @@ pub struct App {
     force_draw: bool,
     last_drawn: Option<UiModel>,
     last_has_media: bool,
+    last_lib_mode: bool,
     warnings_seen: usize,
     loop_a: Option<Timestamp>,
     loop_b: Option<Timestamp>,
@@ -84,6 +109,10 @@ pub struct App {
     now: Timestamp,
     frames_drawn: u64,
     perf: Perf,
+    /// The library face: index, scanner, visualizer, what is playing.
+    lib: LibState,
+    /// The library revision the frame on screen was drawn for.
+    drawn_lib_rev: u64,
 }
 
 /// What was last told to the host's now-playing sink.
@@ -120,7 +149,12 @@ impl App {
         Self {
             codecs,
             session: None,
-            ui: Ui::new(config),
+            ui: {
+                let mut ui = Ui::new(config);
+                // The visualizer starts calm: off with reduced motion, on otherwise.
+                ui.set_viz_on(!config.reduce_motion);
+                ui
+            },
             base: FrameBuffer::new(1, 1),
             fb: FrameBuffer::new(1, 1),
             model: UiModel { volume: 1.0, rate: 1.0, ..UiModel::default() },
@@ -136,6 +170,7 @@ impl App {
             force_draw: true,
             last_drawn: None,
             last_has_media: false,
+            last_lib_mode: false,
             warnings_seen: 0,
             loop_a: None,
             loop_b: None,
@@ -148,6 +183,8 @@ impl App {
             now: 0,
             frames_drawn: 0,
             perf: Perf::default(),
+            lib: LibState::new(),
+            drawn_lib_rev: u64::MAX,
         }
     }
 
@@ -219,10 +256,17 @@ impl App {
             self.refresh_model(now);
             return;
         }
+        if is_playlist_name(source.name()) {
+            // A playlist file handed over as a source: it goes to the library's playlists.
+            let name = source.name().to_string();
+            self.import_playlist_source(source, &name);
+            return;
+        }
         self.save_resume(host, true);
         self.playlist.clear();
         let id = self.playlist.add(source.name(), "");
         self.playlist.set_current(id);
+        self.lib.auto_mode = true;
         self.start(host, source, id, true);
     }
 
@@ -235,7 +279,11 @@ impl App {
         H::Source: 'static,
     {
         let now = host.clock().now_us();
-        let (subs, media): (Vec<_>, Vec<_>) = items.iter().partition(|(_, name)| is_subtitle_name(name));
+        let (lists, rest): (Vec<_>, Vec<_>) = items.iter().partition(|(_, name)| is_playlist_name(name));
+        let (subs, media): (Vec<_>, Vec<_>) = rest.into_iter().partition(|(_, name)| is_subtitle_name(name));
+        for (id, name) in lists {
+            self.import_playlist_file(host, id, name, now);
+        }
         let idle = !self.model.has_media() || self.model.state == MediaState::Failed;
         if !append || idle {
             if !media.is_empty() {
@@ -252,6 +300,7 @@ impl App {
         }
         if let Some(first) = first_new {
             if !append || idle {
+                self.lib.auto_mode = true;
                 self.play_item(host, first);
             } else {
                 self.ui.show_toast(&format!("Added {} to the playlist", media.len()), now);
@@ -339,6 +388,9 @@ impl App {
         }
         self.last_resume_save = now;
         let (Some(dur), pos) = (s.duration_us(), s.position_us(now)) else { return };
+        if !s.container_has_video() && dur < RESUME_MIN_AUDIO_US {
+            return; // a song starts from the top every time
+        }
         let value: Vec<u8> = if s.state() == SessionState::Ended || pos + RESUME_MIN_REMAINING_US > dur {
             Vec::new() // finished (or nearly): next time starts from the beginning
         } else {
@@ -365,6 +417,9 @@ impl App {
             return;
         };
         self.resume_checked = true;
+        if !s.container_has_video() && dur < RESUME_MIN_AUDIO_US {
+            return;
+        }
         let Some(key) = self.resume_key.clone() else { return };
         let Some(bytes) = rvp_core::task::block_on(host.storage().load(&key)) else { return };
         let Ok(raw) = <[u8; 8]>::try_from(bytes.as_slice()) else { return };
@@ -591,10 +646,18 @@ impl App {
                 Err(e) => self.ui.show_toast(&format!("Couldn't open that: {e}"), now),
             }
         }
-        let actions = self.ui.handle(&ev, now, &self.model);
+        let actions = if self.ui.mode() == Mode::Library {
+            let video = host.video();
+            let frame = (video.width > 0).then_some((video.rgba.as_slice(), video.width, video.height));
+            let ctx = Self::lib_ctx(&self.lib, frame);
+            self.ui.handle_lib(&ev, now, &self.model, &ctx)
+        } else {
+            self.ui.handle(&ev, now, &self.model)
+        };
         for a in actions {
             self.apply(host, a, now);
         }
+        self.drain_ui_commands(host, now);
         self.refresh_model(now);
     }
 
@@ -615,6 +678,7 @@ impl App {
         let tn = host.clock().now_us();
         self.check_resume(host, tn);
         self.run_playlist(host, tn);
+        self.lib_tick(host, tn);
         self.save_resume(host, false);
         let t1 = host.clock().now_us();
         self.now = t1;
@@ -864,7 +928,23 @@ impl App {
                 }
             }
             Action::SelectSubtitle(id) => self.select_subtitle(id, now),
+            Action::SetMode(m) => self.set_mode(m),
+            Action::ToggleMode => {
+                let m = if self.ui.mode() == Mode::Library { Mode::Player } else { Mode::Library };
+                self.set_mode(m);
+            }
+            Action::ShowView(v) => self.ui.show_view(v),
+            Action::OpenDetail(d) => self.ui.open_detail(d),
+            Action::GoBack => self.ui.go_back(),
+            Action::Lib(a) => self.apply_lib(host, a, now),
         }
+    }
+
+    /// Switch faces; the picture layer is drawn again.
+    fn set_mode(&mut self, m: Mode) {
+        self.ui.set_mode(m);
+        self.base_dirty = true;
+        self.force_draw = true;
     }
 
     fn set_loop_point(&mut self, is_a: bool, now: Timestamp) {
@@ -973,13 +1053,17 @@ impl App {
             fullscreen: self.fullscreen,
             ..UiModel::default()
         };
-        let cur = self.playlist.current_id();
-        m.playlist = self
-            .playlist
-            .items()
-            .iter()
-            .map(|i| PlaylistEntry { id: i.id, label: i.name.clone(), current: Some(i.id) == cur })
-            .collect();
+        m.playlist = self.queue_entries();
+        m.queue_rev = [
+            self.playlist.revision() as u64,
+            self.playlist.current_id().unwrap_or(0) as u64,
+            self.lib.lib.revision(),
+        ]
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325u64, |h, v| (h ^ v).wrapping_mul(0x100_0000_01b3));
+        let cur_item = self.playlist.current();
+        m.now_track = cur_item.and_then(|i| i.track);
+        m.now_art = m.now_track.and_then(|t| self.lib.lib.track(t)).map_or(0, |t| t.art);
         m.repeat = match self.playlist.repeat() {
             Repeat::Off => 0,
             Repeat::All => 1,
@@ -992,6 +1076,16 @@ impl App {
             let pos = s.position_us(now);
             m.position_us = m.duration_us.map_or(pos, |d| pos.min(d));
             m.has_video = s.has_video();
+            // Audio shows what its tags say (a library track, what the library shows for it); a video keeps its file name.
+            if !m.has_video {
+                if let Some(t) = m.now_track.and_then(|t| self.lib.lib.track(t)) {
+                    m.title = t.display_title().to_string();
+                } else if !self.lib.now.title.is_empty() {
+                    m.title = self.lib.now.title.clone();
+                }
+            }
+            m.artist = self.lib.now.artist.clone();
+            m.album = self.lib.now.album.clone();
             m.state = match s.state() {
                 SessionState::Opening => MediaState::Opening,
                 SessionState::Paused => MediaState::Paused,
@@ -1076,41 +1170,66 @@ impl App {
         self.ui.set_size(sw, sh, dpr);
         let ui_dirty = self.ui.update(now, &self.model);
 
+        let lib_mode = self.ui.mode() == Mode::Library;
         let has_media = self.model.has_media();
-        if has_media != self.last_has_media {
+        if has_media != self.last_has_media || lib_mode != self.last_lib_mode {
             self.last_has_media = has_media;
+            self.last_lib_mode = lib_mode;
             self.base_dirty = true;
         }
         let tb0 = host.clock().now_us();
         let video = host.video();
         let video_changed = video.count != self.drawn_video;
         if video_changed || self.base_dirty {
-            let frame = (video.width > 0).then_some((video.rgba.as_slice(), video.width, video.height));
-            self.ui.draw_base(&mut self.base, &self.model, frame);
+            if lib_mode {
+                let ctx = Self::lib_ctx(&self.lib, None);
+                self.ui.draw_base_lib(&mut self.base, &self.model, &ctx);
+            } else {
+                let frame = (video.width > 0).then_some((video.rgba.as_slice(), video.width, video.height));
+                self.ui.draw_base(&mut self.base, &self.model, frame);
+            }
             self.drawn_video = video.count;
             self.drawn_size = (video.width, video.height);
             self.base_dirty = false;
         }
         // The seek bar and clock move while playing with the controls up; otherwise position changes are invisible.
-        // Moving the seek bar and clock does not need 60 redraws a second: position is compared at 50 ms steps.
+        // Moving the seek bar and clock does not need 60 redraws a second: position is compared at 50 ms steps (a
+        // quarter of a second in the library, whose bar only shows whole seconds).
         let mut cmp = self.model.clone();
-        cmp.position_us =
-            if self.ui.controls_visible() { cmp.position_us / LIVE_REDRAW_US * LIVE_REDRAW_US } else { 0 };
+        let step = if lib_mode { LIB_LIVE_REDRAW_US } else { LIVE_REDRAW_US };
+        cmp.position_us = if self.ui.controls_visible() { cmp.position_us / step * step } else { 0 };
         let changed = self.last_drawn.as_ref() != Some(&cmp);
-        if !(video_changed || ui_dirty || changed || self.force_draw) {
+        let progress = self.lib.scan_status.as_ref().map_or(usize::MAX, |s| s.done);
+        let lib_changed = lib_mode
+            && (self.lib.lib.revision() != self.drawn_lib_rev || progress != self.lib.last_scan_progress);
+        if !(video_changed || ui_dirty || changed || lib_changed || self.force_draw) {
             return false;
         }
         self.force_draw = false;
         self.last_drawn = Some(cmp);
+        self.drawn_lib_rev = self.lib.lib.revision();
+        self.lib.last_scan_progress = progress;
         let tb1 = host.clock().now_us();
         // Watching with the controls away: the picture layer is the whole frame, so skip the copy and the chrome.
-        let bare = self.model.state == MediaState::Playing
+        let bare = !lib_mode
+            && self.model.state == MediaState::Playing
             && self.model.has_video
             && self.model.subtitle.is_none()
             && !self.ui.has_overlay();
         if !bare {
             self.fb.copy_from(&self.base);
-            self.ui.draw_overlay(&mut self.fb, &self.model);
+            if lib_mode {
+                let video = host.video();
+                let frame = (video.width > 0 && self.model.has_video).then_some((
+                    video.rgba.as_slice(),
+                    video.width,
+                    video.height,
+                ));
+                let ctx = Self::lib_ctx(&self.lib, frame);
+                self.ui.draw_overlay_lib(&mut self.fb, &self.model, &ctx);
+            } else {
+                self.ui.draw_overlay(&mut self.fb, &self.model);
+            }
         }
         let tb2 = host.clock().now_us();
         let pixels = if bare { &self.base.pixels } else { &self.fb.pixels };

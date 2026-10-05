@@ -3,11 +3,15 @@
 import { RvpAudio } from "./audio.js";
 import { RvpMediaSession } from "./mediasession.js";
 import { Threads } from "./threads.js";
+import { RvpStore, hasDirectoryPicker, listFromInput, rootId, walkEntry, walkHandle } from "./library.js";
 
 const canvas = document.getElementById("screen");
 const fileInput = document.getElementById("file");
 // A second, hidden picker for "add to playlist" so that it never replaces the playlist.
 const addInput = document.getElementById("file-add");
+// Folder picker fallback for the library, and the picker for playlist files.
+const dirInput = document.getElementById("dir");
+const playlistInput = document.getElementById("playlist-file");
 const statusEl = document.getElementById("status");
 
 // ---- the wasm module: shared-memory build with worker threads when the page can have it ------------------
@@ -60,6 +64,8 @@ async function loadWasm() {
 }
 
 await loadWasm();
+// The library's data (index, covers) lives in IndexedDB; it is read once here so every player instance starts with it.
+const store = await new RvpStore().open();
 const audio = new RvpAudio();
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 // Now-playing in the browser's media controls (lock screen, media keys) through the Media Session API.
@@ -108,6 +114,8 @@ let lastSnapshot = { state: "idle" };
 function makePlayer() {
   const p = new glue.WebPlayer(canvas, audio, reduceMotion.matches);
   p.set_media_session(media);
+  p.set_store(store);
+  for (const [key, bytes] of store.mem) p.store_preload(key, bytes);
   player = guarded(p);
   fit.done = false;
   fit();
@@ -134,6 +142,7 @@ async function recover(err) {
       await loadWasm();
       wasmCrashed = false;
       makePlayer();
+      relistFolders();
       recoveries++;
       if (openedFiles.length) player.open_files(openedFiles, false);
       player.toast("The player crashed and was restarted.");
@@ -173,10 +182,110 @@ function effects() {
     } else if (e === "add") {
       addInput.value = "";
       addInput.click();
+    } else if (e === "folder") {
+      addFolder();
+    } else if (e.startsWith("rescan:")) {
+      rescan(e.slice(7));
+    } else if (e.startsWith("forget:")) {
+      const id = e.slice(7);
+      store.deleteHandle(id);
+      listings.delete(id);
+      connected.delete(id);
+      player.library_connected([...connected]);
+    } else if (e === "import") {
+      playlistInput.value = "";
+      playlistInput.click();
+    } else if (e === "download") {
+      for (const [name, mime, data] of player.take_downloads()) download(name, mime, data);
     } else if (e.startsWith("fullscreen:")) {
       setFullscreen(e.endsWith("true"));
     }
   }
+}
+
+// ---- library folders ------------------------------------------------------------------------------------
+
+// What was last listed for each folder (so a restarted player instance can be given the same files again), and which folders
+// are readable right now.
+const listings = new Map();
+const connected = new Set();
+
+function giveListing(id, name, paths, files) {
+  listings.set(id, { name, paths, files });
+  connected.add(id);
+  player.library_listing(id, name, paths, files);
+  player.library_connected([...connected]);
+  statusEl.textContent = `Read folder ${name}: ${paths.length} files`;
+}
+
+function relistFolders() {
+  for (const [id, l] of listings) player.library_listing(id, l.name, l.paths, l.files);
+  player.library_connected([...connected]);
+}
+
+async function scanHandle(handle, id = rootId(handle.name)) {
+  statusEl.textContent = `Reading folder ${handle.name}…`;
+  const { paths, files } = await walkHandle(handle);
+  store.putHandle(id, handle);
+  giveListing(id, handle.name, paths, files);
+}
+
+/** Pick a folder: the directory picker where there is one (it returns a handle we keep), else a folder input. Called inside the user's click. */
+async function addFolder() {
+  if (hasDirectoryPicker()) {
+    let handle;
+    try {
+      handle = await window.showDirectoryPicker({ mode: "read", id: "rvp-music", startIn: "music" });
+    } catch {
+      return; // cancelled
+    }
+    await scanHandle(handle);
+  } else {
+    dirInput.value = "";
+    dirInput.click();
+  }
+}
+
+async function rescan(id) {
+  const handle = store.handles.get(id);
+  if (handle) {
+    try {
+      const mode = { mode: "read" };
+      if ((await handle.queryPermission(mode)) === "granted" || (await handle.requestPermission(mode)) === "granted") {
+        await scanHandle(handle, id);
+        return;
+      }
+    } catch (err) {
+      console.warn("rvp: could not read the folder again:", err);
+    }
+  }
+  addFolder(); // no handle, or no permission: ask for the folder again
+}
+
+dirInput.addEventListener("change", () => {
+  const l = listFromInput(dirInput.files);
+  if (l) giveListing(rootId(l.name), l.name, l.paths, l.files);
+});
+playlistInput.addEventListener("change", () => openFiles(playlistInput.files, true));
+
+/** Folders the browser remembers: read the ones it lets us read without asking. */
+async function restoreFolders() {
+  for (const [id, handle] of store.handles) {
+    try {
+      if ((await handle.queryPermission({ mode: "read" })) === "granted") await scanHandle(handle, id);
+    } catch { /* the folder is gone or the permission was withdrawn: it stays unconnected until the user rescans it */ }
+  }
+}
+
+function download(name, mime, data) {
+  const url = URL.createObjectURL(new Blob([data], { type: mime }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 function setFullscreen(on) {
@@ -227,6 +336,7 @@ canvas.addEventListener("pointermove", (e) => {
 canvas.addEventListener("pointerdown", (e) => {
   audio.unlock();
   canvas.focus({ preventScroll: true });
+restoreFolders();
   if (e.button === 0) canvas.setPointerCapture(e.pointerId);
   const [x, y] = pos(e);
   player.pointer_down(x, y, e.button);
@@ -288,6 +398,15 @@ window.addEventListener("drop", (e) => {
   e.preventDefault();
   dragDepth = 0;
   player.drag_over(false);
+  // A dropped folder joins the library; the files dropped with it play as usual.
+  const entries = Array.from(e.dataTransfer.items || []).map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
+  const dirs = entries.filter((x) => x.isDirectory);
+  if (dirs.length) {
+    for (const d of dirs) walkEntry(d).then((l) => giveListing(rootId(l.name), l.name, l.paths, l.files));
+    const loose = Array.from(e.dataTransfer.files).filter((f) => !dirs.some((d) => d.name === f.name && f.size === 0 && !f.type));
+    if (loose.length) openFiles(loose, e.shiftKey);
+    return;
+  }
   // A drop plays what was dropped (several files make a playlist); Shift+drop adds to the current playlist.
   openFiles(e.dataTransfer.files, e.shiftKey);
 });
@@ -324,6 +443,14 @@ window.rvp = {
   },
   openFile,
   openFiles,
+  /** Give the library a folder picked with an input (tests use this and the fallback input). */
+  addFolderFiles: (fileList) => {
+    const l = listFromInput(fileList);
+    if (l) giveListing(rootId(l.name), l.name, l.paths, l.files);
+    return l ? l.paths.length : 0;
+  },
+  /** Everything written to IndexedDB so far is stored. */
+  flushStore: () => store.flush(),
   saveState: () => player.save_state(),
   /** Switch the audio-analysis tap on or off, and read what it has seen (counts and the latest summary). */
   visualizer: (on) => { visualizerOn = on; player.enable_visualizer(on); },

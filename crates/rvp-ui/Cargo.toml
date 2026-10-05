@@ -15,5 +15,7 @@ workspace = true
 theme.workspace = true
 rvp-core.workspace = true
 rvp-host.workspace = true
+rvp-library.workspace = true
+rvp-viz.workspace = true
 fontdue = { version = "0.9", default-features = false, features = ["hashbrown"] }
 libm = "0.2"

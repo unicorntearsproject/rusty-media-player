@@ -1,4 +1,5 @@
 //! What the UI shows: a plain-data snapshot the host application fills from the player each tick.
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -56,6 +57,14 @@ pub struct PlaylistEntry {
     pub label: String,
     /// The item being played.
     pub current: bool,
+    /// A second line (artist and album) when the item has tags.
+    pub subtitle: String,
+    /// Length, microseconds (0 if unknown).
+    pub duration_us: i64,
+    /// The library track it came from.
+    pub track: Option<u32>,
+    /// Its cover picture in the library (0 if none).
+    pub art: u64,
 }
 
 /// Everything the UI needs to draw and to build its menus.
@@ -91,8 +100,18 @@ pub struct UiModel {
     pub subtitle: Option<String>,
     /// Chapter marks, in time order.
     pub chapters: Vec<ChapterItem>,
-    /// The playlist, in list order.
-    pub playlist: Vec<PlaylistEntry>,
+    /// The playlist (the queue), in list order. Shared so a model that is cloned every tick stays cheap.
+    pub playlist: Rc<Vec<PlaylistEntry>>,
+    /// Artist of what is playing (empty if unknown).
+    pub artist: String,
+    /// Album of what is playing (empty if unknown).
+    pub album: String,
+    /// Library track id of what is playing, if it came from the library.
+    pub now_track: Option<u32>,
+    /// Cover picture id (library thumbnail) of what is playing, 0 if none.
+    pub now_art: u64,
+    /// Changes whenever the queue's items, their order or the current item change.
+    pub queue_rev: u64,
     /// Repeat mode: 0 off, 1 all, 2 one.
     pub repeat: u8,
     /// Shuffle on.

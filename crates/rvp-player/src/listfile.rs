@@ -46,7 +46,11 @@ pub fn parse_m3u(text: &str) -> Vec<Entry> {
         if let Some(info) = line.strip_prefix("#EXTINF:") {
             // `#EXTINF:123,Artist - Title` (attributes such as `tvg-id="x"` may sit between the number and the comma).
             let (head, title) = info.split_once(',').unwrap_or((info, ""));
-            let secs = head.split_whitespace().next().and_then(|n| n.parse::<f64>().ok()).filter(|s| s.is_finite() && *s >= 0.0);
+            let secs = head
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<f64>().ok())
+                .filter(|s| s.is_finite() && *s >= 0.0);
             let title = title.trim();
             pending = Some((secs, (!title.is_empty()).then(|| clip(title))));
         } else if line.starts_with('#') {
@@ -85,7 +89,8 @@ pub fn parse_pls(text: &str) -> Vec<Entry> {
             "file" => slot(&mut slots, n).path = clip(value),
             "title" => slot(&mut slots, n).title = (!value.is_empty()).then(|| clip(value)),
             "length" => {
-                slot(&mut slots, n).seconds = value.parse::<f64>().ok().filter(|s| s.is_finite() && *s >= 0.0);
+                slot(&mut slots, n).seconds =
+                    value.parse::<f64>().ok().filter(|s| s.is_finite() && *s >= 0.0);
             }
             _ => {}
         }
@@ -97,7 +102,11 @@ pub fn parse_pls(text: &str) -> Vec<Entry> {
 /// Parse either format (a file starting with `[playlist]` is PLS, anything else is M3U).
 pub fn parse(text: &str) -> Vec<Entry> {
     let t = strip_bom(text).trim_start();
-    if t.get(..10).is_some_and(|h| h.eq_ignore_ascii_case("[playlist]")) { parse_pls(text) } else { parse_m3u(text) }
+    if t.get(..10).is_some_and(|h| h.eq_ignore_ascii_case("[playlist]")) {
+        parse_pls(text)
+    } else {
+        parse_m3u(text)
+    }
 }
 
 /// Write an extended M3U file (UTF-8, `\n` line ends).
@@ -158,7 +167,9 @@ fn is_absolute(p: &str) -> bool {
     p.starts_with('/')
         || p.starts_with("\\\\")
         || p.as_bytes().get(1) == Some(&b':') && p.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
-        || p.find("://").is_some_and(|i| i > 0 && p[..i].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'-' || b == b'.'))
+        || p.find("://").is_some_and(|i| {
+            i > 0 && p[..i].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'-' || b == b'.')
+        })
 }
 
 /// Resolve `path` (an entry of a playlist file) against `base`, the location of the playlist file itself. `file://`
@@ -230,13 +241,20 @@ mod tests {
     #[test]
     fn pls_out_of_order_and_gaps() {
         let text = "[playlist]\nNumberOfEntries=3\nFile3=c.mp3\nTitle3=Third\nLength3=60\nFile1=a.mp3\nfile2 = b.mp3\nLength2=-1\nTitle9=orphan\n";
-        assert_eq!(parse_pls(text), vec![e("a.mp3", None, None), e("b.mp3", None, None), e("c.mp3", Some("Third"), Some(60.0))]);
+        assert_eq!(
+            parse_pls(text),
+            vec![e("a.mp3", None, None), e("b.mp3", None, None), e("c.mp3", Some("Third"), Some(60.0))]
+        );
         assert_eq!(parse(text), parse_pls(text));
     }
 
     #[test]
     fn export_then_import_is_the_same_list() {
-        let list = vec![e("a.mp3", Some("A"), Some(10.0)), e("dir/b c.flac", None, None), e("http://h/s", Some("S, x"), None)];
+        let list = vec![
+            e("a.mp3", Some("A"), Some(10.0)),
+            e("dir/b c.flac", None, None),
+            e("http://h/s", Some("S, x"), None),
+        ];
         assert_eq!(parse(&export_m3u(&list)), list);
         let pls = export_pls(&list);
         assert_eq!(parse(&pls), list);

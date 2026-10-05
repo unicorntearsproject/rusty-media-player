@@ -64,7 +64,9 @@ fn scan(lib: &mut Library, dir: &Path) -> rvp_library::ScanReport {
 }
 
 /// The tree as `(artist, album) -> [(path, title, artist, track)]` from the expected file.
-fn expected_tree(e: &Value) -> BTreeMap<(String, String), Vec<(String, String, String, u64)>> {
+type Tree = BTreeMap<(String, String), Vec<(String, String, String, u64)>>;
+
+fn expected_tree(e: &Value) -> Tree {
     let mut m = BTreeMap::new();
     for a in e["albums"].as_array().unwrap() {
         let key = (a["artist"].as_str().unwrap().to_string(), a["album"].as_str().unwrap().to_string());
@@ -86,7 +88,7 @@ fn expected_tree(e: &Value) -> BTreeMap<(String, String), Vec<(String, String, S
     m
 }
 
-fn actual_tree(l: &Library) -> BTreeMap<(String, String), Vec<(String, String, String, u64)>> {
+fn actual_tree(l: &Library) -> Tree {
     l.albums()
         .iter()
         .map(|a| {

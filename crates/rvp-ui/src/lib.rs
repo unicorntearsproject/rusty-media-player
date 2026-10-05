@@ -21,10 +21,12 @@ pub mod font;
 pub mod gfx;
 pub mod icon;
 mod icon_data;
+pub mod lib_ui;
 pub mod model;
 pub mod ui;
 
 pub use actions::{Action, MenuItem, SHORTCUTS, SPEEDS, Shortcut};
 pub use gfx::{FrameBuffer, Paint, RectF};
+pub use lib_ui::{Detail, Enqueue, LibAction, LibCtx, LibHit, LibUi, Mode, Scope, UiCommand, View};
 pub use model::{ChapterItem, MediaState, PlaylistEntry, TrackItem, UiModel, format_time};
 pub use ui::{Cursor, HIDE_AFTER_US, Layout, Target, Ui, UiConfig};

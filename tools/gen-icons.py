@@ -11,6 +11,11 @@ ICONS = [
     "play", "pause", "skip-back", "skip-forward", "rewind", "fast-forward", "volume-2", "volume-1", "volume-x",
     "maximize", "minimize", "folder-open", "subtitles", "audio-lines", "gauge", "x", "check", "chevron-right",
     "circle-alert", "settings-2", "loader-circle", "film", "list",
+    # M10: the library views.
+    "music", "disc-3", "mic-vocal", "list-music", "search", "list-plus", "plus", "shuffle", "repeat", "repeat-1",
+    "library", "folder-plus", "download", "upload", "trash-2", "pencil", "arrow-up", "arrow-down", "chevron-left",
+    "ellipsis", "folder", "info", "sparkles", "list-end", "refresh-cw", "triangle-alert", "chevron-down",
+    "audio-waveform", "layout-grid", "house",
 ]
 BASE = "https://cdn.jsdelivr.net/npm/lucide-static/icons/{}.svg"
 

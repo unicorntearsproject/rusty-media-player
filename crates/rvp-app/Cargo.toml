@@ -16,3 +16,5 @@ rvp-core.workspace = true
 rvp-host.workspace = true
 rvp-player.workspace = true
 rvp-ui.workspace = true
+rvp-library.workspace = true
+rvp-viz.workspace = true

@@ -127,6 +127,9 @@ impl WebPlayer {
             input: WebInput::default(),
             storage: WebStorage::new(),
             files: HashMap::new(),
+            root_files: HashMap::new(),
+            library: crate::host::WebLibrary::default(),
+            downloads: Vec::new(),
             media: None,
             tap: None,
         };
@@ -153,6 +156,59 @@ impl WebPlayer {
             .collect();
         self.app.open_items(&mut self.host, &items, append);
         self.app.pump(&mut self.host);
+    }
+
+    /// Give the player the page's store for the library's data (IndexedDB).
+    pub fn set_store(&mut self, js: crate::host::JsStore) {
+        self.host.storage.set_js(js);
+    }
+
+    /// A value the page loaded from its store before the player started.
+    pub fn store_preload(&mut self, key: &str, data: &[u8]) {
+        self.host.storage.preload(key, data);
+    }
+
+    /// A library folder was walked: `paths` are the files' paths below the folder (`/` separated) and `files` the `File`
+    /// objects, in the same order. The app scans what changed since it last saw the folder.
+    pub fn library_listing(&mut self, root: &str, name: &str, paths: Vec<String>, files: Vec<JsValue>) {
+        // The files of the previous listing of this folder are no longer needed (running playback holds its own handle).
+        for id in self.host.root_files.remove(root).unwrap_or_default() {
+            self.host.files.remove(&id);
+        }
+        let mut ids = Vec::with_capacity(files.len());
+        let mut entries = Vec::with_capacity(files.len());
+        for (path, f) in paths.into_iter().zip(files) {
+            let Ok(file) = f.dyn_into::<web_sys::File>() else { continue };
+            let blob: &web_sys::Blob = file.as_ref();
+            let (size, mtime) = (blob.size() as u64, file.last_modified() as i64);
+            let id = self.stash_file(file);
+            ids.push(id.clone());
+            entries.push(rvp_host::FileEntry { id, path, size, mtime_ms: mtime });
+        }
+        self.host.root_files.insert(root.to_string(), ids);
+        self.host.library.listings.push_back(rvp_host::Listing {
+            root: root.into(),
+            name: name.into(),
+            files: entries,
+        });
+    }
+
+    /// The folders the page can read right now.
+    pub fn library_connected(&mut self, roots: Vec<String>) {
+        self.host.library.connected = roots;
+    }
+
+    /// Files for the user, as `[name, mime, Uint8Array]` triples (after a `"download"` effect).
+    pub fn take_downloads(&mut self) -> js_sys::Array {
+        let out = js_sys::Array::new();
+        for (name, mime, data) in std::mem::take(&mut self.host.downloads) {
+            let triple = js_sys::Array::new();
+            triple.push(&JsValue::from_str(&name));
+            triple.push(&JsValue::from_str(&mime));
+            triple.push(&js_sys::Uint8Array::from(data.as_slice()));
+            out.push(&triple);
+        }
+        out
     }
 
     /// Give the player the page's Media Session adapter (`web/mediasession.js`), so lock screens, media keys and
@@ -303,6 +359,14 @@ impl WebPlayer {
             match e {
                 Effect::PickFile => v.push("pick".into()),
                 Effect::AddFiles => v.push("add".into()),
+                Effect::AddFolder => v.push("folder".into()),
+                Effect::Rescan(id) => v.push(format!("rescan:{id}")),
+                Effect::Forget(id) => v.push(format!("forget:{id}")),
+                Effect::ImportPlaylist => v.push("import".into()),
+                Effect::Download { name, mime, data } => {
+                    self.host.downloads.push((name, mime, data));
+                    v.push("download".into());
+                }
             }
         }
         if let Some(on) = self.host.surface.fullscreen_request.take() {

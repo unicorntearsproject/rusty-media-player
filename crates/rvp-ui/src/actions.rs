@@ -2,6 +2,7 @@
 //!
 //! Rusty Bucket requires full keyboard *and* full pointer control, so every shortcut has a menu entry. The
 //! tests at the bottom enforce that against the tables here.
+use crate::lib_ui::{Detail, LibAction, Mode, View};
 use crate::model::UiModel;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -81,6 +82,18 @@ pub enum Action {
     SeekAbs(i64),
     /// The next chapter (+1) or the start of this one and then the previous one (-1).
     ChapterStep(i8),
+    /// Switch to the Library or the Player face of the app.
+    SetMode(Mode),
+    /// Switch between the two.
+    ToggleMode,
+    /// Show a view of the library (this switches to the Library face).
+    ShowView(View),
+    /// Open an album, an artist or a playlist.
+    OpenDetail(Detail),
+    /// Go back one step in the library.
+    GoBack,
+    /// An action of the library (play, queue, playlists, folders, visualizer).
+    Lib(LibAction),
 }
 
 /// The physical key of a shortcut.
@@ -159,6 +172,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::Char('q'), Action::ShowPlaylist),
     sc(ShortKey::PageDown, Action::ChapterStep(1)),
     sc(ShortKey::PageUp, Action::ChapterStep(-1)),
+    sc(ShortKey::Char('b'), Action::ToggleMode),
+    sc(ShortKey::Char('v'), Action::ShowView(View::Visualizer)),
+    // Ctrl+arrows keep seeking and the volume where the plain arrows move around lists in the library.
+    Shortcut { key: ShortKey::Left, shift: false, ctrl: true, action: Action::SeekBy(-5_000) },
+    Shortcut { key: ShortKey::Right, shift: false, ctrl: true, action: Action::SeekBy(5_000) },
+    Shortcut { key: ShortKey::Up, shift: false, ctrl: true, action: Action::VolumeBy(5) },
+    Shortcut { key: ShortKey::Down, shift: false, ctrl: true, action: Action::VolumeBy(-5) },
 ];
 
 /// The action bound to a key press, if any. Browser-style combinations (Ctrl, Alt or Meta with a letter)
@@ -244,7 +264,7 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
-    fn act(label: &str, action: Action) -> Self {
+    pub(crate) fn act(label: &str, action: Action) -> Self {
         Self {
             label: label.to_string(),
             hint: shortcut_label(action),
@@ -257,7 +277,7 @@ impl MenuItem {
         }
     }
 
-    fn heading(label: &str) -> Self {
+    pub(crate) fn heading(label: &str) -> Self {
         Self {
             label: label.to_string(),
             hint: String::new(),
@@ -270,7 +290,7 @@ impl MenuItem {
         }
     }
 
-    fn parent(label: &str, sub: Vec<MenuItem>) -> Self {
+    pub(crate) fn parent(label: &str, sub: Vec<MenuItem>) -> Self {
         Self {
             label: label.to_string(),
             hint: String::new(),
@@ -283,17 +303,17 @@ impl MenuItem {
         }
     }
 
-    fn sep(mut self) -> Self {
+    pub(crate) fn sep(mut self) -> Self {
         self.separator = true;
         self
     }
 
-    fn checked(mut self, on: bool) -> Self {
+    pub(crate) fn checked(mut self, on: bool) -> Self {
         self.checked = on;
         self
     }
 
-    fn enabled(mut self, on: bool) -> Self {
+    pub(crate) fn enabled(mut self, on: bool) -> Self {
         self.enabled = on;
         self
     }
@@ -500,7 +520,9 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::parent("Audio track", audio_menu(model)).sep().enabled(has),
         MenuItem::parent("Subtitles", subtitle_menu(model)).enabled(has),
         MenuItem::parent("Chapters", chapter_menu(model)).enabled(!model.chapters.is_empty()),
-        MenuItem::act("Show playlist", Action::ShowPlaylist).sep(),
+        MenuItem::act("Library", Action::ToggleMode).sep(),
+        MenuItem::act("Visualizer", Action::ShowView(View::Visualizer)),
+        MenuItem::act("Show playlist", Action::ShowPlaylist),
         MenuItem::parent("Playlist", {
             let mut v = alloc::vec![
                 MenuItem::act("Next", Action::Next).enabled(has),

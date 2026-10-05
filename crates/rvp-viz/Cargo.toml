@@ -14,4 +14,5 @@ workspace = true
 [dependencies]
 rvp-core.workspace = true
 rvp-host.workspace = true
+theme.workspace = true
 libm = "0.2"
