@@ -1,0 +1,4 @@
+#EXTM3U
+#EXTINF:5,A - B
+a/b.mp3
+../x/c.flac

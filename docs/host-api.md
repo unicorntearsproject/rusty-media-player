@@ -1,18 +1,19 @@
-# Host API: now-playing and the visualizer tap
+# Host API: now-playing, the visualizer tap and the library
 
 Status: shapes stable since M8 (2026-10-05). They live in `crates/rvp-host/src/media.rs` and are the source of truth;
 Rusty Bucket's App API media interfaces are modelled on them (rust-os ADR-0026) and the mapping lives in `rvp-host-rb`.
 Nothing here is specific to any one host. Changes are listed at the bottom; the full host trait set is in
 [`PLAN.md`](PLAN.md) section 4.
 
-Both are **optional** capabilities of `Host`; a host that has no media shell or no use for audio analysis keeps the
-default (`None`) and pays nothing.
+All three are **optional** capabilities of `Host`; a host that has no media shell, no use for audio analysis and no directory
+access keeps the default (`None`) and pays nothing.
 
 ```rust
 trait Host {
     // ...playback traits...
     fn now_playing(&mut self) -> Option<&mut dyn NowPlaying> { None }
     fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> { None }
+    fn library(&mut self) -> Option<&mut dyn Library> { None }          // M10
 }
 ```
 
@@ -88,6 +89,40 @@ Rules:
 - A full-scale sine reads 1.0 in its band. The 32-band layout and the hop are fixed in `rvp-viz`; changing them is a
   breaking change to this document.
 
+## Library (M10)
+
+Directory access for the audio-first view (`crates/rvp-host/src/library.rs`). The host only lists; reading bytes is the ordinary
+`Host::open` with an id, so a listing is cheap and the player reads tags and covers itself (`rvp-library`).
+
+```rust
+trait Library {
+    fn take_listing(&mut self) -> Option<Listing>;   // a finished walk since the last call
+    fn connected_roots(&self) -> Vec<String>;        // roots readable right now (a remembered browser folder is not until allowed)
+}
+struct Listing { root: String /* stable id */, name: String, files: Vec<FileEntry> }
+struct FileEntry { id: String /* for OpenRequest::Id, this session */, path: String /* below the root, '/' separated */,
+                   size: u64, mtime_ms: i64 }
+```
+
+How it is used:
+
+- The player asks for work through its **effects** (`rvp_app::Effect`): `AddFolder` (show a folder picker; in a browser this must happen
+  inside the user's input event), `Rescan(root)`, `Forget(root)`, `ImportPlaylist` (show a picker for `.m3u`, `.m3u8` and `.pls`) and
+  `Download { name, mime, data }` (give the user an exported playlist). The host does it however it likes and, for a folder, answers with a
+  `Listing` through `take_listing`. Files of all kinds may be listed; the library takes audio files (`mp3 flac ogg oga opus wav m4a m4b aac mka`)
+  and cover pictures (`cover`, `folder`, `front`, `albumart`, `album` or `art` as `jpg`, `jpeg` or `png`) and ignores the rest.
+- A root id must be stable across sessions (the browser uses `dir:<folder name>`), because the index is keyed by root and path. `FileEntry::id`
+  only has to work until the next listing of that root.
+- A rescan is incremental: files whose path, size and modification time are unchanged are not read again, new and changed files are read,
+  files that are gone leave the index. A host with no modification times reports 0 and gets size-only change detection.
+- **Persistence** goes through `Storage` under the keys `library/index`, `library/playlists` and `library/art/<16 hex digits>`; an empty value
+  deletes a key. Values can be large (a thumbnail is about 62 KB, the index 100 to 200 bytes per track), so a host should not put them in
+  something with a small quota; the browser host keeps them in IndexedDB behind a synchronous copy (see `web/library.js`). The format is
+  versioned and a blob that does not parse is ignored (the library is rescanned).
+- The **built-in visualizer** does not need a `VisualizerTap`: while its view is up the player asks the session for the same analysis
+  (`Session::set_viz_capture`), so any host can show it. A host that wants the numbers too still gets them through its tap.
+
 ## Changes
 
 - 2026-10-05: first version (M8).
+- 2026-10-05: `Library` capability, effects for folders and playlist files, storage keys (M10).

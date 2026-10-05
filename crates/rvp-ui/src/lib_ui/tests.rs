@@ -541,3 +541,30 @@ fn plain_arrows_still_seek_on_the_now_playing_screen() {
     assert_eq!(r.key(Key::Space), [Action::PlayPause]);
     let _ = vec![0];
 }
+
+#[test]
+fn dragging_a_queue_row_moves_it() {
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    r.ui.show_view(View::Queue);
+    r.ents();
+    let (x0, y0) = center(r.ent_rect(0));
+    let (_, y2) = center(r.ent_rect(2));
+    r.handle(InputEvent::PointerMove { x: x0 + 100.0, y: y0 });
+    r.handle(InputEvent::PointerDown { x: x0 + 100.0, y: y0, button: PointerButton::Primary });
+    // Not yet a drag: a few pixels of wobble are a click.
+    r.handle(InputEvent::PointerMove { x: x0 + 100.0, y: y0 + 3.0 });
+    r.handle(InputEvent::PointerMove { x: x0 + 100.0, y: y2 });
+    let out = r.handle(InputEvent::PointerUp { x: x0 + 100.0, y: y2, button: PointerButton::Primary });
+    assert_eq!(out, [Action::MoveItem(1, 2)]);
+    // A click without moving selects (and a double click would play); it moves nothing.
+    let out = r.click(x0 + 100.0, y0);
+    assert!(out.is_empty());
+    assert_eq!(r.ui.lib_state().selected(), Some(0));
+    // The drag draws its drop line without trouble.
+    r.handle(InputEvent::PointerMove { x: x0 + 100.0, y: y0 });
+    r.handle(InputEvent::PointerDown { x: x0 + 100.0, y: y0, button: PointerButton::Primary });
+    r.handle(InputEvent::PointerMove { x: x0 + 100.0, y: y2 });
+    r.draw();
+    r.handle(InputEvent::PointerUp { x: x0 + 100.0, y: y2, button: PointerButton::Primary });
+}

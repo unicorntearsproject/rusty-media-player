@@ -96,6 +96,7 @@ pub struct App {
     last_drawn: Option<UiModel>,
     last_has_media: bool,
     last_lib_mode: bool,
+    last_base_key: Option<(bool, rvp_ui::View, bool, bool)>,
     warnings_seen: usize,
     loop_a: Option<Timestamp>,
     loop_b: Option<Timestamp>,
@@ -171,6 +172,7 @@ impl App {
             last_drawn: None,
             last_has_media: false,
             last_lib_mode: false,
+            last_base_key: None,
             warnings_seen: 0,
             loop_a: None,
             loop_b: None,
@@ -836,8 +838,12 @@ impl App {
             }
             Action::AddFiles => self.effects.push(Effect::AddFiles),
             Action::ShowPlaylist => {
-                let m = self.model.clone();
-                self.ui.open_playlist_popup(&m);
+                if self.ui.mode() == Mode::Library {
+                    self.ui.show_view(rvp_ui::View::Queue);
+                } else {
+                    let m = self.model.clone();
+                    self.ui.open_playlist_popup(&m);
+                }
             }
             Action::FrameStep(d) => {
                 if let Some(s) = &mut self.session {
@@ -1172,9 +1178,20 @@ impl App {
 
         let lib_mode = self.ui.mode() == Mode::Library;
         let has_media = self.model.has_media();
-        if has_media != self.last_has_media || lib_mode != self.last_lib_mode {
+        // The layer under the chrome depends on the face, the view and whether the visualizer is on.
+        let base_key = (
+            lib_mode,
+            self.ui.lib_state().view(),
+            self.ui.lib_state().detail().is_some(),
+            self.ui.lib_state().viz_on(),
+        );
+        if has_media != self.last_has_media
+            || lib_mode != self.last_lib_mode
+            || self.last_base_key != Some(base_key)
+        {
             self.last_has_media = has_media;
             self.last_lib_mode = lib_mode;
+            self.last_base_key = Some(base_key);
             self.base_dirty = true;
         }
         let tb0 = host.clock().now_us();

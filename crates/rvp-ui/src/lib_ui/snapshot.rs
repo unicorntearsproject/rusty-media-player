@@ -127,6 +127,12 @@ impl Ui {
             j += &format!("\"viz_buttons\":[{}],", vz.join(","));
             j += &format!("\"body\":{},", rect(g.m.body));
         }
+        let hero: Vec<String> = l
+            .hero
+            .iter()
+            .map(|(id, r, label)| format!("{{\"id\":{id},\"label\":{},\"rect\":{}}}", esc(label), rect(*r)))
+            .collect();
+        j += &format!("\"hero_buttons\":[{}],", hero.join(","));
         let ents: Vec<String> = l
             .visible
             .iter()

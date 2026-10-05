@@ -126,6 +126,13 @@ impl Playlist {
         self.shuffle
     }
 
+    /// Point item `id` at a different source (a library folder was listed again and its files have new ids). Not a change of the list.
+    pub fn set_source(&mut self, id: u32, source: &str) {
+        if let Some(i) = self.items.iter_mut().find(|i| i.id == id) {
+            i.source = String::from(source);
+        }
+    }
+
     /// Changes whenever the list or its order does.
     pub fn revision(&self) -> u32 {
         self.rev

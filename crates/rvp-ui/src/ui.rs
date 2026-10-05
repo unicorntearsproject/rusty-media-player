@@ -113,6 +113,8 @@ pub(crate) enum Drag {
 /// Computed positions of every control, in physical pixels.
 #[derive(Debug, Clone, Default)]
 pub struct Layout {
+    /// Where the toast sits (its top edge); 0 for the default, near the top.
+    pub toast_y: f32,
     /// Pixel scale (device pixel ratio).
     pub s: f32,
     /// Window size.
@@ -313,7 +315,15 @@ impl Ui {
     pub fn cursor(&self, model: &UiModel) -> Cursor {
         if self.lib.mode == crate::lib_ui::Mode::Library {
             use crate::lib_ui::{LibDrag, LibHit};
-            if matches!(self.lib.drag, Some(LibDrag::Scroll { .. } | LibDrag::Seek | LibDrag::Volume)) {
+            if matches!(
+                self.lib.drag,
+                Some(
+                    LibDrag::Scroll { .. }
+                        | LibDrag::Seek
+                        | LibDrag::Volume
+                        | LibDrag::Reorder { moved: true, .. }
+                )
+            ) {
                 return Cursor::Grabbing;
             }
             if self.lib.view == crate::lib_ui::View::Visualizer

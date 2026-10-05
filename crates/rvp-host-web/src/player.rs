@@ -171,10 +171,6 @@ impl WebPlayer {
     /// A library folder was walked: `paths` are the files' paths below the folder (`/` separated) and `files` the `File`
     /// objects, in the same order. The app scans what changed since it last saw the folder.
     pub fn library_listing(&mut self, root: &str, name: &str, paths: Vec<String>, files: Vec<JsValue>) {
-        // The files of the previous listing of this folder are no longer needed (running playback holds its own handle).
-        for id in self.host.root_files.remove(root).unwrap_or_default() {
-            self.host.files.remove(&id);
-        }
         let mut ids = Vec::with_capacity(files.len());
         let mut entries = Vec::with_capacity(files.len());
         for (path, f) in paths.into_iter().zip(files) {
@@ -185,7 +181,14 @@ impl WebPlayer {
             ids.push(id.clone());
             entries.push(rvp_host::FileEntry { id, path, size, mtime_ms: mtime });
         }
-        self.host.root_files.insert(root.to_string(), ids);
+        // Keep the two newest listings of a folder; older files are no longer reachable by id (running playback holds its own handle).
+        let gens = self.host.root_files.entry(root.to_string()).or_default();
+        gens.push(ids);
+        while gens.len() > 2 {
+            for id in gens.remove(0) {
+                self.host.files.remove(&id);
+            }
+        }
         self.host.library.listings.push_back(rvp_host::Listing {
             root: root.into(),
             name: name.into(),

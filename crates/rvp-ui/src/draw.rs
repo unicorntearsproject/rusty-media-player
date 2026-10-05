@@ -592,7 +592,8 @@ impl Ui {
         let left = until - self.now;
         let a = if self.config.reduce_motion { 1.0 } else { (left as f32 / 300_000.0).clamp(0.0, 1.0) };
         let tw = self.text_w(Face::SansMedium, 14.0, &text, 0.0);
-        let r = RectF::new(l.w * 0.5 - tw * 0.5 - 18.0 * s, 64.0 * s, tw + 36.0 * s, 36.0 * s);
+        let y = if l.toast_y > 0.0 { l.toast_y } else { 64.0 * s };
+        let r = RectF::new(l.w * 0.5 - tw * 0.5 - 18.0 * s, y, tw + 36.0 * s, 36.0 * s);
         fb.shadow_rrect(r, r.h * 0.5, 6.0 * s, 20.0 * s, Rgba::new(5, 2, 15, 160), a);
         fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::INK_800, 0.94)), a);
         fb.stroke_rrect(r, r.h * 0.5, 1.0 * s, t::INK_500, a);

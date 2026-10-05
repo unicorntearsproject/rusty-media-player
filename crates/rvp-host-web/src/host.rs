@@ -212,8 +212,9 @@ pub struct WebHost {
     pub input: WebInput,
     pub storage: WebStorage,
     pub files: HashMap<String, web_sys::File>,
-    /// The ids of the files of each library folder (dropped again when the folder is listed anew).
-    pub root_files: HashMap<String, Vec<String>>,
+    /// The ids of the files of each library folder, one list per listing (the two newest are kept: the queue may still point at
+    /// the previous one while the new one is being scanned).
+    pub root_files: HashMap<String, Vec<Vec<String>>>,
     /// Directory access for the library.
     pub library: WebLibrary,
     /// Files the app wants the page to hand to the user (exported playlists): name, media type, bytes.

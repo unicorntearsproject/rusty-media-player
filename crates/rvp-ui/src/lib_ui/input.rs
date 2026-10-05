@@ -452,7 +452,10 @@ impl Ui {
     ) -> Vec<Action> {
         self.now = now_us;
         let mut out = Vec::new();
-        self.dirty = true;
+        // A pointer that only moves over the same thing changes nothing on screen (see `lib_move`).
+        if !matches!(ev, InputEvent::PointerMove { .. }) {
+            self.dirty = true;
+        }
         match ev {
             InputEvent::Resize { w, h, dpr } => self.set_size(*w, *h, *dpr),
             InputEvent::Focus(f) => {
@@ -505,19 +508,45 @@ impl Ui {
         self.pointer = Some((x, y));
         if moved {
             self.last_activity = now_us;
-            self.keyboard_mode = false;
+            if self.keyboard_mode {
+                self.keyboard_mode = false;
+                self.dirty = true; // the focus ring goes away
+            }
         }
         let g = self.lib_geom(model, ctx);
         match self.lib.drag {
             Some(LibDrag::Scroll { grab }) => {
                 self.drag_scroll(y, grab, &g);
+                self.dirty = true;
                 return;
             }
             Some(LibDrag::Seek) => {
                 self.scrub = Some(((x - g.seek_track.x) / g.seek_track.w.max(1.0)).clamp(0.0, 1.0));
+                self.dirty = true;
                 return;
             }
             Some(LibDrag::Volume) => return,
+            Some(LibDrag::Reorder { from, to, grab_y, moved }) => {
+                let moved = moved || (y - grab_y).abs() > 8.0 * self.scale;
+                let mut to = to;
+                if moved {
+                    self.ensure_rows(model, ctx, &g);
+                    if let Some(rows) = &self.lib.rows {
+                        let by = y - g.m.body.y + self.lib.scroll;
+                        let n = rows.ents.len();
+                        // The entity under the pointer, or the end of the list when below it.
+                        let target = rows.ent_at(g.m.pad + 1.0, by, &g.m).or_else(|| {
+                            if by > rows.total - 40.0 * self.scale { n.checked_sub(1) } else { None }
+                        });
+                        if let Some(t) = target {
+                            to = t;
+                        }
+                    }
+                }
+                self.lib.drag = Some(LibDrag::Reorder { from, to, grab_y, moved });
+                self.dirty = true;
+                return;
+            }
             None => {}
         }
         let h = self.lib_hit(x, y, &g, model, ctx);
@@ -534,6 +563,7 @@ impl Ui {
         if h != self.lib.hover {
             self.lib.hover = h;
             self.hover_since = now_us;
+            self.dirty = true;
         }
     }
 
@@ -608,6 +638,14 @@ impl Ui {
                     return;
                 }
                 match hit {
+                    LibHit::Ent(ei) | LibHit::EntPlay(ei)
+                        if matches!(hit, LibHit::Ent(_))
+                            && self.lib.rows.as_ref().is_some_and(|r| {
+                                matches!(r.ents[ei].kind, EntKind::Queue(_) | EntKind::PlEntry { .. })
+                            }) =>
+                    {
+                        self.lib.drag = Some(LibDrag::Reorder { from: ei, to: ei, grab_y: y, moved: false });
+                    }
                     LibHit::Scrollbar => {
                         let total = self.lib.rows.as_ref().map_or(1.0, |r| r.total.max(1.0));
                         let track = g.scroll_track;
@@ -674,6 +712,24 @@ impl Ui {
                 return;
             }
             Some(LibDrag::Scroll { .. }) => return,
+            Some(LibDrag::Reorder { from, to, moved: true, .. }) => {
+                // A drop on another row moves the item there.
+                if let Some(rows) = &self.lib.rows {
+                    if let (Some(a), true) = (rows.ents.get(from).copied(), to != from) {
+                        let d = (to as i32 - from as i32).clamp(-100, 100) as i8;
+                        match a.kind {
+                            EntKind::Queue(id) => out.push(Action::MoveItem(id, d)),
+                            EntKind::PlEntry { pl, idx } => {
+                                out.push(Action::Lib(LibAction::MovePlaylistEntry(pl, idx as u32, d)))
+                            }
+                            _ => {}
+                        }
+                        self.lib.sel = Some(to);
+                    }
+                }
+                return;
+            }
+            Some(LibDrag::Reorder { .. }) => {} // not moved: it was a click
             None => {}
         }
         let hit = self.lib_hit(x, y, &g, model, ctx);

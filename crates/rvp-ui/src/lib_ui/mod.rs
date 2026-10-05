@@ -256,9 +256,18 @@ pub(crate) enum Zone {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum LibDrag {
-    Scroll { grab: f32 },
+    Scroll {
+        grab: f32,
+    },
     Seek,
     Volume,
+    /// A queue item or playlist entry being dragged to a new place.
+    Reorder {
+        from: usize,
+        to: usize,
+        grab_y: f32,
+        moved: bool,
+    },
 }
 
 /// Where Back goes.
@@ -306,6 +315,10 @@ pub struct LibUi {
     /// The geometry of the last frame drawn and the entities that were on screen (for tooling and tests).
     pub(crate) last_geom: Option<geom::Geom>,
     pub(crate) visible: Vec<(usize, RectF)>,
+    /// Scratch for the dimmed copy of the visualizer's picture.
+    pub(crate) dim: Vec<u8>,
+    /// The hero block's buttons as drawn last: id, rectangle, label.
+    pub(crate) hero: Vec<(u8, RectF, String)>,
 }
 
 impl Default for LibUi {
@@ -339,6 +352,8 @@ impl Default for LibUi {
             blink: false,
             last_geom: None,
             visible: Vec::new(),
+            hero: Vec::new(),
+            dim: Vec::new(),
         }
     }
 }
@@ -399,7 +414,6 @@ pub(crate) struct Metrics {
     pub compact: bool,
     pub rail: RectF,
     pub bar: RectF,
-    pub content: RectF,
     pub header: RectF,
     pub table_head: Option<RectF>,
     pub body: RectF,
@@ -425,7 +439,7 @@ impl Metrics {
             .then(|| RectF::new(content.x, header_h, content.w, 34.0 * s));
         let body_top = header_h + table_head.map_or(0.0, |t| t.h);
         let body = RectF::new(content.x, body_top, content.w, (content.h - body_top).max(0.0));
-        Self { s, w, h, compact, rail, bar, content, header, table_head, body, pad: 28.0 * s }
+        Self { s, w, h, compact, rail, bar, header, table_head, body, pad: 28.0 * s }
     }
 
     /// Cards per grid row in the body.

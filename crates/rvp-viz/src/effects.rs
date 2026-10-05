@@ -170,6 +170,8 @@ pub struct Viz {
     phase: f32,
     spin: f32,
     buf: Vec<u8>,
+    /// The night backdrop (the picture fades back towards it, so trails melt into the sky instead of into black).
+    bg: Vec<u8>,
     bw: usize,
     bh: usize,
     built_for: Option<(Effect, usize, usize)>,
@@ -211,6 +213,7 @@ impl Viz {
             phase: 0.0,
             spin: 0.0,
             buf: Vec::new(),
+            bg: Vec::new(),
             bw: 0,
             bh: 0,
             built_for: None,
@@ -253,7 +256,7 @@ impl Viz {
     /// Fold one summary of the audio being heard into the smoothed features.
     pub fn feed(&mut self, s: &VizSummary, reduce_motion: bool) {
         // One summary is 10.7 ms of audio at 48 kHz; attack is quick, decay a little over a tenth of a second.
-        let (up, down) = if reduce_motion { (0.10, 0.02) } else { (0.55, 0.10) };
+        let (up, down) = if reduce_motion { (0.035, 0.012) } else { (0.55, 0.10) };
         let follow = |cur: &mut f32, new: f32| {
             let k = if new > *cur { up } else { down };
             *cur += (new - *cur) * k;
@@ -327,6 +330,10 @@ impl Viz {
             if matches!(self.effect, Effect::Tunnel | Effect::Plasma) {
                 self.build_polar();
             }
+            if matches!(self.effect, Effect::Scope | Effect::Particles) {
+                self.backdrop(0.18);
+                self.bg = self.buf.clone();
+            }
         }
         if self.lut_for != self.palette {
             self.lut = build_lut(self.palette);
@@ -374,11 +381,20 @@ impl Viz {
         }
     }
 
+    /// Fade the picture towards the backdrop: `k` of what was there stays.
     fn fade(&mut self, k: f32) {
-        let m = (k * 256.0) as u32;
-        for p in self.buf.chunks_exact_mut(4) {
-            for c in &mut p[..3] {
-                *c = ((*c as u32 * m) >> 8) as u8;
+        let m = (k * 256.0) as i32;
+        if self.bg.len() != self.buf.len() {
+            for p in self.buf.chunks_exact_mut(4) {
+                for c in &mut p[..3] {
+                    *c = ((*c as i32 * m) >> 8) as u8;
+                }
+            }
+            return;
+        }
+        for (p, b) in self.buf.chunks_exact_mut(4).zip(self.bg.chunks_exact(4)) {
+            for i in 0..3 {
+                p[i] = (b[i] as i32 + (((p[i] as i32 - b[i] as i32) * m) >> 8)) as u8;
             }
         }
     }
@@ -470,19 +486,23 @@ impl Viz {
                 self.rect_add(x0, y, x1, y + 1, col, f * 0.9 * g);
             }
             let cap = base - (powf(pk, 1.25) * max_h) as i32;
-            self.rect_add(x0, cap - 2, x1, cap, [255, 239, 251], 0.85);
+            if pk > 0.03 {
+                self.rect_add(x0, cap - 2, x1, cap, [255, 239, 251], 0.85);
+            }
             for r in 0..((hgt * 0.35) as i32) {
                 let f = 0.30 * (1.0 - r as f32 / (hgt * 0.35).max(1.0));
                 self.rect_add(x0, base + 2 + r, x1, base + 3 + r, col, f * g);
             }
         }
-        // The floor line.
-        self.rect_add(margin - 2, base, bw - margin + 2, base + 1, [189, 131, 255], 0.5);
+        // The floor line (only while there is something standing on it).
+        if self.peaks.iter().any(|&p| p > 0.03) {
+            self.rect_add(margin - 2, base, bw - margin + 2, base + 1, [189, 131, 255], 0.5);
+        }
     }
 
     fn draw_scope(&mut self, scope: &[f32], calm: f32) {
         let g = self.gain();
-        self.fade(if calm < 1.0 { 0.9 } else { 0.78 });
+        self.fade(if calm < 1.0 { 0.9 } else { 0.8 });
         let (bw, bh) = (self.bw, self.bh);
         let mid = bh as f32 * 0.5;
         let amp = bh as f32 * 0.34 * (0.7 + self.level * 0.6).min(1.4);
@@ -507,10 +527,13 @@ impl Viz {
             let f = pos - i as f32;
             let s = scope[i] * (1.0 - f) + scope[i + 1] * f;
             let y = mid - s.clamp(-1.0, 1.0) * amp;
-            let c = self.col(x * 256 / n);
+            let c = self.col(x * 256 / n + 20);
             if let Some((px, py)) = prev {
-                self.line_add(px, py, x as f32, y, c, 0.55 * g, 1);
-                self.line_add(px, py, x as f32, y, [255, 239, 251], 0.35, 0);
+                // A wide dim halo, the coloured line, and a thin hot core.
+                // (The trails add up, so each pass is faint.)
+                self.line_add(px, py, x as f32, y, c, 0.07 * g, 4);
+                self.line_add(px, py, x as f32, y, c, 0.30 * g, 2);
+                self.line_add(px, py, x as f32, y, [255, 239, 251], 0.10, 0);
             }
             prev = Some((x as f32, y));
         }
@@ -526,7 +549,7 @@ impl Viz {
                 let (dx, dy) = ((x as f32 + 0.5 - cx) / scale, (y as f32 + 0.5 - cy) / scale);
                 let r = sqrtf(dx * dx + dy * dy).max(0.001);
                 let a = atan2f(dy, dx) / core::f32::consts::TAU + 0.5;
-                let inv = (0.25 / r * 256.0).clamp(0.0, 65_535.0);
+                let inv = (1.0 / r * 256.0).clamp(0.0, 65_535.0);
                 self.polar.push(((a * 255.99) as u8, inv as u16));
             }
         }
@@ -534,7 +557,7 @@ impl Viz {
 
     fn draw_tunnel(&mut self) {
         let g = self.gain();
-        let depth = (self.phase * 900.0) as u32;
+        let depth = (self.phase * 2600.0) as u32;
         let twist = (self.spin * 256.0 * 3.0) as u32;
         let hue = (self.phase * 18.0) as u32;
         let bright = (0.55 + 0.45 * (self.level * 0.5 + self.bass * 0.7).min(1.0)) * g;
@@ -545,13 +568,13 @@ impl Viz {
                 let u = (ang as u32).wrapping_mul(2).wrapping_add(twist);
                 let v = (inv as u32).wrapping_add(depth);
                 // Rings and spokes: a checker of the two, with a soft edge from the sine table.
-                let ring = self.sin_lut[((v >> 4) & 255) as usize] as i32;
-                let spoke = self.sin_lut[((u.wrapping_mul(2)) & 255) as usize] as i32;
+                let ring = self.sin_lut[((v >> 1) & 255) as usize] as i32;
+                let spoke = self.sin_lut[((u.wrapping_mul(3)) & 255) as usize] as i32;
                 let pat = ((ring * spoke) >> 11) + 512; // 0..1024 roughly
                 let idx = ((v >> 5).wrapping_add(hue)) as usize + (pat as usize >> 3);
                 let c = self.lut[idx & 255];
                 // Fog: dark in the middle (far away), full at the rim.
-                let fog = (1.0 - 1.0 / (1.0 + inv as f32 / 900.0)).clamp(0.0, 1.0);
+                let fog = (1.0 - 1.0 / (1.0 + inv as f32 / 3600.0)).clamp(0.0, 1.0);
                 let k = ((pat as f32 / 1024.0).clamp(0.15, 1.0) * (1.0 - fog * 0.85) * bright).min(1.0);
                 let i = (y * bw + x) * 4;
                 self.buf[i] = (c[0] as f32 * k) as u8;
@@ -564,12 +587,12 @@ impl Viz {
 
     fn draw_particles(&mut self, dt: f32, moving: bool, reduce_motion: bool) {
         let g = self.gain();
-        self.fade(if reduce_motion { 0.9 } else { 0.84 });
+        self.fade(if reduce_motion { 0.92 } else { 0.88 });
         let (bw, bh) = (self.bw as f32, self.bh as f32);
         let (cx, cy) = (bw * 0.5, bh * 0.5);
         let scale = bh * 0.55;
         // A calm field of stars at all times; more of them and faster when the music is loud.
-        while self.parts.iter().filter(|p| !p.burst).count() < 150 {
+        while self.parts.iter().filter(|p| !p.burst).count() < 230 {
             let a = self.rand() * core::f32::consts::TAU;
             let r = 0.05 + self.rand() * 1.4;
             let z = 0.2 + self.rand() * 1.8;
@@ -607,14 +630,14 @@ impl Viz {
             let (px, py) = (cx + sx * scale, cy + sy * scale * 0.9);
             let near = if p.burst { p.life.max(0.0) } else { (1.0 - p.z * 0.5).clamp(0.0, 1.0) };
             let c = self.col(p.hue as usize);
-            let r = if p.burst { 1.5 + p.life.max(0.0) * 1.5 } else { 0.8 + near * 1.6 };
-            self.disc_add(px, py, r, c, (0.35 + near * 0.65) * g);
+            let r = if p.burst { 2.0 + p.life.max(0.0) * 2.4 } else { 1.0 + near * 2.4 };
+            self.disc_add(px, py, r, c, (0.5 + near * 0.9) * g);
         }
         parts.retain(|p| !(p.burst && p.life <= 0.0));
         self.parts = parts;
         // A soft heart in the middle that swells with the bass (smoothed, never a flash).
         let c = self.col(((self.phase * 20.0) as usize) & 255);
-        self.disc_add(cx, cy, 6.0 + self.bass * 22.0, c, 0.22 + self.bass * 0.3);
+        self.disc_add(cx, cy, 8.0 + self.bass * 30.0, c, 0.3 + self.bass * 0.4);
     }
 
     fn draw_plasma(&mut self) {

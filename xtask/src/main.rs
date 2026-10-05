@@ -73,8 +73,18 @@ fn fixtures_perf() -> Result<(), String> {
 
 /// Run the cargo-fuzz targets (see `fuzz/run.sh`) for a bounded time each.
 fn fuzz(args: &[String]) -> Result<(), String> {
-    const TARGETS: [&str; 9] =
-        ["demux", "h264", "h264_pipelined", "vp9", "av1", "audio", "subs", "playlist", "playlist_files"];
+    const TARGETS: [&str; 10] = [
+        "demux",
+        "h264",
+        "h264_pipelined",
+        "vp9",
+        "av1",
+        "audio",
+        "subs",
+        "playlist",
+        "playlist_files",
+        "library",
+    ];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let which = args.first().map_or("all", String::as_str);
     let secs = args.get(1).map_or("600", String::as_str);

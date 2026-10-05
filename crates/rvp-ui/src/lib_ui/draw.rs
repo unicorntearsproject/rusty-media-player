@@ -45,7 +45,14 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 
 impl Ui {
     pub(crate) fn lib_layout(&self) -> Layout {
-        Layout { s: self.scale, w: self.w as f32, h: self.h as f32, ..Layout::default() }
+        // Toasts sit just above the bar, out of the way of the header's search box.
+        Layout {
+            s: self.scale,
+            w: self.w as f32,
+            h: self.h as f32,
+            toast_y: self.h as f32 - 96.0 * self.scale - 52.0 * self.scale,
+            ..Layout::default()
+        }
     }
 
     // ---- shared pieces ------------------------------------------------------------------------------------------------
@@ -146,6 +153,12 @@ impl Ui {
         }
     }
 
+    /// The keyboard focus ring for something big (a row, a rail entry): only the cyan outline, no glow tinting the inside.
+    fn focus_outline(&mut self, fb: &mut FrameBuffer, r: RectF, radius: f32, a: f32) {
+        let s = self.scale;
+        fb.stroke_rrect(r.inflate(1.0 * s), radius + 1.0 * s, 2.0 * s, t::FOCUS_RING, a);
+    }
+
     fn lib_pressed(&self, h: LibHit) -> bool {
         self.pressed_lib == Some(h) && self.lib.hover == h
     }
@@ -161,12 +174,18 @@ impl Ui {
             Some(v) if wants_viz && self.lib.viz_on => {
                 let (px, w, h) = v.picture();
                 if w > 0 && px.len() >= w * h * 4 {
-                    fb.blit_scaled(
-                        RectF::new(0.0, 0.0, fb.width as f32, fb.height as f32),
-                        px,
-                        w as u32,
-                        h as u32,
-                    );
+                    let full = RectF::new(0.0, 0.0, fb.width as f32, fb.height as f32);
+                    if self.lib.view == View::NowPlaying {
+                        // Behind the cover and the text the picture is dimmed: done on the small picture, not the big screen.
+                        self.lib.dim.clear();
+                        for p in px.chunks_exact(4) {
+                            let k = |c: u8| (c as u32 * 42 / 100) as u8;
+                            self.lib.dim.extend_from_slice(&[k(p[0]), k(p[1]), k(p[2]), 255]);
+                        }
+                        fb.blit_scaled(full, &self.lib.dim, w as u32, h as u32);
+                    } else {
+                        fb.blit_scaled(full, px, w as u32, h as u32);
+                    }
                     return;
                 }
                 fb.fill_radial(&t::GRADIENT_NIGHT);
@@ -181,6 +200,7 @@ impl Ui {
         self.ensure_rows(model, ctx, &g);
         self.lib.last_geom = Some(g.clone());
         self.lib.visible.clear();
+        self.lib.hero.clear();
         let l = self.lib_layout();
         let view = self.lib.view;
         let mut animated = false;
@@ -188,11 +208,6 @@ impl Ui {
             self.draw_viz_chrome(fb, &g, model, ctx);
         } else {
             // Content first; the header and the rail are drawn over what scrolls under them.
-            let dim =
-                view == View::NowPlaying && self.lib.detail.is_none() && ctx.viz.is_some() && self.lib.viz_on;
-            if dim {
-                fb.fill_rect_paint(g.m.content, Paint::Solid(t::INK_900), 0.58);
-            }
             if view == View::NowPlaying && self.lib.detail.is_none() {
                 animated |= self.draw_now_playing(fb, &g, model, ctx);
             } else {
@@ -365,7 +380,7 @@ impl Ui {
                 );
             }
             if kb {
-                self.focus_ring(fb, rect, 12.0 * s, 1.0);
+                self.focus_outline(fb, rect, 12.0 * s, 1.0);
             }
         }
         // Folders and the scan.
@@ -546,9 +561,22 @@ impl Ui {
             (g.search.x - g.title_x - 24.0 * s - g.header_btns.last().map_or(0.0, |b| g.search.x - b.rect.x))
                 .max(120.0 * s);
         let max_w = max_w.min(g.search.x - g.title_x - 16.0 * s);
+        let room = max_w > 60.0 * s;
         let title = self.fonts.fit(Face::SansBold, 28.0 * s, &title, max_w);
-        self.text(fb, Face::SansBold, 28.0, g.title_x, hd.y + 40.0 * s, &title, t::TEXT_STRONG, 1.0, -0.3);
-        if !sub.is_empty() {
+        if room {
+            self.text(
+                fb,
+                Face::SansBold,
+                28.0,
+                g.title_x,
+                hd.y + 40.0 * s,
+                &title,
+                t::TEXT_STRONG,
+                1.0,
+                -0.3,
+            );
+        }
+        if !sub.is_empty() && room {
             let sub = self.fonts.fit(Face::Sans, 13.0 * s, &sub, max_w);
             self.text(fb, Face::Sans, 13.0, g.title_x, hd.y + 68.0 * s, &sub, t::TEXT_DIM, 1.0, 0.0);
         }
@@ -573,19 +601,26 @@ impl Ui {
             },
             1.0,
         );
+        let icon_x = if g.search_collapsed { sr.cx() } else { sr.x + 22.0 * s };
         self.icon(
             fb,
             Icon::Search,
-            sr.x + 22.0 * s,
+            icon_x,
             sr.cy(),
             17.0,
-            if focused { t::CYAN_500 } else { t::TEXT_DIM },
+            if focused || (g.search_collapsed && !self.lib.query.is_empty()) {
+                t::CYAN_500
+            } else {
+                t::TEXT_DIM
+            },
             1.0,
             false,
         );
         let tx = sr.x + 42.0 * s;
         let room = sr.w - 42.0 * s - 40.0 * s;
-        if self.lib.query.is_empty() {
+        if g.search_collapsed {
+            // Just the icon.
+        } else if self.lib.query.is_empty() {
             self.text(fb, Face::Sans, 14.0, tx, sr.cy(), "Search library", t::TEXT_DIM, 1.0, 0.0);
         } else {
             // Show the tail of what was typed when it is longer than the box.
@@ -614,7 +649,7 @@ impl Ui {
                 false,
             );
         }
-        if self.lib.query.is_empty() && focused && (self.now / 530_000) % 2 == 0 {
+        if self.lib.query.is_empty() && focused && !g.search_collapsed && (self.now / 530_000) % 2 == 0 {
             fb.fill_rect_paint(
                 RectF::new(tx - 1.0 * s, sr.cy() - 9.0 * s, 1.5 * s, 18.0 * s),
                 Paint::Solid(t::CYAN_500),
@@ -647,7 +682,7 @@ impl Ui {
             Paint::Solid(t::WHITE),
             0.06,
         );
-        let cols = track_cols(th.w - 2.0 * (g.m.pad - 8.0 * s), s, true);
+        let cols = track_cols(th.w - 2.0 * (g.m.pad - 8.0 * s), s, true, true, true);
         let x0 = th.x + g.m.pad - 8.0 * s;
         use rvp_library::TrackSort as T;
         let active = match self.lib.track_sort {
@@ -768,6 +803,29 @@ impl Ui {
                         animated |= self.draw_ent(fb, &rows, ei, screen, g, model, ctx);
                     }
                 }
+            }
+        }
+        // The drop line of a row being dragged to a new place.
+        if let Some(super::LibDrag::Reorder { from, to, moved: true, .. }) = self.lib.drag {
+            if let (Some(&(_, r)), Some(&(_, f))) = (
+                self.lib.visible.iter().find(|(i, _)| *i == to),
+                self.lib.visible.iter().find(|(i, _)| *i == from),
+            ) {
+                let y = if to > from { r.bottom() } else { r.y };
+                let s = self.scale;
+                fb.fill_rrect(
+                    RectF::new(r.x, y - 1.5 * s, r.w, 3.0 * s),
+                    1.5 * s,
+                    Paint::Solid(t::CYAN_500),
+                    0.95,
+                );
+                fb.fill_rrect(
+                    RectF::new(r.x - 3.0 * s, y - 4.0 * s, 8.0 * s, 8.0 * s),
+                    4.0 * s,
+                    Paint::Solid(t::CYAN_500),
+                    1.0,
+                );
+                fb.stroke_rrect(f, 10.0 * s, 1.5 * s, fade(t::CYAN_500, 0.7), 1.0);
             }
         }
         self.lib.rows = Some(rows);
@@ -980,7 +1038,11 @@ impl Ui {
             }
             EntKind::Track { id, pos } => {
                 let Some(tr) = lib.track(id) else { return false };
-                let thumbs = self.lib.detail.is_none_or(|d| !matches!(d, Detail::Album(_)));
+                let in_album = matches!(self.lib.detail, Some(Detail::Album(_)));
+                let thumbs = !in_album;
+                let various =
+                    in_album && lib.album_of(id).is_some_and(|a| a.artist == rvp_library::VARIOUS_ARTISTS);
+                let (show_artist, show_album) = if in_album { (various, false) } else { (true, true) };
                 let now_here = model.now_track == Some(id);
                 let num = alloc::format!(
                     "{}",
@@ -1007,6 +1069,8 @@ impl Ui {
                         active: playing_state,
                         missing: false,
                         thumbs,
+                        show_artist,
+                        show_album,
                     },
                     (hover_row, play_hot, selected, kb),
                 );
@@ -1033,6 +1097,8 @@ impl Ui {
                                 active: playing_state,
                                 missing: false,
                                 thumbs: true,
+                                show_artist: true,
+                                show_album: true,
                             },
                             (hover_row, play_hot, selected, kb),
                         );
@@ -1059,6 +1125,8 @@ impl Ui {
                                 active: false,
                                 missing: true,
                                 thumbs: true,
+                                show_artist: true,
+                                show_album: true,
                             },
                             (hover_row, false, selected, kb),
                         );
@@ -1213,7 +1281,7 @@ impl Ui {
             );
         }
         if kb {
-            self.focus_ring(fb, r, 10.0 * s, 1.0);
+            self.focus_outline(fb, r, 10.0 * s, 1.0);
         }
     }
 
@@ -1238,7 +1306,7 @@ impl Ui {
                 1.0,
             );
         }
-        let cols = track_cols(r.w, s, row.thumbs);
+        let cols = track_cols(r.w, s, row.thumbs, row.show_artist, row.show_album);
         let x0 = r.x;
         let mut animated = false;
         // Number, play button or equaliser.
@@ -1429,6 +1497,7 @@ impl Ui {
             0.0,
         );
         for b in self.hero_buttons(rect, d, ctx) {
+            self.lib.hero.push((b.id, b.rect, b.label.clone()));
             let h = LibHit::Button(b.id);
             self.draw_pill(fb, &b, self.lib.hover == h, self.lib_pressed(h), false);
         }
@@ -1521,7 +1590,12 @@ impl Ui {
         }
         // The cover, or the picture of a video.
         let c = rects.cover;
-        fb.shadow_rrect(c, 20.0 * s, 18.0 * s, 44.0 * s, Rgba::new(5, 2, 15, 190), 1.0);
+        // A big soft shadow costs a lot to blend; with the visualizer moving behind (it dims the picture anyway) a rim will do.
+        if ctx.viz.is_some() && self.lib.viz_on {
+            fb.stroke_rrect(c.inflate(1.0 * s), 20.0 * s, 1.5 * s, fade(t::VIOLET_400, 0.35), 1.0);
+        } else {
+            fb.shadow_rrect(c, 20.0 * s, 18.0 * s, 44.0 * s, Rgba::new(5, 2, 15, 190), 1.0);
+        }
         match (model.has_video, ctx.video, ctx.now_art) {
             (true, Some((px, w, h)), _) if w > 0 && h > 0 => {
                 let k = (c.w / w as f32).min(c.h / h as f32);
@@ -1637,12 +1711,12 @@ impl Ui {
         let a = self.controls_alpha;
         // Protection gradients under the text.
         fb.fill_rect_paint(
-            RectF::new(0.0, 0.0, w, 120.0 * s),
+            RectF::new(0.0, 0.0, w, 84.0 * s),
             Paint::Vertical(fade(t::INK_900, 0.7), Rgba::new(7, 6, 13, 0)),
             a.max(0.0),
         );
         fb.fill_rect_paint(
-            RectF::new(0.0, h - 260.0 * s, w, 260.0 * s),
+            RectF::new(0.0, h - 210.0 * s, w, 210.0 * s),
             Paint::Vertical(Rgba::new(7, 6, 13, 0), fade(t::INK_900, 0.78)),
             1.0,
         );
@@ -2130,4 +2204,6 @@ pub(crate) struct TrackRow<'a> {
     pub active: bool,
     pub missing: bool,
     pub thumbs: bool,
+    pub show_artist: bool,
+    pub show_album: bool,
 }

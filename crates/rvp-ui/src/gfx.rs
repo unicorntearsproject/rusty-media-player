@@ -285,37 +285,84 @@ impl FrameBuffer {
         }
     }
 
-    /// Fill an anti-aliased rounded rectangle.
+    /// Fill an anti-aliased rounded rectangle. Only the rim and the corners are evaluated pixel by pixel; the inside, where
+    /// coverage is one, is filled a row at a time.
     pub fn fill_rrect(&mut self, r: RectF, radius: f32, paint: Paint, opacity: f32) {
         let x0 = (floorf(r.x) as i32 - 1).max(0);
         let y0 = (floorf(r.y) as i32 - 1).max(0);
         let x1 = (r.right() as i32 + 2).min(self.width as i32);
         let y1 = (r.bottom() as i32 + 2).min(self.height as i32);
         let p = Painter::new(paint, r);
+        let rad = radius.min(r.w * 0.5).min(r.h * 0.5).max(0.0);
+        // Pixels whose centre is more than a pixel inside the shape are fully covered.
+        let (ix0, ix1) = (libm::ceilf(r.x + rad + 1.0) as i32, floorf(r.right() - rad - 1.0) as i32);
+        let (iy0, iy1) = (libm::ceilf(r.y + 1.0) as i32, floorf(r.bottom() - 1.0) as i32);
+        let flat = matches!(paint, Paint::Solid(_) | Paint::Vertical(..));
+        let stride = self.width as usize * 4;
         for y in y0..y1 {
-            for x in x0..x1 {
-                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                let cov = 0.5 - sd_rrect(fx, fy, &r, radius);
-                if cov > 0.0 {
-                    self.blend(x, y, p.at(fx, fy), cov.min(1.0) * opacity);
+            let inside_rows = y >= iy0 && y < iy1;
+            // The corner rows (within `rad` of top or bottom) are not covered across the inner span.
+            let straight =
+                inside_rows && (y as f32 + 0.5) >= r.y + rad && (y as f32 + 0.5) <= r.bottom() - rad;
+            let (sx0, sx1) =
+                if straight && flat && ix1 > ix0 { (ix0.max(x0), ix1.min(x1)) } else { (x1, x1) };
+            let edge = |me: &mut Self, from: i32, to: i32| {
+                for x in from..to {
+                    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                    let cov = 0.5 - sd_rrect(fx, fy, &r, radius);
+                    if cov > 0.0 {
+                        me.blend(x, y, p.at(fx, fy), cov.min(1.0) * opacity);
+                    }
                 }
+            };
+            if sx1 > sx0 {
+                edge(self, x0, sx0);
+                let c = p.at(r.x, y as f32 + 0.5);
+                let a = (c.a as f32 * opacity + 0.5) as i32;
+                if a > 0 {
+                    let a = a + (a >> 7);
+                    let (cr, cg, cb) = (c.r as i32, c.g as i32, c.b as i32);
+                    let row = &mut self.pixels
+                        [y as usize * stride + sx0 as usize * 4..y as usize * stride + sx1 as usize * 4];
+                    for d in row.chunks_exact_mut(4) {
+                        d[0] = (d[0] as i32 + (((cr - d[0] as i32) * a) >> 8)) as u8;
+                        d[1] = (d[1] as i32 + (((cg - d[1] as i32) * a) >> 8)) as u8;
+                        d[2] = (d[2] as i32 + (((cb - d[2] as i32) * a) >> 8)) as u8;
+                        d[3] = 255;
+                    }
+                }
+                edge(self, sx1, x1);
+            } else {
+                edge(self, x0, x1);
             }
         }
     }
 
-    /// Stroke the inside edge of a rounded rectangle.
+    /// Stroke the inside edge of a rounded rectangle. Rows in the straight part of the sides only look at the pixels near the
+    /// two edges, so a big rectangle costs its perimeter, not its area.
     pub fn stroke_rrect(&mut self, r: RectF, radius: f32, width: f32, color: Rgba, opacity: f32) {
         let x0 = (floorf(r.x) as i32 - 1).max(0);
         let y0 = (floorf(r.y) as i32 - 1).max(0);
         let x1 = (r.right() as i32 + 2).min(self.width as i32);
         let y1 = (r.bottom() as i32 + 2).min(self.height as i32);
+        let rad = radius.min(r.w * 0.5).min(r.h * 0.5).max(0.0);
+        let band = libm::ceilf(width + 2.0) as i32;
         for y in y0..y1 {
-            for x in x0..x1 {
-                let d = sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &r, radius);
+            let fy = y as f32 + 0.5;
+            let margin = rad.max(width + 2.0);
+            let straight = fy >= r.y + margin && fy <= r.bottom() - margin && r.w > 2.0 * (band as f32 + 2.0);
+            let mut x = x0;
+            while x < x1 {
+                // In a straight row jump from the left band to the right one.
+                if straight && x == x0 + band + 1 {
+                    x = (x1 - band - 1).max(x);
+                }
+                let d = sd_rrect(x as f32 + 0.5, fy, &r, radius);
                 let cov = (0.5 - d).clamp(0.0, 1.0) * (d + width + 0.5).clamp(0.0, 1.0);
                 if cov > 0.0 {
                     self.blend(x, y, color, cov * opacity);
                 }
+                x += 1;
             }
         }
     }
@@ -336,11 +383,35 @@ impl FrameBuffer {
         let x1 = ((sh.right() + reach) as i32 + 1).min(self.width as i32);
         let y1 = ((sh.bottom() + reach) as i32 + 1).min(self.height as i32);
         let k = 1.702 / sigma;
+        // The shadow is smooth, so it is evaluated on a coarse lattice and interpolated.
+        let step = if blur >= 16.0 {
+            4
+        } else if blur >= 8.0 {
+            2
+        } else {
+            1
+        };
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let nx = ((x1 - x0) / step + 2) as usize;
+        let ny = ((y1 - y0) / step + 2) as usize;
+        let mut lat: Vec<f32> = Vec::with_capacity(nx * ny);
+        for j in 0..ny as i32 {
+            let fy = (y0 + j * step) as f32 + 0.5;
+            for i in 0..nx as i32 {
+                let d = sd_rrect((x0 + i * step) as f32 + 0.5, fy, &sh, radius);
+                lat.push(1.0 / (1.0 + expf(d * k)));
+            }
+        }
+        let inv = 1.0 / step as f32;
         for y in y0..y1 {
+            let (j, fy) = (((y - y0) / step) as usize, ((y - y0) % step) as f32 * inv);
             for x in x0..x1 {
-                let d = sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &sh, radius);
-                // Logistic approximation of the Gaussian edge profile.
-                let cov = 1.0 / (1.0 + expf(d * k));
+                let (i, fx) = (((x - x0) / step) as usize, ((x - x0) % step) as f32 * inv);
+                let a = lat[j * nx + i] * (1.0 - fx) + lat[j * nx + i + 1] * fx;
+                let b = lat[(j + 1) * nx + i] * (1.0 - fx) + lat[(j + 1) * nx + i + 1] * fx;
+                let cov = a * (1.0 - fy) + b * fy;
                 if cov > 0.004 {
                     self.blend(x, y, color, cov * opacity);
                 }
@@ -681,5 +752,81 @@ mod tests {
         fb.blit_scaled(RectF::new(2.0, 2.0, 16.0, 16.0), &src, 4, 4);
         assert_eq!(fb.pixel(10, 10), Rgba::rgb(200, 100, 50));
         assert_eq!(fb.pixel(0, 0), tokens::INK_900);
+    }
+
+    /// The pixel-by-pixel rendering the fast paths replace.
+    fn brute_fill(fb: &mut FrameBuffer, r: RectF, radius: f32, c: Rgba, opacity: f32) {
+        for y in 0..fb.height as i32 {
+            for x in 0..fb.width as i32 {
+                let cov = 0.5 - sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &r, radius);
+                if cov > 0.0 {
+                    fb.blend(x, y, c, cov.min(1.0) * opacity);
+                }
+            }
+        }
+    }
+
+    fn brute_stroke(fb: &mut FrameBuffer, r: RectF, radius: f32, width: f32, c: Rgba, opacity: f32) {
+        for y in 0..fb.height as i32 {
+            for x in 0..fb.width as i32 {
+                let d = sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &r, radius);
+                let cov = (0.5 - d).clamp(0.0, 1.0) * (d + width + 0.5).clamp(0.0, 1.0);
+                if cov > 0.0 {
+                    fb.blend(x, y, c, cov * opacity);
+                }
+            }
+        }
+    }
+
+    fn max_diff(a: &FrameBuffer, b: &FrameBuffer) -> u8 {
+        a.pixels.iter().zip(&b.pixels).map(|(x, y)| x.abs_diff(*y)).max().unwrap_or(0)
+    }
+
+    #[test]
+    fn the_fast_rounded_rectangle_paths_match_the_pixel_by_pixel_ones() {
+        let c = Rgba::new(255, 43, 214, 255);
+        for (i, (x, y, w, h, rad, wd, op)) in [
+            (10.3, 7.8, 90.0, 60.5, 14.0, 2.0, 1.0),
+            (5.0, 5.0, 150.0, 20.0, 10.0, 1.0, 0.6),
+            (20.5, 3.2, 40.0, 100.0, 40.0, 3.0, 0.9),
+            (0.0, 0.0, 200.0, 140.0, 0.0, 1.5, 1.0),
+            (-12.0, -8.0, 80.0, 50.0, 12.0, 2.0, 1.0),
+            (150.0, 100.0, 100.0, 100.0, 9.0, 2.0, 0.5),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let r = RectF::new(x, y, w, h);
+            let (mut a, mut b) = (FrameBuffer::new(200, 140), FrameBuffer::new(200, 140));
+            a.fill_rrect(r, rad, Paint::Solid(c), op);
+            brute_fill(&mut b, r, rad, c, op);
+            assert!(max_diff(&a, &b) <= 2, "fill {i}: {}", max_diff(&a, &b));
+            let (mut a, mut b) = (FrameBuffer::new(200, 140), FrameBuffer::new(200, 140));
+            a.stroke_rrect(r, rad, wd, c, op);
+            brute_stroke(&mut b, r, rad, wd, c, op);
+            assert_eq!(max_diff(&a, &b), 0, "stroke {i}");
+        }
+    }
+
+    #[test]
+    fn the_lattice_shadow_stays_close_to_the_exact_one() {
+        let r = RectF::new(60.0, 50.0, 120.0, 80.0);
+        let col = Rgba::new(5, 2, 15, 200);
+        let mut a = FrameBuffer::new(240, 200);
+        a.shadow_rrect(r, 18.0, 12.0, 32.0, col, 1.0);
+        // Exact reference.
+        let mut b = FrameBuffer::new(240, 200);
+        let sh = RectF::new(r.x, r.y + 12.0, r.w, r.h);
+        let k = 1.702 / 16.0;
+        for y in 0..200 {
+            for x in 0..240 {
+                let d = sd_rrect(x as f32 + 0.5, y as f32 + 0.5, &sh, 18.0);
+                let cov = 1.0 / (1.0 + expf(d * k));
+                if cov > 0.004 {
+                    b.blend(x, y, col, cov);
+                }
+            }
+        }
+        assert!(max_diff(&a, &b) <= 3, "{}", max_diff(&a, &b));
     }
 }

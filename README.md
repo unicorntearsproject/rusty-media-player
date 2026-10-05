@@ -13,12 +13,13 @@ One codebase, two editions:
   decoder), AV1, VP9. Audio: AAC, MP3, FLAC, Opus, Vorbis, PCM.
 - 1080p30 in the browser: WebAssembly SIMD128 kernels, plus an opt-in threads build (`cargo xtask web --threads`).
 - A portable `no_std + alloc` core behind a small host trait; no threads required.
-- Playlist, gapless playback, subtitles and a host-neutral now-playing model (Media Session in the browser) are in; planned: MPRIS on
-  Linux, an audio-first library view with M3U/M3U8/PLS playlists and a visualizer view, and the desktop app and packaging.
+- Playlist, gapless playback, subtitles and a host-neutral now-playing model (Media Session in the browser) are in, and so is the
+  audio-first Library face: a scanned and indexed music library (albums, artists, tracks, search, cover art, saved playlists with
+  M3U/M3U8/PLS import and export, a queue) and a full-window visualizer; planned: MPRIS on Linux, the desktop app and packaging.
 - Its own UI, drawn with the Unicorn Tears design-system tokens (`crates/theme`).
 - Clean-room: VLC is an architecture reference only; no VLC code is used.
 
-Status: milestones 0 to 9 done.
+Status: milestones 0 to 10 done.
 
 - M0-M6: scaffold, host/clock/executor, demuxers, audio, AV1, A/V sync, the headless host, the browser host with the themed
   UI, and our own pure-Rust H.264 decoder (Baseline/Main/High, progressive 8-bit 4:2:0, bit-exact with ffmpeg).
@@ -30,6 +31,11 @@ Status: milestones 0 to 9 done.
 - M9: wasm SIMD128 kernels and an opt-in worker-thread build (1080p30 H.264, VP9 and AV1 at 0% dropped frames in headless Chromium),
   cargo-fuzz targets for the demuxers, decoders and parsers, truncated/growing/corrupt file handling, crash recovery, raw audio
   demuxers (MP3 with gapless info, FLAC, Ogg, WAV, ADTS) with tags and art.
+
+- M10: the audio-first Library face next to the Player, one app with a switch (`B`): a library scanned from a folder (File System Access API or a
+  folder input, incremental rescans, persisted in IndexedDB), albums, artists, tracks, search, queue and playlists (M3U, M3U8, PLS), gapless album
+  playback, cover art, a now-playing screen and a visualizer view with five effects (reduced-motion safe), all with keyboard and pointer parity and
+  context menus. See the [screenshots](docs/screenshots) and the M10 notes in [`docs/PLAN.md`](docs/PLAN.md).
 
 Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Read [`docs/PLAN.md`](docs/PLAN.md)
 for the architecture and the milestone list (M10 audio-first view, M11 desktop app and packaging, M12 Rusty
@@ -46,13 +52,14 @@ for project rules.
 | `crates/rvp-par` | worker pool, decoder-on-a-thread, pipelined H.264 (native threads or Web Workers) |
 | `fuzz/` | cargo-fuzz targets and seed corpora (`cargo xtask fuzz`) |
 | `crates/rvp-codec-*` | audio, H.264 (own decoder; its bitstream, parameter-set, transform, CAVLC and CABAC modules are reusable by an encoder), AV1, VP9 decoders |
-| `crates/rvp-subs`, `crates/rvp-viz` | text subtitles; audio analysis for visualizers |
+| `crates/rvp-subs`, `crates/rvp-viz` | text subtitles; audio analysis and the effects of the visualizer |
+| `crates/rvp-library` | the music library: index, scan driver, cover thumbnails, saved playlists (M3U/M3U8/PLS), persistence |
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
-| `crates/rvp-ui`, `crates/theme` | the UI (drawn into a pixel surface) and the generated design tokens |
+| `crates/rvp-ui`, `crates/theme` | the UI (the Player and the Library faces, drawn into a pixel surface) and the generated design tokens |
 | `crates/rvp-app` | session + UI + input glue behind the host trait |
 | `crates/rvp-host-{headless,web,rb}` | hosts: native test harness, browser, Rusty Bucket (`rvp-host-desktop` arrives in M11) |
 | `web/`, `tests/e2e/` | the page (canvas, audio worklet, glue) and its Playwright tests |
-| `xtask`, `tools/` | `cargo xtask theme`, `check`, `fixtures`, `web`, `serve`, `e2e`, `perf-web`, `fuzz` |
+| `xtask`, `tools/` | `cargo xtask theme`, `check`, `fixtures` (also the 200-track test library, `tools/gen-library.py`), `web`, `serve`, `e2e`, `perf-web`, `fuzz` |
 
 ## Build and test
 
@@ -72,9 +79,22 @@ cargo xtask perf-fixtures       # one-minute 1080p30 streams; then `cargo xtask 
 cargo xtask fuzz [target] [secs]  # cargo-fuzz targets (nightly + cargo-fuzz)
 ```
 
-Browser player: drop a file on the page or press `O`. Keys: `Space`/`K` play, arrows seek 5 s (Shift 30 s), `J`/`L` 10 s,
-`Up`/`Down` volume, `M` mute, `F` fullscreen, `[`/`]` speed, `\` normal speed, `Home`/`End`, `S`/`A` subtitle and audio track, `.`/`,` frame step, `I` A-B loop, `N`/`P` next and previous, `R` repeat, `Z` shuffle, `Q` playlist, Page Up/Down chapters; right-click for a menu with all
-of them. Open several files to make a playlist; they play gaplessly. See [`docs/host-api.md`](docs/host-api.md) for the now-playing and visualizer interfaces. Screenshots are in [`docs/screenshots`](docs/screenshots).
+Browser player: drop a file or a folder on the page or press `O`. Two faces, switched with `B` (or the button in the bar, or the switch in the
+rail): the **Player** for video and the **Library** for music. A song opened from outside goes to the Library, a video to the Player.
+
+Player keys: `Space`/`K` play, arrows seek 5 s (Shift 30 s), `J`/`L` 10 s, `Up`/`Down` volume, `M` mute, `F` fullscreen, `[`/`]` speed, `\` normal
+speed, `Home`/`End`, `S`/`A` subtitle and audio track, `.`/`,` frame step, `I` A-B loop, `N`/`P` next and previous, `R` repeat, `Z` shuffle, `Q`
+playlist, Page Up/Down chapters; right-click for a menu with all of them. Open several files to make a playlist; they play gaplessly.
+
+Library keys: `1` Albums, `2` Artists, `3` Tracks, `4` Playlists, `5` Queue, `6` Now playing, `7` or `V` the visualizer, `/` or `Ctrl+F` search (type;
+`Esc` clears and goes back). Plain arrows, `Home`/`End`, `PageUp`/`PageDown` move through the list or grid, `Enter` plays from the selected row (or
+opens an album, artist or playlist), `Shift+Enter` adds to the queue, `Ctrl+Enter` plays next, `Delete` removes from the queue or a playlist,
+`Alt+Up`/`Alt+Down` move an item, `Backspace` or `Esc` go back, `Tab` walks rail, content and bar, the menu key or `Shift+F10` opens the context menu
+of the selection. `Ctrl+Left`/`Ctrl+Right` seek and `Ctrl+Up`/`Ctrl+Down` change the volume (`J`/`L` and `M` still work). In the visualizer:
+`Left`/`Right` change the effect, `C` the colours, `T` the title, `Enter` turns it on or off. With the pointer: click a card or row (double click plays),
+the play button on a card, right-click anything for its menu, drag queue rows to reorder, the mouse's back button goes back, the wheel scrolls.
+Add a folder with the button in the rail (`Add folder`), drop one on the page, or open playlist files (`.m3u`, `.m3u8`, `.pls`) to import them.
+See [`docs/host-api.md`](docs/host-api.md) for the now-playing, visualizer and library interfaces. Screenshots are in [`docs/screenshots`](docs/screenshots).
 
 ## License
 

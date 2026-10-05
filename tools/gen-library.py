@@ -225,5 +225,73 @@ def main():
     print(f"library fixtures: {len(jobs)} tracks in {out}")
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# The showcase: a small library with real-looking lengths, colourful generated covers and music with a beat (a kick every
+# half second and a slow filter sweep), for the screenshots and the visualizer to look like something. Not used by the tests.
+SHOWCASE = [
+    ("Aurora Vale", "Neon Rain", 2019, "Synthwave", ["Cascade", "Violet Hour", "Afterglow", "Static Bloom", "Midnight Rail"]),
+    ("The Midnight Owls", "Velvet Static", 2017, "Dream pop", ["Hush", "Paper Lanterns", "Slow Burn", "Radio Silence", "Wide Awake"]),
+    ("Quiet Machines", "Glass Horizon", 2021, "Ambient", ["Low Orbit", "Tidal Memory", "Glass Horizon", "Warm Signal", "Drift"]),
+    ("DJ Unicorn Tears", "Tears for Tomorrow", 2024, "Electronic", ["Mirror Ball", "Drip Feed", "Laser Garden", "Salt and Glitter", "Encore"]),
+    ("Zo\u00eb P\u00e9rez", "Paper Moons", 2020, "Pop", ["Luna de Papel", "Caf\u00e9 Neon", "Aire", "Cometas", "Hasta Ma\u00f1ana"]),
+    ("Mono Mimi", "Night Drive FM", 2023, "Lo-fi", ["Exit 14", "Streetlight Jazz", "Tailwind", "Dashboard Glow", "Last Gas"]),
+    ("Delta Hiss", "Pulse Garden", 2018, "IDM", ["Seedling", "Root System", "Pulse Garden", "Pollen Count", "Greenhouse"]),
+    ("Bj\u00f8rn \u00c5kesson", "Low Tide Letters", 2015, "Folk", ["Harbour Light", "Salt Wind", "Letters Home", "Low Tide", "Lantern Song"]),
+]
+
+
+def showcase(out):
+    out = os.path.abspath(out)
+    stamp = os.path.join(out, ".done")
+    me = hashlib.sha1(open(__file__, "rb").read()).hexdigest()[:12]
+    if os.path.exists(stamp) and open(stamp).read().strip() == f"showcase-{me}":
+        return
+    music = os.path.join(out, "music")
+    jobs = []
+    for ai, (artist, album, year, genre, titles) in enumerate(SHOWCASE):
+        d = os.path.join(music, safe(artist), safe(album))
+        os.makedirs(d, exist_ok=True)
+        cover = os.path.join(out, f"cover{ai}.jpg")
+        hue = ai * 43
+        # Rings and waves in the brand colours: a different phase and frequency per album.
+        f = 14 + ai * 3
+        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+             f"color=c=black:s=600x600:d=1,format=rgb24,geq="
+             f"r='clip(40+215*pow(0.5+0.5*sin(hypot(X-{200 + ai * 30},Y-{250 + (ai % 3) * 70})/{f}),2)*(0.4+0.6*X/600),0,255)':"
+             f"g='clip(20+90*pow(0.5+0.5*sin(hypot(X-300,Y-300)/{f + 5}+{ai}),2)+120*Y/600*Y/600,0,255)':"
+             f"b='clip(120+135*pow(0.5+0.5*sin(hypot(X-{400 - ai * 20},Y-{350})/{f - 3}+1),2),0,255)',hue=h={hue}",
+             "-frames:v", "1", "-q:v", "3", cover])
+        for ti, title in enumerate(titles):
+            dur = 150 + ((ai * 7 + ti * 13) % 60)
+            kick = 50 + (ai * 5 + ti * 3) % 14
+            bpm_period = [0.5, 0.46, 0.55, 0.5, 0.43][(ai + ti) % 5]
+            base = 110 * (1 + ((ai + ti * 2) % 5) * 0.12)
+            expr = (f"0.55*sin(2*PI*{kick}*t)*exp(-9*mod(t,{bpm_period}))"
+                    f"+0.22*sin(2*PI*{base}*t*(1+0.004*sin(0.7*t)))*(0.55+0.45*sin(2*PI*0.2*t))"
+                    f"+0.16*sin(2*PI*{base * 3.01}*t)*(0.5+0.5*sin(2*PI*{1 / bpm_period}*t))"
+                    f"+0.08*sin(2*PI*{base * 7.3}*t)*(0.5+0.5*sin(2*PI*{2 / bpm_period}*t+1))")
+            path = os.path.join(d, f"{ti + 1:02d} {safe(title)}.mp3")
+            jobs.append((path, expr, dur, cover, dict(title=title, artist=artist, album=album, track=f"{ti + 1}/{len(titles)}",
+                                                      date=str(year), genre=genre, album_artist=artist)))
+
+    def render(j):
+        path, expr, dur, cover, tags = j
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"aevalsrc='{expr}':s=24000:d={dur}",
+               "-i", cover, "-map", "0:a", "-map", "1:v", "-c:v", "copy", "-disposition:v", "attached_pic",
+               "-c:a", "libmp3lame", "-b:a", "40k", "-ac", "1", "-id3v2_version", "3"]
+        for k, v in tags.items():
+            cmd += ["-metadata", f"{k}={v}"]
+        run(cmd + [path])
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(render, jobs))
+    with open(stamp, "w") as f:
+        f.write(f"showcase-{me}\n")
+    print(f"showcase fixtures: {len(jobs)} tracks in {out}")
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 2 and sys.argv[1] == "--showcase":
+        showcase(sys.argv[2])
+    else:
+        main()

@@ -382,6 +382,8 @@ gen_audio() {
 # M10: a 200-track library in mixed formats with art, Unicode and odd tags, plus expected.json (the tree a scan must find).
 gen_library() {
   python3 "$root/tools/gen-library.py" "$out/library"
+  # A small library with real lengths, colourful covers and music with a beat, for the screenshots.
+  python3 "$root/tools/gen-library.py" --showcase "$out/showcase"
 }
 
 fixture_set="${RVP_FIXTURE_SET:-all}"

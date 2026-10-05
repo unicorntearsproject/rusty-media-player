@@ -174,6 +174,9 @@ test.describe("M8", () => {
     });
     expect(seen).toEqual(["gap_0.mkv", "gap_1.mkv", "gap_2.mkv"]);
     await waitState(page, "ended");
+    // These are audio files, so the app showed its Library face; the playlist menu belongs to the Player (there Q shows the queue).
+    await page.keyboard.press("b");
+    await waitFor(page, () => window.rvp.snapshot().lib.mode === "player");
     // The playlist menu lists the items and marks the current one.
     await page.keyboard.press("q");
     await waitFor(page, () => window.rvp.snapshot().menu_open);

@@ -7,12 +7,16 @@ const root = path.resolve(__dirname, "../..");
 const FIXTURES = process.env.RVP_FIXTURES || path.join(root, "target/fixtures");
 const OUT = path.join(root, "docs/screenshots");
 const LONG = path.join(FIXTURES, "av1_opus_60s.webm");
+const SHOWCASE = path.join(FIXTURES, "showcase/music");
 
 test.skip(!process.env.RVP_SCREENSHOTS, "set RVP_SCREENSHOTS=1 (cargo xtask e2e --screenshots)");
 
 const snap = (page) => page.evaluate(() => window.rvp.snapshot());
 const waitFor = (page, fn, arg) => page.waitForFunction(fn, arg, { timeout: 15_000, polling: 50 });
-const shot = (page, name) => page.screenshot({ path: path.join(OUT, name) });
+const shot = async (page, name, wait = 0) => {
+  if (wait) await page.waitForTimeout(wait);
+  await page.screenshot({ path: path.join(OUT, name) });
+};
 const center = (r) => [r.x + r.w / 2, r.y + r.h / 2];
 
 async function ready(page) {
@@ -110,8 +114,14 @@ test("screenshots", async ({ page, browser }) => {
   await shot(page, "10-keyboard-focus.png");
 
   // Audio-only file, an H.264 file (our own decoder), and a broken file.
+  // A song opened from outside goes to the Library face: the now-playing screen (this one has no cover or tags).
   await ready(page);
-  await openPaused(page, path.join(FIXTURES, "mp3.mkv"), 0.3);
+  await page.setInputFiles("#file", path.join(FIXTURES, "mp3.mkv"));
+  await waitFor(page, () => window.rvp.snapshot().state === "playing" && window.rvp.snapshot().lib.mode === "library");
+  await page.keyboard.press("Space");
+  await waitFor(page, () => window.rvp.snapshot().state === "paused");
+  await page.mouse.move(640, 300);
+  await page.waitForTimeout(800);
   await shot(page, "11-audio-only.png");
   await ready(page);
   await openPaused(page, path.join(FIXTURES, "h264_aac.mp4"), 0.4);
@@ -132,4 +142,96 @@ test("screenshots", async ({ page, browser }) => {
   await shot(hi, "14-hidpi-paused.png");
   await ctx.close();
   expect(fs.readdirSync(OUT).length).toBeGreaterThanOrEqual(14);
+});
+
+test("library screenshots", async ({ page, browser }) => {
+  await ready(page);
+  await page.keyboard.press("b");
+  await waitFor(page, () => window.rvp.snapshot().lib.mode === "library");
+  await page.waitForTimeout(300);
+  await shot(page, "15-library-empty.png");
+  await page.setInputFiles("#dir", SHOWCASE);
+  await waitFor(page, () => window.rvp.snapshot().lib.tracks >= 40 && !window.rvp.snapshot().lib.scan, null);
+  await page.waitForTimeout(2600); // the "library updated" toast goes away
+  const ent = async (label, kind) => (await snap(page)).lib.ents.find((e) => e.label === label && (!kind || e.kind === kind));
+
+  // Albums with a card under the pointer (its play button shows).
+  let e = await ent("Tears for Tomorrow", "album");
+  await page.mouse.move(e.rect.x + e.rect.w / 2, e.rect.y + e.rect.h / 2 - 30);
+  await shot(page, "16-library-albums.png", 400);
+  // An album and its tracks.
+  e = await ent("Neon Rain", "album");
+  await page.mouse.click(...center(e.rect));
+  await waitFor(page, () => window.rvp.snapshot().lib.detail !== null);
+  await page.mouse.move(1180, 440);
+  await shot(page, "17-library-album.png", 400);
+  // Play it: the row with the equaliser, the bar and now playing.
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await waitFor(page, () => window.rvp.snapshot().state === "playing");
+  await page.mouse.move(1180, 440);
+  await page.waitForTimeout(2500);
+  await shot(page, "18-library-album-playing.png");
+  await page.keyboard.press("3");
+  await page.mouse.move(1180, 440);
+  await shot(page, "19-library-tracks.png", 500);
+  await page.keyboard.press("2");
+  await page.mouse.move(1180, 440);
+  await shot(page, "20-library-artists.png", 500);
+  await page.keyboard.press("/");
+  await page.keyboard.type("moon");
+  await shot(page, "21-library-search.png", 500);
+  await page.keyboard.press("Escape");
+  // A playlist made from the album's menu.
+  await page.keyboard.press("1");
+  await waitFor(page, () => window.rvp.snapshot().lib.view === "albums");
+  await page.waitForTimeout(200);
+  e = await ent("Night Drive FM", "album");
+  await page.mouse.click(...center(e.rect), { button: "right" });
+  await waitFor(page, () => window.rvp.snapshot().menu_open);
+  let s = await snap(page);
+  await page.mouse.move(...center(s.menu.find((m) => m.label === "Add to playlist").rect));
+  await page.waitForTimeout(250);
+  await shot(page, "22-library-context-menu.png", 100);
+  s = await snap(page);
+  await page.mouse.click(...center(s.menu.find((m) => m.label.startsWith("New playlist")).rect));
+  await waitFor(page, () => window.rvp.snapshot().lib.typing);
+  await page.keyboard.type("Night drive");
+  await shot(page, "23-library-name-prompt.png", 300);
+  await page.keyboard.press("Enter");
+  await waitFor(page, () => window.rvp.snapshot().lib.playlists === 1);
+  await page.keyboard.press("4");
+  await page.mouse.move(1180, 440);
+  await shot(page, "24-library-playlists.png", 2600);
+  await page.keyboard.press("5");
+  await page.mouse.move(1180, 440);
+  await shot(page, "25-library-queue.png", 500);
+  await page.keyboard.press("6");
+  await page.mouse.move(1180, 440);
+  await shot(page, "26-now-playing.png", 1500);
+  // The visualizer: every effect.
+  await page.keyboard.press("7");
+  await page.mouse.move(640, 250);
+  await page.waitForTimeout(3300); // the controls settle, the toast goes
+  await page.mouse.move(640, 252);
+  await page.waitForTimeout(300);
+  const names = ["spectrum", "scope", "tunnel", "starfield", "plasma"];
+  for (let i = 0; i < 5; i++) {
+    await shot(page, `27-visualizer-${names[i]}.png`, 1500);
+    await page.keyboard.press("ArrowRight");
+  }
+  await page.keyboard.press("Escape");
+
+  // A narrow window.
+  const ctx = await browser.newContext({ viewport: { width: 520, height: 760 }, deviceScaleFactor: 1 });
+  const narrow = await ctx.newPage();
+  await ready(narrow);
+  await narrow.keyboard.press("b");
+  await narrow.setInputFiles("#dir", SHOWCASE);
+  await waitFor(narrow, () => window.rvp.snapshot().lib.tracks >= 40 && !window.rvp.snapshot().lib.scan, null);
+  await narrow.waitForTimeout(2600);
+  await shot(narrow, "28-library-narrow.png", 300);
+  await ctx.close();
+  expect(fs.readdirSync(OUT).length).toBeGreaterThanOrEqual(32);
 });

@@ -30,7 +30,7 @@ pub(crate) struct TrackCols {
     pub time: (f32, f32),
 }
 
-pub(crate) fn track_cols(w: f32, s: f32, thumbs: bool) -> TrackCols {
+pub(crate) fn track_cols(w: f32, s: f32, thumbs: bool, want_artist: bool, want_album: bool) -> TrackCols {
     let pad = 8.0 * s;
     let num = (pad, 36.0 * s);
     let mut x = pad + num.1 + 4.0 * s;
@@ -41,7 +41,16 @@ pub(crate) fn track_cols(w: f32, s: f32, thumbs: bool) -> TrackCols {
     let time = (w - pad - 56.0 * s, 56.0 * s);
     let avail = time.0 - x - 12.0 * s;
     let (artist, album, title);
-    if w > 980.0 * s {
+    if !want_artist && !want_album {
+        title = (x, avail);
+        artist = None;
+        album = None;
+    } else if !want_album && w > 640.0 * s {
+        let a = avail * 0.34;
+        title = (x, avail - a - 12.0 * s);
+        artist = Some((x + title.1 + 12.0 * s, a));
+        album = None;
+    } else if w > 980.0 * s {
         let a = avail * 0.24;
         let b = avail * 0.28;
         title = (x, avail - a - b - 24.0 * s);
@@ -71,6 +80,8 @@ pub(crate) struct Geom {
     pub back: Option<RectF>,
     pub search: RectF,
     pub search_clear: RectF,
+    /// The search box is only its icon (a narrow window, not focused).
+    pub search_collapsed: bool,
     pub sort: Option<RectF>,
     pub header_btns: Vec<PillBtn>,
     pub title_x: f32,
@@ -117,6 +128,7 @@ impl Ui {
             back: None,
             search: RectF::default(),
             search_clear: RectF::default(),
+            search_collapsed: false,
             sort: None,
             header_btns: Vec::new(),
             title_x: 0.0,
@@ -137,7 +149,7 @@ impl Ui {
         let full = self.lib.view == View::Visualizer;
         if !full {
             self.geom_rail(&mut g, ctx);
-            self.geom_header(&mut g, model);
+            self.geom_header(&mut g, model, ctx);
         }
         self.geom_bar(&mut g, model);
         if full {
@@ -166,7 +178,12 @@ impl Ui {
             ];
         }
         let mut y = top + if compact { 92.0 * s } else { 58.0 * s };
-        let item_h = if compact { 44.0 * s } else { 42.0 * s };
+        // On a short window the entries shrink to fit between the switch and the add button.
+        let items = NAV.iter().flatten().count() as f32;
+        let dividers = NAV.iter().filter(|n| n.is_none()).count() as f32;
+        let btn_h = 40.0 * s;
+        let room = (r.bottom() - 16.0 * s - btn_h - 10.0 * s) - y - dividers * 14.0 * s;
+        let item_h = ((room / items) - 2.0 * s).clamp(30.0 * s, if compact { 44.0 * s } else { 42.0 * s });
         for it in NAV.iter() {
             match it {
                 Some((v, ..)) => {
@@ -178,10 +195,9 @@ impl Ui {
         }
         // Folders (not in the compact rail) and the add button.
         let bottom = r.bottom() - 16.0 * s;
-        let btn_h = 40.0 * s;
         g.add_folder = RectF::new(px, bottom - btn_h, iw, btn_h);
         if !compact {
-            let mut fy = y + 26.0 * s;
+            let mut fy = y + 48.0 * s;
             for (i, _) in ctx.lib.roots().iter().enumerate() {
                 if fy + 28.0 * s > g.add_folder.y - 8.0 * s {
                     break;
@@ -192,7 +208,7 @@ impl Ui {
         }
     }
 
-    fn geom_header(&mut self, g: &mut Geom, model: &UiModel) {
+    fn geom_header(&mut self, g: &mut Geom, model: &UiModel, ctx: &LibCtx<'_>) {
         let s = self.scale;
         let hd = g.m.header;
         let pad = g.m.pad;
@@ -203,19 +219,31 @@ impl Ui {
         }
         g.title_x = x;
         // Search box on the right, then the sort button and the view's actions to its left.
-        let sw = (hd.w * 0.30).clamp(190.0 * s, 330.0 * s);
+        let narrow = hd.w < 620.0 * s;
+        let focused = self.lib.zone == super::Zone::Search;
+        let sw = if narrow && !focused {
+            40.0 * s
+        } else if narrow {
+            hd.w - 2.0 * pad
+        } else {
+            (hd.w * 0.30).clamp(190.0 * s, 330.0 * s)
+        };
         g.search = RectF::new(hd.right() - pad - sw, hd.y + 26.0 * s, sw, 40.0 * s);
         g.search_clear = RectF::new(g.search.right() - 34.0 * s, g.search.y + 6.0 * s, 28.0 * s, 28.0 * s);
+        g.search_collapsed = narrow && !focused;
         let mut rx = g.search.x - 12.0 * s;
         let btns: Vec<(u8, &str, Icon, bool)> = match (self.lib.view, self.lib.detail) {
             (_, Some(_)) => Vec::new(),
+            _ if narrow && focused => Vec::new(),
             (View::Playlists, _) => {
                 alloc::vec![(1, "Import", Icon::Upload, false), (0, "New playlist", Icon::Plus, true)]
             }
-            (View::Queue, _) => {
+            (View::Queue, _) if !model.playlist.is_empty() => {
                 alloc::vec![(1, "Save as playlist", Icon::ListPlus, false), (0, "Clear", Icon::Trash2, false)]
             }
-            (View::Tracks | View::Albums, _) => alloc::vec![(0, "Shuffle all", Icon::Shuffle, true)],
+            (View::Tracks | View::Albums, _) if ctx.lib.track_count() > 0 => {
+                alloc::vec![(0, "Shuffle all", Icon::Shuffle, true)]
+            }
             _ => Vec::new(),
         };
         let compact = hd.w < 900.0 * s;
@@ -232,7 +260,7 @@ impl Ui {
             });
             rx = r.x - 10.0 * s;
         }
-        if self.lib.view == View::Tracks && self.lib.detail.is_none() {
+        if self.lib.view == View::Tracks && self.lib.detail.is_none() && !(narrow && focused) {
             let label = self.sort_label();
             let tw = self.text_w(Face::SansMedium, 13.0, &label, 0.0);
             let bw = tw + 48.0 * s;
@@ -242,7 +270,7 @@ impl Ui {
         }
         // The table head of the Tracks view.
         if let Some(th) = g.m.table_head {
-            let cols = track_cols(th.w - 2.0 * (g.m.pad - 8.0 * s), s, true);
+            let cols = track_cols(th.w - 2.0 * (g.m.pad - 8.0 * s), s, true, true, true);
             let x0 = g.m.pad - 8.0 * s + th.x;
             g.table_cols.push((0, RectF::new(x0 + cols.title.0, th.y, cols.title.1, th.h)));
             if let Some(a) = cols.artist {
@@ -254,7 +282,6 @@ impl Ui {
             g.table_cols
                 .push((3, RectF::new(x0 + cols.time.0 - 24.0 * s, th.y, cols.time.1 + 24.0 * s, th.h)));
         }
-        let _ = model;
     }
 
     fn geom_bar(&mut self, g: &mut Geom, model: &UiModel) {
@@ -262,11 +289,20 @@ impl Ui {
         let b = g.m.bar;
         let (w, y0) = (b.w, b.y);
         let compact = g.m.compact;
+        let tiny = w < 760.0 * s;
         let pad = 20.0 * s;
         // Left: cover and text.
         g.bar_art = RectF::new(pad, y0 + 16.0 * s, 64.0 * s, 64.0 * s);
-        let cw = (w * 0.38).clamp(360.0 * s, 660.0 * s).min(w - 2.0 * pad);
-        let cx0 = (w - cw) * 0.5;
+        let small = 36.0 * s;
+        let big = 46.0 * s;
+        let gap = 10.0 * s;
+        let (cx0, cw) = if tiny {
+            let x0 = g.bar_art.right() + 12.0 * s;
+            (x0, (w - x0 - pad - small - 12.0 * s).max(60.0 * s))
+        } else {
+            let cw = (w * 0.38).clamp(360.0 * s, 660.0 * s).min(w - 2.0 * pad);
+            ((w - cw) * 0.5, cw)
+        };
         g.bar_info = RectF::new(
             pad,
             y0 + 12.0 * s,
@@ -275,18 +311,20 @@ impl Ui {
         );
         // Centre: transport.
         let cy = y0 + 34.0 * s;
-        let small = 36.0 * s;
-        let big = 46.0 * s;
-        let gap = 10.0 * s;
-        let total = small * 4.0 + big + gap * 4.0;
-        let mut x = w * 0.5 - total * 0.5;
-        for (btn, size) in [
-            (Btn::Shuffle, small),
-            (Btn::Prev, small),
-            (Btn::Play, big),
-            (Btn::Next, small),
-            (Btn::Repeat, small),
-        ] {
+        let row: Vec<(Btn, f32)> = if tiny {
+            alloc::vec![(Btn::Prev, small), (Btn::Play, big), (Btn::Next, small)]
+        } else {
+            alloc::vec![
+                (Btn::Shuffle, small),
+                (Btn::Prev, small),
+                (Btn::Play, big),
+                (Btn::Next, small),
+                (Btn::Repeat, small)
+            ]
+        };
+        let total: f32 = row.iter().map(|(_, sz)| sz).sum::<f32>() + gap * (row.len() as f32 - 1.0);
+        let mut x = cx0 + cw * 0.5 - total * 0.5;
+        for (btn, size) in row {
             g.bar_btns.push((btn, RectF::new(x, cy - size * 0.5, size, size)));
             x += size + gap;
         }
@@ -295,23 +333,28 @@ impl Ui {
         let tw = 46.0 * s;
         g.time_l = cx0;
         g.time_r = cx0 + cw - tw;
-        g.seek_track = RectF::new(cx0 + tw + 8.0 * s, g.time_y - 2.0 * s, cw - 2.0 * tw - 16.0 * s, 4.0 * s);
+        g.seek_track =
+            RectF::new(cx0 + tw + 8.0 * s, g.time_y - 2.0 * s, (cw - 2.0 * tw - 16.0 * s).max(10.0), 4.0 * s);
         g.seek_hit = RectF::new(g.seek_track.x, g.time_y - 12.0 * s, g.seek_track.w, 24.0 * s);
-        // Right: volume, queue, visualizer, mode.
+        // Right: volume, queue, visualizer, mode (a narrow bar keeps only the switch to the player).
         let mut rx = w - pad;
         let cy2 = y0 + 48.0 * s;
-        for btn in [Btn::ModeSwitch, Btn::VizView, Btn::QueueView] {
-            g.bar_btns.push((btn, RectF::new(rx - small, cy2 - small * 0.5, small, small)));
+        let right: &[Btn] =
+            if tiny { &[Btn::ModeSwitch] } else { &[Btn::ModeSwitch, Btn::VizView, Btn::QueueView] };
+        for btn in right {
+            g.bar_btns.push((*btn, RectF::new(rx - small, cy2 - small * 0.5, small, small)));
             rx -= small + 4.0 * s;
         }
-        rx -= 10.0 * s;
-        if !compact && w > 1000.0 * s {
-            let vw = 92.0 * s;
-            g.vol_hit = Some(RectF::new(rx - vw, cy2 - 14.0 * s, vw, 28.0 * s));
-            g.vol_track = RectF::new(rx - vw + 6.0 * s, cy2 - 2.0 * s, vw - 12.0 * s, 4.0 * s);
-            rx -= vw + 6.0 * s;
+        if !tiny {
+            rx -= 10.0 * s;
+            if !compact && w > 1000.0 * s {
+                let vw = 92.0 * s;
+                g.vol_hit = Some(RectF::new(rx - vw, cy2 - 14.0 * s, vw, 28.0 * s));
+                g.vol_track = RectF::new(rx - vw + 6.0 * s, cy2 - 2.0 * s, vw - 12.0 * s, 4.0 * s);
+                rx -= vw + 6.0 * s;
+            }
+            g.bar_btns.push((Btn::Mute, RectF::new(rx - small, cy2 - small * 0.5, small, small)));
         }
-        g.bar_btns.push((Btn::Mute, RectF::new(rx - small, cy2 - small * 0.5, small, small)));
         let _ = model;
     }
 
@@ -320,12 +363,13 @@ impl Ui {
         // The switcher: previous, next, palette, info, animation, centred above the bar.
         let w = g.m.w;
         let bw = 44.0 * s;
-        let total = bw * 5.0 + 8.0 * s * 4.0 + 40.0 * s;
+        let name_gap = 110.0 * s;
+        let total = bw * 5.0 + 8.0 * s * 4.0 + name_gap;
         let mut x = (w - total) * 0.5;
         let y = g.m.bar.y - 70.0 * s;
         for (i, wid) in [(0u8, bw), (1, bw), (2, bw), (3, bw), (4, bw)] {
             g.viz_btns.push((i, RectF::new(x, y, wid, 40.0 * s)));
-            x += wid + 8.0 * s + if i == 1 { 40.0 * s } else { 0.0 };
+            x += wid + 8.0 * s + if i == 0 { name_gap } else { 0.0 };
         }
     }
 
@@ -346,7 +390,7 @@ impl Ui {
                 (0, "Play", Icon::Play, true),
                 (1, "Shuffle", Icon::Shuffle, false),
                 (2, "Add to queue", Icon::ListEnd, false),
-                (4, "Export M3U8", Icon::Download, false),
+                (4, "M3U8", Icon::Download, false),
                 (5, "PLS", Icon::Download, false),
                 (6, "Rename", Icon::Pencil, false),
                 (7, "Delete", Icon::Trash2, false),
@@ -356,7 +400,7 @@ impl Ui {
         let mut out = Vec::new();
         for (id, label, icon, primary) in defs {
             let tw = self.text_w(Face::SansMedium, 13.0, label, 0.0) + 8.0 * s;
-            let bw = tw + 50.0 * s;
+            let bw = tw + 46.0 * s;
             if x + bw > rect.right() - 20.0 * s && !out.is_empty() {
                 break;
             }
@@ -367,7 +411,7 @@ impl Ui {
                 icon,
                 primary,
             });
-            x += bw + 10.0 * s;
+            x += bw + 8.0 * s;
         }
         out
     }

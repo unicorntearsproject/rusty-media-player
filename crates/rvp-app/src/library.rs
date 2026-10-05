@@ -218,6 +218,19 @@ impl App {
     }
 
     fn lib_scan_done<H: Host<Video = FrameSink>>(&mut self, host: &mut H, rep: ScanReport, now: Timestamp) {
+        // A listing gives the files new ids: queue items that were not opened yet must follow.
+        let fresh: Vec<(u32, String)> = self
+            .playlist
+            .items()
+            .iter()
+            .filter_map(|i| {
+                let t = self.lib.lib.track(i.track?)?;
+                (!t.src.is_empty() && t.src != i.source).then(|| (i.id, t.src.clone()))
+            })
+            .collect();
+        for (id, src) in fresh {
+            self.playlist.set_source(id, &src);
+        }
         self.lib_save(host);
         let changed = rep.added + rep.changed + rep.removed;
         let msg = if changed == 0 {
@@ -318,7 +331,10 @@ impl App {
         if !wanted {
             return;
         }
-        if now - self.lib.viz_last_us < VIZ_EVERY_US && self.lib.viz.frames() > 0 {
+        // Big screens (a 2560x1440 canvas) take fewer pictures a second to keep the tick short.
+        let (sw, sh) = self.ui.size();
+        let every = if sw as u64 * sh as u64 > 2_200_000 { VIZ_EVERY_US * 3 / 2 } else { VIZ_EVERY_US };
+        if now - self.lib.viz_last_us < every && self.lib.viz.frames() > 0 {
             return;
         }
         self.lib.viz_last_us = now;

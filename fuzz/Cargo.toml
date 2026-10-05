@@ -23,6 +23,7 @@ rvp-codec-av1 = { path = "../crates/rvp-codec-av1" }
 rvp-codec-audio = { path = "../crates/rvp-codec-audio" }
 rvp-subs = { path = "../crates/rvp-subs" }
 rvp-player = { path = "../crates/rvp-player" }
+rvp-library = { path = "../crates/rvp-library" }
 rvp-par = { path = "../crates/rvp-par" }
 
 [profile.release]
@@ -106,5 +107,11 @@ doc = false
 [[bin]]
 name = "playlist_files"
 path = "fuzz_targets/playlist_files.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "library"
+path = "fuzz_targets/library.rs"
 test = false
 doc = false
