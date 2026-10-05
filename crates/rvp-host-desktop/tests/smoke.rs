@@ -61,7 +61,7 @@ fn fixtures(set: &str) {
 
 fn core_fixtures() -> PathBuf {
     static ONCE: Once = Once::new();
-    ONCE.call_once(|| fixtures("core"));
+    ONCE.call_once(|| fixtures("basic"));
     fixtures_dir()
 }
 

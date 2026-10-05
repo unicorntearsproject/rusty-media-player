@@ -71,6 +71,11 @@ struct Ctx {
 pub fn run(args: &[String]) -> Result<(), String> {
     let Some(target) = args.first() else { return Err(USAGE.into()) };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().map_err(|e| e.to_string())?;
+    // Windows canonicalizes to `\\?\D:\...`, which Inno Setup (and most tools) reject: use the plain path.
+    let root = match root.to_string_lossy().strip_prefix(r"\\?\") {
+        Some(plain) => PathBuf::from(plain),
+        None => root,
+    };
     let mut version = None;
     let (mut container, mut no_build, mut prepare_only) = (false, false, false);
     let (mut want_sign, mut sign_key, mut repo_url) = (false, None, None);
@@ -844,7 +849,21 @@ impl Ctx {
         let stamped = tmp.join(format!("{APP_ID}.metainfo.xml"));
         write(&stamped, self.stamp(&meta).as_bytes())?;
         if have("appstreamcli") {
-            sh(Command::new("appstreamcli").args(["validate", "--no-net"]).arg(&stamped))?;
+            // The file is written for current AppStream (1.x: `<developer>`, `vcs-browser`); Ubuntu 22.04 ships 0.15, whose validator
+            // does not know them, so its verdict is advisory.
+            let version = capture(Command::new("appstreamcli").arg("--version")).unwrap_or_default();
+            let major: u32 = version
+                .split(|c: char| !c.is_ascii_digit())
+                .find(|t| !t.is_empty())
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(1);
+            let result = sh(Command::new("appstreamcli").args(["validate", "--no-net"]).arg(&stamped));
+            if let Err(e) = result {
+                if major >= 1 {
+                    return Err(e);
+                }
+                println!("(AppStream validator {} is older than 1.0: result is advisory)", version.trim());
+            }
         } else {
             println!("(appstreamcli is not installed: skipped)");
         }

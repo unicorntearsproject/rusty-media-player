@@ -15,8 +15,10 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libasound2-dev libdbus-1-dev libxkbcommon-dev libwayland-dev ffmpeg python3 \
-            xvfb xauth playerctl dbus-x11 fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends libasound2-dev libdbus-1-dev libxkbcommon-dev libwayland-dev python3 python3-pil \
+            xvfb xauth playerctl dbus-x11 fonts-noto-cjk libxkbcommon-x11-0 libx11-6 libxcursor1 libxi6 libxrandr2 libwayland-client0 libxkbcommon-x11-0 libx11-6 libxcursor1 libxi6 libxrandr2 libwayland-client0
+      # Ubuntu's ffmpeg has no AV1 encoder (libsvtav1); the full fixture set needs one.
+      - uses: FedericoCarboni/setup-ffmpeg@v3
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly

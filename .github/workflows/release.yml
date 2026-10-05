@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libasound2-dev libdbus-1-dev libxkbcommon-dev libwayland-dev \
-            xvfb xauth ffmpeg python3 desktop-file-utils appstream fuse3 libfuse2 playerctl dbus-x11 fonts-noto-cjk
+            xvfb xauth ffmpeg python3 desktop-file-utils appstream squashfs-tools file fuse3 libfuse2 playerctl dbus-x11 fonts-noto-cjk libxkbcommon-x11-0 libx11-6 libxcursor1 libxi6 libxrandr2 libwayland-client0
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RVP_TOOLCHAIN }}
@@ -246,7 +246,7 @@ jobs:
         run: cargo xtask web
       - name: Playwright tests of the installable app (manifest, offline, update)
         run: |
-          RVP_FIXTURE_SET=core bash tools/gen-fixtures.sh target/fixtures
+          RVP_FIXTURE_SET=basic bash tools/gen-fixtures.sh target/fixtures
           cd tests/e2e
           npm ci
           npx playwright install --with-deps chromium

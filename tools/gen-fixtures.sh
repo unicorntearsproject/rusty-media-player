@@ -2,7 +2,7 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=core|h264|vp9|m8|audio|library|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
+#   RVP_FIXTURE_SET=basic|core|h264|vp9|m8|audio|library|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
 #                                       VP9 to <outdir>/vp9, M8 (subtitles, tracks, gapless) to <outdir>/m8, raw audio files to <outdir>/audio, and the one-minute 1080p30
 #                                       speed streams (M9) to <outdir>/perf (minutes of encoding: `cargo xtask perf-fixtures`)
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
@@ -12,6 +12,13 @@ out="${1:-${RVP_FIXTURES:-$root/target/fixtures}}"
 mkdir -p "$out"
 command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || { echo "ffmpeg/ffprobe not found" >&2; exit 1; }
 ff() { ffmpeg -hide_banner -loglevel error -y "$@"; }
+
+# Just the H.264 + AAC MP4 (needs only libx264 and the native AAC encoder: the desktop smoke tests and the PWA test use it where
+# ffmpeg has no AV1 encoder, as in Ubuntu's package).
+gen_basic() {
+  ff -f lavfi -i "testsrc2=size=320x240:rate=25:duration=6" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=6" \
+     -c:v libx264 -preset veryfast -g 12 -bf 2 -pix_fmt yuv420p -c:a aac -b:a 64k -ac 2 -shortest "$out/h264_aac.mp4"
+}
 
 gen_core() {
   dur=6
@@ -387,6 +394,7 @@ gen_library() {
 }
 
 fixture_set="${RVP_FIXTURE_SET:-all}"
+if [[ "$fixture_set" == basic ]]; then gen_basic; fi
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
 if [[ "$fixture_set" == all || "$fixture_set" == h264 ]]; then gen_h264; fi
 if [[ "$fixture_set" == all || "$fixture_set" == vp9 ]]; then gen_vp9; fi
