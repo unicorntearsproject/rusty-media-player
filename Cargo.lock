@@ -375,6 +375,8 @@ name = "rvp-codec-h264"
 version = "0.0.1"
 dependencies = [
  "rvp-core",
+ "rvp-demux",
+ "rvp-host",
 ]
 
 [[package]]
