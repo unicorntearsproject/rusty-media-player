@@ -840,7 +840,11 @@ M10 notes (what was built, what it cost, what is not there):
   counted per 120 ms of real time between samples). Real elapsed time is still waited for where the claim is about time (controls
   hide after 2.5 s idle, a double click needs two clicks apart). One Rust test compared wall time (`exec.rs`: "10 s of virtual time must
   not sleep" now allows 5 s, not 100 ms). Proof: `cargo xtask e2e --threads` (both builds) three times in a row with CPU load; see the
-  results at the end of this section.
+  results next. Under 16 busy loops on a 16-core machine, three early runs failed 3, 3 and 1 tests (a subtitle checked after the cue
+  was over, a frame step measured from the middle of a picture, a one-track queue that ended during a keyboard sequence; all
+  fixed in the specs, none in the player); the next run, 46 of 46 on the single-threaded build and 46 of 46 on the threads build,
+  passed. The series was stopped there at the user's request (the machine was saturated), so the proof is one clean loaded run of both
+  builds plus several clean unloaded ones, not three consecutive loaded ones.
 - **Subtitles.** *A cue already on screen when a forward seek lands now shows:* the demuxer lands on a video keyframe and used to
   read on from there, so the subtitle blocks that came before it (in the cluster, or in earlier ones) were never seen. After every
   seek the session asks the demuxer for the subtitle packets of the 20 s before the landing point (`Demuxer::side_packets`, Matroska

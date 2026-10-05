@@ -260,7 +260,10 @@ test.describe("M10", () => {
     await waitFor(page, () => window.rvp.snapshot().lib.view === "queue");
     await press(page, "6");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "nowplaying");
-    // Tab walks the zones; Enter on the bar's button pauses.
+    // Tab walks the zones; Enter on the bar's button pauses. (The queue is one short track: repeat it, so it cannot end while this
+    // goes on, however slowly.)
+    await press(page, "r");
+    await waitFor(page, () => window.rvp.snapshot().repeat === 1);
     await press(page, "Tab"); // rail
     await press(page, "Tab"); // bar
     await press(page, "ArrowRight");

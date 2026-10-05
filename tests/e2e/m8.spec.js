@@ -10,7 +10,15 @@ const M8 = (n) => path.join(FIXTURES, "m8", n);
 const LONG = path.join(FIXTURES, "av1_opus_60s.webm");
 const H264 = path.join(FIXTURES, "h264_aac.mp4"); // 6 s, 25 fps
 
-const { snap, waitFor, waitState, frames, playedFor } = require("./helpers");
+const { snap, waitFor, waitState, frames, playedFor, settled } = require("./helpers");
+
+/** Click the seek bar at `t` seconds and wait until the position is there (a paused player shows the picture and the subtitle of it). */
+async function seekTo(page, t) {
+  const s = await snap(page);
+  await page.mouse.click(s.seek.x + s.seek.w * (t / (s.duration_us / 1e6)), s.seek.y + 2);
+  await waitFor(page, (t) => Math.abs(window.rvp.snapshot().position_us / 1e6 - t) < 0.3, t);
+  await frames(page, 3);
+}
 
 async function boot(page) {
   const errors = [];
@@ -44,10 +52,12 @@ test.describe("M8", () => {
     const at = (await snap(page)).position_us;
     expect(at).toBeGreaterThan(900_000);
     expect(at).toBeLessThan(2_000_000);
-    // The text is on the canvas: pause inside the cue, then compare with the same frame without subtitles.
+    // The text is on the canvas: pause, go to the middle of the cue (a paused player shows the subtitle of its position, however long
+    // the machine took to get here), then compare with the same frame without subtitles.
     await page.keyboard.press("Space");
     await waitState(page, "paused");
-    expect((await snap(page)).subtitle).toBe("Hello");
+    await seekTo(page, 1.5);
+    await waitFor(page, () => window.rvp.snapshot().subtitle === "Hello");
     const sz = s.surface;
     const region = [Math.round(sz.w * 0.25), Math.round(sz.h * 0.6), Math.round(sz.w * 0.5), Math.round(sz.h * 0.28)];
     const grab = () => page.evaluate((r) => window.rvp.sample(r[0], r[1], r[2], r[3], 2), region);
@@ -63,14 +73,15 @@ test.describe("M8", () => {
       if (Math.abs(withText[i] - without[i]) + Math.abs(withText[i + 1] - without[i + 1]) > 60) changed++;
     }
     expect(changed / (withText.length / 3), "pixels drawn for the subtitle").toBeGreaterThan(0.008);
-    // Back on, play on until the cue is gone.
+    // Back on; between the cues there is no text.
     await page.keyboard.press("s");
-    await page.keyboard.press("Space");
-    await waitFor(page, () => window.rvp.snapshot().subtitle === null && window.rvp.snapshot().position_us > 2_100_000);
-    // Second track: Spanish; then off.
+    await seekTo(page, 2.5);
+    await waitFor(page, () => window.rvp.snapshot().subtitle === null);
+    // Second track: Spanish ("Mundo" is up from 3.0 s to 4.5 s); then off.
     await page.keyboard.press("s");
     s = await snap(page);
     expect(s.selected_subtitle).toBe(s.subtitle_tracks[1].id);
+    await seekTo(page, 3.7);
     await waitFor(page, () => window.rvp.snapshot().subtitle === "Mundo");
     await page.keyboard.press("s");
     expect((await snap(page)).selected_subtitle).toBeNull();
@@ -109,14 +120,21 @@ test.describe("M8", () => {
     const errors = await load(page, H264);
     await page.keyboard.press("Space");
     await waitState(page, "paused");
-    const p0 = (await snap(page)).position_us;
+    const position = () => window.rvp.snapshot().position_us;
+    // The clock of a player that was paused stands between two pictures, wherever the machine let it get: the first step goes to a
+    // picture, and the step that is measured goes from one picture to the next. (A step is an exact seek: let each one land.)
+    const p00 = (await snap(page)).position_us;
+    await page.keyboard.press(".");
+    await waitFor(page, (p) => window.rvp.snapshot().position_us > p, p00);
+    const p0 = await settled(page, position, { n: 4, gap: 3 });
     await page.keyboard.press(".");
     await waitFor(page, (p) => window.rvp.snapshot().position_us > p, p0);
-    const p1 = (await snap(page)).position_us;
+    const p1 = await settled(page, position, { n: 4, gap: 3 });
     expect(p1 - p0).toBeGreaterThan(30_000);
     expect(p1 - p0).toBeLessThan(90_000);
     await page.keyboard.press(",");
     await waitFor(page, (p) => window.rvp.snapshot().position_us < p, p1);
+    await settled(page, () => window.rvp.snapshot().position_us, { n: 4, gap: 3 });
     expect((await snap(page)).state).toBe("paused");
     // The loop: mark 1 s and 2 s, play, and the position never gets far past B.
     await page.keyboard.press("Home");
