@@ -13,3 +13,8 @@ workspace = true
 
 [dependencies]
 rvp-core.workspace = true
+rvp-codec-h264.workspace = true
+
+[dev-dependencies]
+rvp-demux.workspace = true
+rvp-host.workspace = true

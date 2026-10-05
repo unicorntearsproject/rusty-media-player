@@ -51,9 +51,14 @@ test.describe("real-time 1080p30", () => {
           `render=${(p.render_ms / p.ticks).toFixed(2)} base=${(p.base_ms / p.ticks).toFixed(2)} present=${(p.present_ms / p.ticks).toFixed(2)} ` +
           `warnings=${JSON.stringify(end.warnings)}`
       );
+      if (errors.length) console.log("PERF errors", JSON.stringify(errors.slice(0, 5)));
       expect(errors).toEqual([]);
       expect(end.state).toBe("playing");
-      if (LIMIT > 0) expect(pct).toBeLessThan(LIMIT);
+      if (LIMIT > 0) {
+        expect(pct).toBeLessThan(LIMIT);
+        // Frames the decoder never delivered are not "dropped"; the clock stopping to wait for them shows up here.
+        expect(played, "playback kept up with the clock").toBeGreaterThan(SECS * 0.98);
+      }
     });
   }
 });

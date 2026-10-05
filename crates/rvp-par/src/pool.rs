@@ -1,8 +1,20 @@
 //! The worker pool.
 use rvp_core::par::{Parallel, SpinLock};
+use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::Thread;
+
+thread_local! {
+    /// Set on a thread that must never wait for others (a browser's main thread): `run` then does all the work itself.
+    static NO_WAIT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Mark the calling thread as one that must not wait for pool threads (the UI thread of a page). Its `run` calls
+/// execute serially, so a descheduled worker can never hold up a frame.
+pub fn mark_ui_thread() {
+    NO_WAIT.with(|f| f.set(true));
+}
 
 /// One `run` call: tasks `0..n` handed out through `next`, counted in `done`.
 struct Job {
@@ -110,6 +122,10 @@ impl Parallel for Pool {
 
     fn run(&self, n: usize, f: &(dyn Fn(usize) + Sync)) {
         if n == 0 {
+            return;
+        }
+        if NO_WAIT.with(Cell::get) {
+            (0..n).for_each(f);
             return;
         }
         self.start();

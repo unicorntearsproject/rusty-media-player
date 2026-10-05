@@ -1,7 +1,7 @@
 //! The in-loop deblocking filter (8.7), for progressive frames.
 use super::deblock_tables::{ALPHA, BETA, TC0};
 use super::mbinfo::{F_INTRA, F_T8X8, F_UNIFORM, MbInfo};
-use super::picture::Picture;
+use super::picture::{Motion, PlanePic};
 
 /// Per-slice deblocking parameters.
 #[derive(Clone, Copy, Debug, Default)]
@@ -164,7 +164,7 @@ pub(super) fn filter_chroma_scalar(
 
 /// Boundary strength between two blocks of the same or adjacent macroblocks.
 struct Bs<'a> {
-    pic: &'a Picture,
+    motion: &'a Motion,
     mbs: &'a [MbInfo],
     w4: usize,
     w8: usize,
@@ -178,11 +178,11 @@ impl Bs<'_> {
         let i4 = y4 * self.w4 + x4;
         let mut refs = [-1i32; 2];
         for l in 0..2 {
-            if self.pic.ref_idx[l][i8] >= 0 {
-                refs[l] = self.pic.ref_id[l][i8];
+            if self.motion.ref_idx[l][i8] >= 0 {
+                refs[l] = self.motion.ref_id[l][i8];
             }
         }
-        (refs, [self.pic.mv[0][i4], self.pic.mv[1][i4]])
+        (refs, [self.motion.mv[0][i4], self.motion.mv[1][i4]])
     }
 
     /// bS 0 or 1 from motion (both blocks inter coded, no coefficients).
@@ -235,7 +235,7 @@ impl Bs<'_> {
 }
 
 /// Filter a whole decoded picture in macroblock order.
-pub(crate) fn deblock_picture(pic: &mut Picture, mbs: &[MbInfo], slices: &[SliceFilter]) {
+pub(crate) fn deblock_picture(pic: &mut PlanePic, motion: &Motion, mbs: &[MbInfo], slices: &[SliceFilter]) {
     if slices.iter().all(|s| s.disable_idc == 1) {
         return;
     }
@@ -244,7 +244,7 @@ pub(crate) fn deblock_picture(pic: &mut Picture, mbs: &[MbInfo], slices: &[Slice
     let mut planes = core::mem::take(&mut pic.planes);
     let strides = pic.strides;
     {
-        let b = Bs { pic, mbs, w4, w8 };
+        let b = Bs { motion, mbs, w4, w8 };
         for addr in 0..mbw * mbh {
             let q = &mbs[addr];
             if q.slice == 0 {

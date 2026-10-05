@@ -11,7 +11,7 @@ pub type Factory = Box<dyn FnOnce() -> Result<Box<dyn VideoDecoder>> + Send>;
 
 enum Cmd {
     Packet(Packet, u64),
-    Flush,
+    Flush(u64),
     Drain(u64),
 }
 
@@ -75,15 +75,26 @@ fn run(sh: Arc<Shared>, factory: Factory) {
             return;
         }
     };
+    // The epoch of the stream state inside the decoder: frames it finishes on its own (a decoder with a second thread)
+    // belong to it, even if the caller has flushed since and the flush has not reached us yet.
+    let mut state_epoch = sh.epoch.load(Ordering::Acquire);
     while !sh.stop.load(Ordering::Acquire) {
         let cmd = sh.inbox.lock().pop_front();
         let Some(cmd) = cmd else {
-            std::thread::park();
+            // Read the count first: a decoder lowers it after publishing its frames.
+            let busy = dec.pending() > 0;
+            collect(&sh, &mut *dec, state_epoch);
+            if busy {
+                std::thread::park_timeout(std::time::Duration::from_micros(300));
+            } else {
+                std::thread::park();
+            }
             continue;
         };
         match cmd {
             Cmd::Packet(p, epoch) => {
                 if epoch == sh.epoch.load(Ordering::Acquire) {
+                    state_epoch = epoch;
                     match dec.send_packet(&p) {
                         Ok(()) => {}
                         Err(e) => {
@@ -93,9 +104,13 @@ fn run(sh: Arc<Shared>, factory: Factory) {
                     collect(&sh, &mut *dec, epoch);
                 }
             }
-            Cmd::Flush => dec.flush(),
+            Cmd::Flush(epoch) => {
+                dec.flush();
+                state_epoch = epoch;
+            }
             Cmd::Drain(epoch) => {
                 if epoch == sh.epoch.load(Ordering::Acquire) {
+                    state_epoch = epoch;
                     let _ = dec.drain();
                     collect(&sh, &mut *dec, epoch);
                 }
@@ -140,7 +155,7 @@ impl VideoDecoder for ThreadedVideoDecoder {
     }
 
     fn flush(&mut self) {
-        self.sh.epoch.fetch_add(1, Ordering::AcqRel);
+        let epoch = self.sh.epoch.fetch_add(1, Ordering::AcqRel) + 1;
         // Commands not yet started are dropped; the one running (if any) finishes and its output is discarded.
         let dropped = {
             let mut inbox = self.sh.inbox.lock();
@@ -153,7 +168,7 @@ impl VideoDecoder for ThreadedVideoDecoder {
         }
         self.sh.outbox.lock().clear();
         self.sh.pending.fetch_add(1, Ordering::AcqRel);
-        self.sh.inbox.lock().push_back(Cmd::Flush);
+        self.sh.inbox.lock().push_back(Cmd::Flush(epoch));
         self.sh.wake();
     }
 

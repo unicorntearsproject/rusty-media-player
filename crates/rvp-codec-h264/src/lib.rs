@@ -55,10 +55,22 @@ use rvp_core::{
 
 /// Create an H.264 decoder for a video stream (`info.codec == "h264"`, `info.extra_data` an avcC record).
 pub fn h264_decoder(info: &StreamInfo) -> rvp_core::Result<Box<dyn VideoDecoder>> {
+    h264_decoder_with(info, None)
+}
+
+/// Like [`h264_decoder`], reconstructing pictures with `exec` (see [`decoder::recon::ReconExecutor`]) so that parsing
+/// and reconstruction overlap on two threads.
+pub fn h264_decoder_with(
+    info: &StreamInfo,
+    exec: Option<Box<dyn decoder::recon::ReconExecutor>>,
+) -> rvp_core::Result<Box<dyn VideoDecoder>> {
     if info.kind != StreamKind::Video || info.codec != "h264" {
         return Err(rvp_core::Error::Unsupported(alloc::format!("not an H.264 stream: {}", info.codec)));
     }
     let mut dec = decoder::Decoder::new();
+    if let Some(e) = exec {
+        dec.set_recon_executor(e);
+    }
     if !info.extra_data.is_empty() {
         dec.set_avcc(&info.extra_data)?;
     }
@@ -112,7 +124,13 @@ impl VideoDecoder for H264VideoDecoder {
     }
 
     fn receive_frame(&mut self) -> rvp_core::Result<Option<VideoFrame>> {
+        // With a reconstruction thread frames finish on their own schedule.
+        self.collect();
         Ok(self.out.pop_front())
+    }
+
+    fn pending(&self) -> usize {
+        self.dec.pending()
     }
 
     fn flush(&mut self) {

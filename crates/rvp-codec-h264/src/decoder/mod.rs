@@ -18,12 +18,14 @@ pub mod mbinfo;
 mod mvpred;
 pub mod picture;
 pub mod poc;
+pub mod recon;
 pub mod slice;
 
 use crate::bitstream::{NalHeader, NalUnitType, nal};
 use crate::error::{Error, Result};
 use crate::params::{DecRefPicMarking, ParamSets, Pps, SliceHeader, SliceType, Sps};
 use crate::transform::LevelScale;
+use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::vec;
@@ -32,7 +34,8 @@ use deblock::SliceFilter;
 use mbinfo::MbInfo;
 use picture::{Picture, RefState};
 use poc::{PocResult, PocState};
-use slice::SliceDecoder;
+use recon::{OutputInfo, PicJob, ReconEvent, ReconExecutor, Reconstructor, SliceRecon};
+use slice::{SliceDecoder, Store};
 
 /// Largest picture accepted by default, in macroblocks (level 5.1: 4096x2304). Bounds memory for hostile streams.
 pub const DEFAULT_MAX_MBS: usize = 36_864;
@@ -82,7 +85,7 @@ struct CurPic {
     sps: Rc<Sps>,
     hdr: SliceHeader,
     poc: PocResult,
-    slices: Vec<SliceFilter>,
+    slices: Vec<SliceRecon>,
     marking: Option<DecRefPicMarking>,
     pts: i64,
 }
@@ -106,6 +109,12 @@ pub struct Decoder {
     scratch: Vec<u8>,
     stats: Stats,
     max_mbs: usize,
+    /// Scaled coefficients and PCM samples of the picture being parsed.
+    store: Store,
+    /// Reconstruction when it runs inline (no executor).
+    recon: Reconstructor,
+    /// Reconstruction on another thread, if the host provided one.
+    exec: Option<Box<dyn ReconExecutor>>,
 }
 
 impl Default for Decoder {
@@ -152,6 +161,9 @@ impl Decoder {
             scratch: Vec::new(),
             stats: Stats::default(),
             max_mbs: DEFAULT_MAX_MBS,
+            store: Store::default(),
+            recon: Reconstructor::new(),
+            exec: None,
         }
     }
 
@@ -163,6 +175,25 @@ impl Decoder {
     /// Limit the picture size (in macroblocks) this decoder will allocate; larger streams fail with `Unsupported`.
     pub fn set_max_mbs(&mut self, mbs: usize) {
         self.max_mbs = mbs;
+    }
+
+    /// Reconstruct pictures with `exec` (typically on a thread of its own) instead of inline, so that parsing the
+    /// next picture overlaps the reconstruction of this one. Must be set before the first picture.
+    pub fn set_recon_executor(&mut self, exec: Box<dyn ReconExecutor>) {
+        self.exec = Some(exec);
+    }
+
+    /// Reconstruction events still queued or running (always 0 without an executor).
+    pub fn pending(&self) -> usize {
+        self.exec.as_ref().map_or(0, |e| e.pending())
+    }
+
+    /// Hand an event to the reconstruction side (inline, or through the executor).
+    fn emit(&mut self, ev: ReconEvent) {
+        match &mut self.exec {
+            Some(e) => e.submit(ev),
+            None => self.recon.handle(ev, &mut self.out),
+        }
     }
 
     /// Diagnostic counters.
@@ -209,6 +240,9 @@ impl Decoder {
 
     /// Take the next picture in output order, if one is ready.
     pub fn next_frame(&mut self) -> Option<Frame> {
+        if let Some(e) = &mut self.exec {
+            e.take_frames(&mut self.out);
+        }
         self.out.pop_front()
     }
 
@@ -216,6 +250,9 @@ impl Decoder {
     pub fn flush(&mut self) -> Result<()> {
         let r = self.finish_picture();
         while self.bump() {}
+        if let Some(e) = &mut self.exec {
+            e.wait_idle();
+        }
         r
     }
 
@@ -224,6 +261,12 @@ impl Decoder {
         self.cur = None;
         let old = core::mem::take(&mut self.dpb);
         self.pool.extend(old);
+        self.emit(ReconEvent::Reset);
+        if let Some(e) = &mut self.exec {
+            // Frames the reconstruction side finished meanwhile belong to the old position.
+            e.wait_idle();
+            e.take_frames(&mut self.out);
+        }
         self.out.clear();
         self.poc = PocState::default();
         self.prev_ref_frame_num = 0;
@@ -323,10 +366,21 @@ impl Decoder {
         }
         let ls = &self.scale.as_ref().map(|s| &s.2).ok_or(Error::Invalid("no scale tables"))?;
         let slice_num = cur.slices.len() as u16 + 1;
-        cur.slices.push(SliceFilter {
-            disable_idc: hdr.disable_deblocking_filter_idc as u8,
-            offset_a: (hdr.slice_alpha_c0_offset_div2 * 2) as i8,
-            offset_b: (hdr.slice_beta_offset_div2 * 2) as i8,
+        cur.slices.push(SliceRecon {
+            refs: refs.clone(),
+            cur_poc,
+            weight_mode: match hdr.slice_type {
+                SliceType::P | SliceType::Sp => pps.weighted_pred as u8,
+                SliceType::B => pps.weighted_bipred_idc as u8,
+                _ => 0,
+            },
+            pwt: hdr.pred_weight_table.clone(),
+            constrained_intra: pps.constrained_intra_pred,
+            filter: SliceFilter {
+                disable_idc: hdr.disable_deblocking_filter_idc as u8,
+                offset_a: (hdr.slice_alpha_c0_offset_div2 * 2) as i8,
+                offset_b: (hdr.slice_beta_offset_div2 * 2) as i8,
+            },
         });
         let mut sd = SliceDecoder::new(
             &sps,
@@ -339,6 +393,7 @@ impl Decoder {
             refs,
             cur_poc,
             slice_num,
+            &mut self.store,
         );
         let r = if pps.cabac {
             sd.decode_cabac(rbsp, hdr.data_bit_pos.div_ceil(8))
@@ -370,6 +425,12 @@ impl Decoder {
             let mut p = Picture::new(sps.width_mbs(), sps.height_mbs());
             p.uid = self.next_uid;
             self.next_uid = self.next_uid.wrapping_add(1).max(1);
+            self.emit(ReconEvent::Gap {
+                uids: alloc::vec![p.uid],
+                mbw: sps.width_mbs(),
+                mbh: sps.height_mbs(),
+                template: None,
+            });
             p.ref_state = RefState::Short;
             p.non_existing = true;
             p.frame_num = hdr.frame_num.wrapping_sub(1);
@@ -401,6 +462,7 @@ impl Decoder {
     }
 
     fn release(&mut self, p: Picture) {
+        self.emit(ReconEvent::Free(p.uid));
         if self.pool.len() < 4 {
             self.pool.push(p);
         }
@@ -426,6 +488,7 @@ impl Decoder {
                 let old = core::mem::take(&mut self.dpb);
                 self.pool.clear();
                 drop(old);
+                self.emit(ReconEvent::Reset);
                 self.mbs = vec![MbInfo::EMPTY; sps.width_mbs() * sps.height_mbs()];
                 self.poc = PocState::default();
                 self.prev_ref_frame_num = 0;
@@ -479,18 +542,20 @@ impl Decoder {
         let count = count.min(sps.max_num_ref_frames.max(1));
         // Only the last `count` missing frame numbers matter for the reference set.
         let start = (frame_num + max_frame_num - count) % max_frame_num;
-        let template =
-            self.dpb.iter().filter(|p| p.is_ref()).max_by_key(|p| p.decode_order).map(|p| p.planes.clone());
+        let template = self.dpb.iter().filter(|p| p.is_ref()).max_by_key(|p| p.decode_order).map(|p| p.uid);
+        // All the copies are made at once: the loop below may drop the picture they copy from.
+        let uids: Vec<i32> = (0..count)
+            .map(|_| {
+                let u = self.next_uid;
+                self.next_uid = self.next_uid.wrapping_add(1).max(1);
+                u
+            })
+            .collect();
+        self.emit(ReconEvent::Gap { uids: uids.clone(), mbw, mbh, template });
         for k in 0..count {
             let fnum = (start + k) % max_frame_num;
             let mut pic = self.alloc_picture(mbw, mbh);
-            if let Some(t) = &template {
-                pic.planes = t.clone();
-            } else {
-                pic.fill_grey();
-            }
-            pic.uid = self.next_uid;
-            self.next_uid = self.next_uid.wrapping_add(1).max(1);
+            pic.uid = uids[k as usize];
             pic.frame_num = fnum;
             pic.non_existing = true;
             self.decode_counter += 1;
@@ -528,16 +593,30 @@ impl Decoder {
     pub fn finish_picture(&mut self) -> Result<()> {
         let Some(mut cur) = self.cur.take() else { return Ok(()) };
         let sps = cur.sps.clone();
-        let mbw = sps.width_mbs();
-        // Conceal macroblocks no slice covered.
+        // Macroblocks no slice covered are concealed by the reconstruction side, from the newest picture we hold.
         let missing = self.mbs.iter().filter(|m| m.slice == 0).count();
+        let mut conceal_src = None;
         if missing > 0 {
             self.stats.concealed_mbs += missing as u64;
-            let src =
-                self.dpb.iter().filter(|p| p.is_ref() || p.needed_for_output).max_by_key(|p| p.decode_order);
-            conceal(&mut cur.pic, &self.mbs, src, mbw);
+            conceal_src = self
+                .dpb
+                .iter()
+                .filter(|p| p.is_ref() || p.needed_for_output)
+                .max_by_key(|p| p.decode_order)
+                .map(|p| p.uid);
         }
-        deblock::deblock_picture(&mut cur.pic, &self.mbs, &cur.slices);
+        let job = PicJob {
+            uid: cur.pic.uid,
+            mbw: sps.width_mbs(),
+            mbh: sps.height_mbs(),
+            mbs: self.mbs.clone(),
+            motion: cur.pic.motion(),
+            slices: core::mem::take(&mut cur.slices),
+            coefs: core::mem::take(&mut self.store.coefs),
+            pcm: core::mem::take(&mut self.store.pcm),
+            conceal_src,
+        };
+        self.emit(ReconEvent::Picture(Box::new(job)));
         self.stats.pictures += 1;
 
         let h = &cur.hdr;
@@ -596,8 +675,8 @@ impl Decoder {
             // A non-reference picture that would be output first goes out immediately when there is no room.
             let waiting_lower = self.dpb.iter().any(|p| p.needed_for_output && p.poc < pic.poc);
             if self.dpb.len() >= dpb_size && !waiting_lower {
-                let frame = make_frame(&pic, &sps);
-                self.out.push_back(frame);
+                let ev = output_event(&pic, &sps);
+                self.emit(ev);
                 pic.needed_for_output = false;
                 self.release(pic);
                 return Ok(());
@@ -627,8 +706,8 @@ impl Decoder {
         };
         let sps = self.sps.clone();
         if let Some(sps) = sps {
-            let frame = make_frame(&self.dpb[i], &sps);
-            self.out.push_back(frame);
+            let ev = output_event(&self.dpb[i], &sps);
+            self.emit(ev);
         }
         self.dpb[i].needed_for_output = false;
         if !self.dpb[i].is_ref() {
@@ -639,57 +718,18 @@ impl Decoder {
     }
 }
 
-/// Fill macroblocks that were never decoded from `src` (or leave them grey).
-fn conceal(pic: &mut Picture, mbs: &[MbInfo], src: Option<&Picture>, mbw: usize) {
-    for (addr, m) in mbs.iter().enumerate() {
-        if m.slice != 0 {
-            continue;
-        }
-        let (mx, my) = (addr % mbw, addr / mbw);
-        for p in 0..3 {
-            let (size, stride) = if p == 0 { (16, pic.strides[0]) } else { (8, pic.strides[p]) };
-            for y in 0..size {
-                let o = (my * size + y) * stride + mx * size;
-                match src {
-                    Some(s) => {
-                        let (dst, from) = (&mut pic.planes[p][o..o + size], &s.planes[p][o..o + size]);
-                        dst.copy_from_slice(from);
-                    }
-                    None => pic.planes[p][o..o + size].fill(128),
-                }
-            }
-        }
-    }
-}
-
-/// Crop a picture into an output frame.
-fn make_frame(pic: &Picture, sps: &Sps) -> Frame {
-    let (cx, cy, cw, ch) = sps.crop_rect();
-    let mut planes: [Vec<u8>; 3] = [Vec::with_capacity(cw * ch), Vec::new(), Vec::new()];
-    for y in 0..ch {
-        let o = (cy + y) * pic.strides[0] + cx;
-        planes[0].extend_from_slice(&pic.planes[0][o..o + cw]);
-    }
-    let (ccx, ccy, ccw, cch) = (cx / 2, cy / 2, cw.div_ceil(2), ch.div_ceil(2));
-    for p in 1..3 {
-        planes[p].reserve(ccw * cch);
-        for y in 0..cch {
-            let o = (ccy + y) * pic.strides[p] + ccx;
-            planes[p].extend_from_slice(&pic.planes[p][o..o + ccw]);
-        }
-    }
+/// The event that makes the reconstruction side emit `pic` as an output frame.
+fn output_event(pic: &Picture, sps: &Sps) -> ReconEvent {
     let (full_range, matrix) = match &sps.vui {
         Some(v) => (v.full_range, v.colour.map(|c| c.2).unwrap_or(2)),
         None => (false, 2),
     };
-    Frame {
-        width: cw,
-        height: ch,
-        planes,
-        strides: [cw, ccw, ccw],
+    ReconEvent::Output(OutputInfo {
+        uid: pic.uid,
+        crop: sps.crop_rect(),
         pts: pic.pts,
         poc: pic.poc,
         full_range,
-        matrix_coefficients: matrix,
-    }
+        matrix,
+    })
 }

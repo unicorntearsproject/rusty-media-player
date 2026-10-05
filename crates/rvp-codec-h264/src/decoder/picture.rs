@@ -13,17 +13,58 @@ pub enum RefState {
     Long,
 }
 
-/// A frame store: samples plus per-block motion data and the bookkeeping of reference marking and output.
+/// The motion data of a picture (what direct prediction, motion compensation and deblocking read).
+#[derive(Clone)]
+pub struct Motion {
+    /// Motion vectors per 4x4 block, both lists, in a `4*mbw` wide grid.
+    pub mv: [Vec<[i16; 2]>; 2],
+    /// Reference indices per 8x8 block (`-1`: list unused), in a `2*mbw` wide grid.
+    pub ref_idx: [Vec<i8>; 2],
+    /// Unique id of the frame each 8x8 block referenced (`-1`: none).
+    pub ref_id: [Vec<i32>; 2],
+}
+
+/// A decoded picture's samples, padded to whole macroblocks. The reconstruction side owns these; the parsing side only
+/// knows pictures by their `uid`.
+pub struct PlanePic {
+    /// `Picture::uid` of the picture these samples belong to.
+    pub uid: i32,
+    /// Width in macroblocks.
+    pub mbw: usize,
+    /// Height in macroblocks.
+    pub mbh: usize,
+    /// Y, Cb, Cr sample planes.
+    pub planes: [Vec<u8>; 3],
+    /// Row strides of the planes.
+    pub strides: [usize; 3],
+}
+
+impl PlanePic {
+    /// Allocate a picture of the given size in macroblocks, filled with mid grey.
+    pub fn new(mbw: usize, mbh: usize) -> Self {
+        let (w, h) = (mbw * 16, mbh * 16);
+        Self {
+            uid: 0,
+            mbw,
+            mbh,
+            planes: [vec![128; w * h], vec![128; w * h / 4], vec![128; w * h / 4]],
+            strides: [w, w / 2, w / 2],
+        }
+    }
+
+    /// True if this picture can be reused for the given size.
+    pub fn fits(&self, mbw: usize, mbh: usize) -> bool {
+        self.mbw == mbw && self.mbh == mbh
+    }
+}
+
+/// A frame store of the parsing side: per-block motion data and the bookkeeping of reference marking and output.
 #[derive(Clone)]
 pub struct Picture {
     /// Width in macroblocks.
     pub mbw: usize,
     /// Height in macroblocks.
     pub mbh: usize,
-    /// Y, Cb, Cr sample planes, padded to whole macroblocks.
-    pub planes: [Vec<u8>; 3],
-    /// Row strides of the planes.
-    pub strides: [usize; 3],
     /// Motion vectors per 4x4 block, both lists, in a `4*mbw` wide grid.
     pub mv: [Vec<[i16; 2]>; 2],
     /// Reference indices per 8x8 block (`-1`: list unused), in a `2*mbw` wide grid.
@@ -51,16 +92,13 @@ pub struct Picture {
 }
 
 impl Picture {
-    /// Allocate a picture of the given size in macroblocks, filled with mid grey.
+    /// Allocate a picture of the given size in macroblocks.
     pub fn new(mbw: usize, mbh: usize) -> Self {
-        let (w, h) = (mbw * 16, mbh * 16);
         let n4 = mbw * 4 * mbh * 4;
         let n8 = mbw * 2 * mbh * 2;
         Self {
             mbw,
             mbh,
-            planes: [vec![128; w * h], vec![128; w * h / 4], vec![128; w * h / 4]],
-            strides: [w, w / 2, w / 2],
             mv: [vec![[0; 2]; n4], vec![[0; 2]; n4]],
             ref_idx: [vec![-1; n8], vec![-1; n8]],
             ref_id: [vec![-1; n8], vec![-1; n8]],
@@ -94,11 +132,9 @@ impl Picture {
         self.long_term_idx = 0;
     }
 
-    /// Fill all samples with grey.
-    pub fn fill_grey(&mut self) {
-        for p in self.planes.iter_mut() {
-            p.fill(128);
-        }
+    /// A copy of the motion data, for the reconstruction side.
+    pub fn motion(&self) -> Motion {
+        Motion { mv: self.mv.clone(), ref_idx: self.ref_idx.clone(), ref_id: self.ref_id.clone() }
     }
 
     /// True if the picture is marked as a reference (short or long term).

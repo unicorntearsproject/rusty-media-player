@@ -46,6 +46,13 @@ pub struct MbInfo {
     pub mvd: [[[u8; 2]; 16]; 2],
     /// Bit per luma 4x4 block (raster) that has non-zero coefficients (8x8 transform blocks set all four bits).
     pub nzmask: u16,
+    /// Intra 16x16 prediction mode.
+    pub i16_mode: u8,
+    /// Blocks with scaled coefficients in the picture's coefficient store: bits 0..16 luma 4x4 (raster), 16..24 chroma
+    /// 4x4 (Cb then Cr), 24..28 luma 8x8.
+    pub blk_nz: u32,
+    /// Where this macroblock's blocks start in the coefficient store (or its samples in the PCM store).
+    pub coef_off: u32,
 }
 
 impl MbInfo {
@@ -63,6 +70,9 @@ impl MbInfo {
         ipm: [-1; 16],
         mvd: [[[0; 2]; 16]; 2],
         nzmask: 0,
+        i16_mode: 0,
+        blk_nz: 0,
+        coef_off: 0,
     };
 
     /// True if intra coded.

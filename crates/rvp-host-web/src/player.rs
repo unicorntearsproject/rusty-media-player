@@ -33,6 +33,8 @@ impl CodecFactory for WebCodecs {
 fn build_video(info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
     match info.codec.as_str() {
         "av1" => rvp_codec_av1::av1_decoder(info),
+        // With threads the reconstruction runs on a thread of its own, overlapping the parsing of the next picture.
+        "h264" if rvp_par::available() => rvp_par::h264::h264_pipelined(info),
         "h264" => rvp_codec_h264::h264_decoder(info),
         "vp9" => rvp_codec_vp9::vp9_decoder(info),
         other => Err(Error::Unsupported(format!("video codec `{other}`"))),

@@ -463,7 +463,10 @@ dependencies = [
 name = "rvp-par"
 version = "0.0.1"
 dependencies = [
+ "rvp-codec-h264",
  "rvp-core",
+ "rvp-demux",
+ "rvp-host",
 ]
 
 [[package]]

@@ -33,6 +33,8 @@ pub fn rvp_worker_entry(ptr: u32, spawn: js_sys::Function) {
 pub fn rvp_init_threads(spawn: js_sys::Function, hardware: u32) -> u32 {
     JS_SPAWN.with(|j| *j.borrow_mut() = Some(spawn));
     rvp_par::set_spawner(spawn_on_worker);
+    // This is the page's main thread: it draws every frame and must not wait for workers.
+    rvp_par::mark_ui_thread();
     if !rvp_par::available() {
         return 0;
     }

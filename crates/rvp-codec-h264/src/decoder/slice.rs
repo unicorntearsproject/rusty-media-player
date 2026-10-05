@@ -1,7 +1,6 @@
 //! Slice decoding: the macroblock loop, syntax parsing, residual decoding and reconstruction.
 use super::cabac_syntax::Cabac;
 use super::entropy::{Cat, Cavlc, Entropy};
-use super::intra::{self, AV_LEFT, AV_TOP, AV_TOPLEFT};
 use super::mbinfo::*;
 use super::picture::Picture;
 use crate::bitstream::BitReader;
@@ -50,8 +49,6 @@ pub struct SliceDecoder<'a> {
     pub(crate) refs: [Vec<RefInfo>; 2],
     /// `PicOrderCnt` of the current picture.
     pub(crate) cur_poc: i32,
-    /// 0 default weighting, 1 explicit, 2 implicit.
-    pub(crate) weight_mode: u8,
     pub(crate) mbw: usize,
     pub(crate) mbh: usize,
     pub(crate) slice_num: u16,
@@ -73,6 +70,18 @@ pub struct SliceDecoder<'a> {
     coef: Box<[i32; 384]>,
     /// Bit per luma block (raster) and chroma block (16..24) that has coefficients to add.
     blk_nz: u32,
+    /// Where the scaled coefficients and PCM samples of the picture go.
+    pub(crate) store: &'a mut Store,
+}
+
+/// The data the parsing side hands to reconstruction besides `MbInfo`: scaled coefficients of the blocks flagged in
+/// `MbInfo::blk_nz` (in macroblock order) and the samples of I_PCM macroblocks.
+#[derive(Default)]
+pub struct Store {
+    /// Coefficient blocks.
+    pub coefs: Vec<i16>,
+    /// PCM samples, 384 bytes per macroblock.
+    pub pcm: Vec<u8>,
 }
 
 const COEF_CB: usize = 256;
@@ -91,17 +100,12 @@ impl<'a> SliceDecoder<'a> {
         refs: [Vec<RefInfo>; 2],
         cur_poc: i32,
         slice_num: u16,
+        store: &'a mut Store,
     ) -> Self {
-        let weight_mode = match hdr.slice_type {
-            SliceType::P | SliceType::Sp => pps.weighted_pred as u8,
-            SliceType::B => pps.weighted_bipred_idc as u8,
-            _ => 0,
-        };
         Self {
             dpb,
             refs,
             cur_poc,
-            weight_mode,
             sps,
             pps,
             hdr,
@@ -124,6 +128,7 @@ impl<'a> SliceDecoder<'a> {
             prev_dqp_nonzero: false,
             coef: Box::new([0; 384]),
             blk_nz: 0,
+            store,
         }
     }
 
@@ -242,14 +247,6 @@ impl<'a> SliceDecoder<'a> {
         }
     }
 
-    #[inline]
-    fn intra_ok(&self, n: Option<usize>) -> bool {
-        match n {
-            Some(a) => !self.constrained_intra || self.mbs[a].is_intra(),
-            None => false,
-        }
-    }
-
     // ---------------------------------------------------------------------------------------------------
     // Macroblock layer
 
@@ -326,12 +323,12 @@ impl<'a> SliceDecoder<'a> {
                     self.prev_dqp_nonzero = false;
                 }
                 self.finish_qp();
-                self.recon_intra_nxn(t8)?;
-                self.recon_chroma_intra(chroma_mode)?;
+                self.store_coefs();
                 Ok(())
             }
             MbType::I16 { mode, cbp_luma, cbp_chroma } => {
                 self.mbs[addr].flags |= F_I16;
+                self.mbs[addr].i16_mode = mode;
                 let chroma_mode = ent.intra_chroma_pred_mode(self)?;
                 self.mbs[addr].chroma_mode = chroma_mode;
                 let cbp = cbp_luma | (cbp_chroma << 4);
@@ -339,8 +336,7 @@ impl<'a> SliceDecoder<'a> {
                 self.read_qp_delta(ent)?;
                 self.read_residual(ent, true, cbp, false, true)?;
                 self.finish_qp();
-                self.recon_intra16(mode)?;
-                self.recon_chroma_intra(chroma_mode)?;
+                self.store_coefs();
                 Ok(())
             }
         }
@@ -368,20 +364,10 @@ impl<'a> SliceDecoder<'a> {
     fn decode_pcm<E: Entropy>(&mut self, ent: &mut E) -> Result<()> {
         let mut buf = [0u8; 384];
         ent.pcm_samples(&mut buf)?;
-        let (mx, my) = (self.mb_x, self.mb_y);
-        let ys = self.cur.strides[0];
-        for y in 0..16 {
-            let o = (my * 16 + y) * ys + mx * 16;
-            self.cur.planes[0][o..o + 16].copy_from_slice(&buf[y * 16..y * 16 + 16]);
-        }
-        for c in 0..2 {
-            let cs = self.cur.strides[1 + c];
-            for y in 0..8 {
-                let o = (my * 8 + y) * cs + mx * 8;
-                let s = 256 + c * 64 + y * 8;
-                self.cur.planes[1 + c][o..o + 8].copy_from_slice(&buf[s..s + 8]);
-            }
-        }
+        // The samples go to the picture's PCM store; the reconstruction side copies them in.
+        let off = self.store.pcm.len() as u32;
+        self.store.pcm.extend_from_slice(&buf);
+        self.mbs[self.mb_addr].coef_off = off;
         let (o0, o1) = (self.pps.chroma_qp_index_offset, self.pps.second_chroma_qp_index_offset);
         let m = &mut self.mbs[self.mb_addr];
         m.flags = F_INTRA | F_PCM;
@@ -412,6 +398,30 @@ impl<'a> SliceDecoder<'a> {
             (Some(a), Some(b)) => a.min(b),
             _ => 2,
         }
+    }
+
+    /// Hand the macroblock's scaled coefficients to the store (and clear them) once it is parsed.
+    pub(crate) fn store_coefs(&mut self) {
+        let addr = self.mb_addr;
+        let mut bits = self.blk_nz;
+        self.mbs[addr].blk_nz = bits;
+        self.mbs[addr].coef_off = self.store.coefs.len() as u32;
+        while bits != 0 {
+            let b = bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            let (base, n) = if b < 16 {
+                (b * 16, 16)
+            } else if b < 24 {
+                (COEF_CB + (b - 16) * 16, 16)
+            } else {
+                ((b - 24) * 64, 64)
+            };
+            let blk = &mut self.coef[base..base + n];
+            // Scaled coefficients are saturated to 16 bits by the dequantiser.
+            self.store.coefs.extend(blk.iter().map(|&v| v as i16));
+            blk.fill(0);
+        }
+        self.blk_nz = 0;
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -555,275 +565,6 @@ impl<'a> SliceDecoder<'a> {
                 }
             }
         }
-        Ok(())
-    }
-
-    // ---------------------------------------------------------------------------------------------------
-    // Reconstruction
-
-    /// Apply the 4x4 residual of luma block `r` (raster index) at plane position `(x, y)`.
-    pub(crate) fn add_luma_block(&mut self, r: usize, x: usize, y: usize) {
-        if self.blk_nz & (1 << r) == 0 {
-            return;
-        }
-        let stride = self.cur.strides[0];
-        let c = &mut self.coef[r * 16..r * 16 + 16];
-        let dst = &mut self.cur.planes[0][y * stride + x..];
-        if c[1..].iter().all(|&v| v == 0) {
-            tr::add_dc_4x4(c[0], dst, stride);
-            c[0] = 0;
-        } else {
-            let mut b = [0i32; 16];
-            b.copy_from_slice(c);
-            tr::idct4x4(&mut b);
-            tr::add_residual_4x4(&b, dst, stride);
-            c.fill(0);
-        }
-    }
-
-    /// Apply the 8x8 residual of luma block `i8` at plane position `(x, y)`.
-    pub(crate) fn add_luma_block8(&mut self, i8: usize, x: usize, y: usize) {
-        if self.blk_nz & (1 << (24 + i8)) == 0 {
-            return;
-        }
-        let stride = self.cur.strides[0];
-        let c = &mut self.coef[i8 * 64..i8 * 64 + 64];
-        let mut b = [0i32; 64];
-        b.copy_from_slice(c);
-        tr::idct8x8(&mut b);
-        tr::add_residual_8x8(&b, &mut self.cur.planes[0][y * stride + x..], stride);
-        c.fill(0);
-    }
-
-    pub(crate) fn add_chroma_blocks(&mut self) {
-        for comp in 0..2 {
-            let stride = self.cur.strides[1 + comp];
-            for blk in 0..4 {
-                if self.blk_nz & (1 << (16 + comp * 4 + blk)) == 0 {
-                    continue;
-                }
-                let base = COEF_CB + comp * 64 + blk * 16;
-                let (x, y) = (self.mb_x * 8 + (blk & 1) * 4, self.mb_y * 8 + (blk >> 1) * 4);
-                let c = &mut self.coef[base..base + 16];
-                let dst = &mut self.cur.planes[1 + comp][y * stride + x..];
-                if c[1..].iter().all(|&v| v == 0) {
-                    tr::add_dc_4x4(c[0], dst, stride);
-                } else {
-                    let mut b = [0i32; 16];
-                    b.copy_from_slice(c);
-                    tr::idct4x4(&mut b);
-                    tr::add_residual_4x4(&b, dst, stride);
-                }
-                c.fill(0);
-            }
-        }
-    }
-
-    fn recon_intra_nxn(&mut self, t8: bool) -> Result<()> {
-        let stride = self.cur.strides[0];
-        let (mx, my) = (self.mb_x * 16, self.mb_y * 16);
-        if t8 {
-            for i8 in 0..4 {
-                let (bx, by) = ((i8 & 1) * 2, (i8 >> 1) * 2);
-                let (x, y) = (mx + bx * 4, my + by * 4);
-                let mode = self.mbs[self.mb_addr].ipm[by * 4 + bx] as u8;
-                let (mut top, mut left, tl, avail) = self.gather_8x8(bx, by, x, y);
-                let (ft, fl, ftl);
-                (ft, fl, ftl) = intra::filter_8x8_refs(&top, &left, tl, avail);
-                top = ft;
-                left = fl;
-                let dst = &mut self.cur.planes[0][y * stride + x..];
-                intra::predict_nxn::<8>(dst, stride, mode, &top, &left, ftl, avail)?;
-                self.add_luma_block8(i8, x, y);
-            }
-        } else {
-            for blk in 0..16 {
-                let (bx, by) = blk_xy(blk);
-                let (x, y) = (mx + bx * 4, my + by * 4);
-                let mode = self.mbs[self.mb_addr].ipm[by * 4 + bx] as u8;
-                let (top, left, tl, avail) = self.gather_4x4(bx, by, x, y);
-                let dst = &mut self.cur.planes[0][y * stride + x..];
-                intra::predict_nxn::<4>(dst, stride, mode, &top, &left, tl, avail)?;
-                self.add_luma_block(by * 4 + bx, x, y);
-            }
-        }
-        Ok(())
-    }
-
-    /// Neighbouring samples and availability for the 4x4 block at `(bx, by)`, picture position `(x, y)`.
-    fn gather_4x4(&self, bx: usize, by: usize, x: usize, y: usize) -> ([u8; 8], [u8; 4], u8, u8) {
-        let stride = self.cur.strides[0];
-        let p = &self.cur.planes[0];
-        let left_ok = bx > 0 || self.intra_ok(self.na);
-        let top_ok = by > 0 || self.intra_ok(self.nb);
-        let tl_ok = match (bx > 0, by > 0) {
-            (true, true) => true,
-            (false, true) => self.intra_ok(self.na),
-            (true, false) => self.intra_ok(self.nb),
-            (false, false) => self.intra_ok(self.nd),
-        };
-        let tr_ok = if by == 0 {
-            if bx < 3 { self.intra_ok(self.nb) } else { self.intra_ok(self.nc) }
-        } else if bx == 3 {
-            false
-        } else {
-            blk_order(bx + 1, by - 1) < blk_order(bx, by)
-        };
-        let mut top = [128u8; 8];
-        let mut left = [128u8; 4];
-        let mut tl = 128;
-        let mut avail = 0;
-        if top_ok {
-            avail |= AV_TOP;
-            let o = (y - 1) * stride + x;
-            top[..4].copy_from_slice(&p[o..o + 4]);
-            if tr_ok {
-                top[4..].copy_from_slice(&p[o + 4..o + 8]);
-            } else {
-                let v = top[3];
-                top[4..].fill(v);
-            }
-        }
-        if left_ok {
-            avail |= AV_LEFT;
-            for i in 0..4 {
-                left[i] = p[(y + i) * stride + x - 1];
-            }
-        }
-        if tl_ok {
-            avail |= AV_TOPLEFT;
-            tl = p[(y - 1) * stride + x - 1];
-        }
-        (top, left, tl, avail)
-    }
-
-    fn gather_8x8(&self, bx: usize, by: usize, x: usize, y: usize) -> ([u8; 16], [u8; 8], u8, u8) {
-        let stride = self.cur.strides[0];
-        let p = &self.cur.planes[0];
-        let left_ok = bx > 0 || self.intra_ok(self.na);
-        let top_ok = by > 0 || self.intra_ok(self.nb);
-        let tl_ok = match (bx > 0, by > 0) {
-            (true, true) => true,
-            (false, true) => self.intra_ok(self.na),
-            (true, false) => self.intra_ok(self.nb),
-            (false, false) => self.intra_ok(self.nd),
-        };
-        // Top right: block 0 uses the macroblock above, block 1 the one above right, block 2 is inside, 3 is not available.
-        let tr_ok = match (bx, by) {
-            (0, 0) => self.intra_ok(self.nb),
-            (2, 0) => self.intra_ok(self.nc),
-            (0, 2) => true,
-            _ => false,
-        };
-        let mut top = [128u8; 16];
-        let mut left = [128u8; 8];
-        let mut tl = 128;
-        let mut avail = 0;
-        if top_ok {
-            avail |= AV_TOP;
-            let o = (y - 1) * stride + x;
-            top[..8].copy_from_slice(&p[o..o + 8]);
-            if tr_ok {
-                top[8..].copy_from_slice(&p[o + 8..o + 16]);
-            } else {
-                let v = top[7];
-                top[8..].fill(v);
-            }
-        }
-        if left_ok {
-            avail |= AV_LEFT;
-            for i in 0..8 {
-                left[i] = p[(y + i) * stride + x - 1];
-            }
-        }
-        if tl_ok {
-            avail |= AV_TOPLEFT;
-            tl = p[(y - 1) * stride + x - 1];
-        }
-        (top, left, tl, avail)
-    }
-
-    fn recon_intra16(&mut self, mode: u8) -> Result<()> {
-        let stride = self.cur.strides[0];
-        let (mx, my) = (self.mb_x * 16, self.mb_y * 16);
-        let top_ok = self.intra_ok(self.nb);
-        let left_ok = self.intra_ok(self.na);
-        let tl_ok = self.intra_ok(self.nd);
-        let mut top = [128u8; 16];
-        let mut left = [128u8; 16];
-        let mut tl = 128;
-        let mut avail = 0;
-        {
-            let p = &self.cur.planes[0];
-            if top_ok {
-                avail |= AV_TOP;
-                top.copy_from_slice(&p[(my - 1) * stride + mx..(my - 1) * stride + mx + 16]);
-            }
-            if left_ok {
-                avail |= AV_LEFT;
-                for i in 0..16 {
-                    left[i] = p[(my + i) * stride + mx - 1];
-                }
-            }
-            if tl_ok {
-                avail |= AV_TOPLEFT;
-                tl = p[(my - 1) * stride + mx - 1];
-            }
-        }
-        intra::predict_16x16(
-            &mut self.cur.planes[0][my * stride + mx..],
-            stride,
-            mode,
-            &top,
-            &left,
-            tl,
-            avail,
-        )?;
-        for r in 0..16 {
-            self.add_luma_block(r, mx + (r & 3) * 4, my + (r >> 2) * 4);
-        }
-        Ok(())
-    }
-
-    fn recon_chroma_intra(&mut self, mode: u8) -> Result<()> {
-        let top_ok = self.intra_ok(self.nb);
-        let left_ok = self.intra_ok(self.na);
-        let tl_ok = self.intra_ok(self.nd);
-        let (mx, my) = (self.mb_x * 8, self.mb_y * 8);
-        for comp in 0..2 {
-            let stride = self.cur.strides[1 + comp];
-            let mut top = [128u8; 8];
-            let mut left = [128u8; 8];
-            let mut tl = 128;
-            let mut avail = 0;
-            {
-                let p = &self.cur.planes[1 + comp];
-                if top_ok {
-                    avail |= AV_TOP;
-                    top.copy_from_slice(&p[(my - 1) * stride + mx..(my - 1) * stride + mx + 8]);
-                }
-                if left_ok {
-                    avail |= AV_LEFT;
-                    for i in 0..8 {
-                        left[i] = p[(my + i) * stride + mx - 1];
-                    }
-                }
-                if tl_ok {
-                    avail |= AV_TOPLEFT;
-                    tl = p[(my - 1) * stride + mx - 1];
-                }
-            }
-            intra::predict_chroma(
-                &mut self.cur.planes[1 + comp][my * stride + mx..],
-                stride,
-                mode,
-                &top,
-                &left,
-                tl,
-                avail,
-            )?;
-        }
-        self.add_chroma_blocks();
         Ok(())
     }
 }

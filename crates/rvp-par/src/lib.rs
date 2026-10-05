@@ -10,10 +10,11 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 mod decoder;
+pub mod h264;
 mod pool;
 
 pub use decoder::ThreadedVideoDecoder;
-pub use pool::Pool;
+pub use pool::{Pool, mark_ui_thread};
 
 use std::sync::OnceLock;
 
