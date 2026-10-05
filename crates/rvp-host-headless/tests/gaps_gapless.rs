@@ -181,7 +181,7 @@ fn a_next_item_without_audio_starts_at_once_and_nothing_stutters() {
                 assert!(
                     first_pic.0 >= at && first_pic.0 - at <= 60_000,
                     "{all:?}: {name} showed its first picture {} us after starting",
-                    first_pic.0 as i64 - at
+                    first_pic.0 - at
                 );
             }
             before += solo(name).1;
