@@ -1,0 +1,15 @@
+[package]
+name = "rvp-codec-av1"
+description = "AV1 decoding via rav1d (needs a wasm32 patch, see docs/PLAN.md R1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true

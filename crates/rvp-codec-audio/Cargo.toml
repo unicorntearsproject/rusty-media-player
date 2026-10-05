@@ -1,0 +1,15 @@
+[package]
+name = "rvp-codec-audio"
+description = "AAC, MP3, FLAC, Vorbis, Opus decoders behind the AudioDecoder trait"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true

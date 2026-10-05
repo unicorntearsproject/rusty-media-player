@@ -1,0 +1,52 @@
+/* ============================================================
+   Unicorn Tears — Spacing, Radius, Border, Shadow, Motion Tokens
+   ============================================================ */
+
+:root {
+  /* Spacing scale (4px base rhythm) */
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4 */
+  --space-2: 0.5rem;    /* 8 */
+  --space-3: 0.75rem;   /* 12 */
+  --space-4: 1rem;      /* 16 */
+  --space-5: 1.5rem;    /* 24 */
+  --space-6: 2rem;      /* 32 */
+  --space-7: 3rem;      /* 48 */
+  --space-8: 4rem;      /* 64 */
+  --space-9: 6rem;      /* 96 */
+  --space-10: 8rem;     /* 128 */
+
+  /* Layout */
+  --container-max: 1200px;
+  --container-wide: 1440px;
+  --gutter: 1.5rem;
+
+  /* Corner radii — chunky club-flyer rounding, plus a "capsule" */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+
+  /* Borders */
+  --border-width: 1px;
+  --border-width-bold: 2px;
+
+  /* Elevation shadows (cool-tinted, deep) */
+  --shadow-sm: 0 2px 8px rgba(5,2,15,.5);
+  --shadow-md: 0 8px 28px rgba(5,2,15,.55);
+  --shadow-lg: 0 24px 64px rgba(5,2,15,.65);
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* @kind other */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1); /* @kind other */
+  --dur-fast: 120ms; /* @kind other */
+  --dur-base: 220ms; /* @kind other */
+  --dur-slow: 400ms; /* @kind other */
+
+  /* Backdrop blur (glassy overlay panels) */
+  --blur-panel: 16px;
+}

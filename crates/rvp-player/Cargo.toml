@@ -1,0 +1,27 @@
+[package]
+name = "rvp-player"
+description = "Player engine: cooperative scheduler, pipeline, A/V sync, playlist (no_std + alloc)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true
+rvp-codec-audio = { workspace = true, optional = true }
+rvp-codec-h264 = { workspace = true, optional = true }
+rvp-codec-av1 = { workspace = true, optional = true }
+rvp-codec-vp9 = { workspace = true, optional = true }
+
+[features]
+default = []
+audio = ["dep:rvp-codec-audio"]
+h264 = ["dep:rvp-codec-h264"]
+av1 = ["dep:rvp-codec-av1"]
+vp9 = ["dep:rvp-codec-vp9"]
+all-codecs = ["audio", "h264", "av1", "vp9"]

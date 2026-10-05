@@ -1,0 +1,20 @@
+[package]
+name = "rvp-host-headless"
+description = "Native headless host and rvp-headless binary for tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true
+rvp-host.workspace = true
+
+[[bin]]
+name = "rvp-headless"
+path = "src/main.rs"

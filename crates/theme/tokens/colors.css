@@ -1,0 +1,79 @@
+/* ============================================================
+   Unicorn Tears — Color Tokens
+   Neon rave / synthwave palette: hot magenta, electric cyan and
+   violet glowing over a deep indigo-black, with an acid-lime accent
+   pulled from the green logo variant. Sampled from the brand assets.
+   ============================================================ */
+
+:root {
+  /* ---- Base ink / surfaces (deep indigo-black, never pure #000) ---- */
+  --ink-900: #07060d;   /* page base */
+  --ink-850: #0c0a16;   /* raised base */
+  --ink-800: #120c1f;   /* card surface */
+  --ink-700: #1b1230;   /* card surface, elevated */
+  --ink-600: #261a42;   /* hover surface */
+  --ink-500: #342357;   /* borders / strokes */
+
+  /* ---- Neon brand hues ---- */
+  --magenta-500: #ff2bd6;  /* primary — "unicorn tears" pink */
+  --magenta-400: #ff5ce0;
+  --magenta-600: #e60bb8;
+  --magenta-700: #b3008f;
+
+  --cyan-500: #19e3ff;     /* secondary — electric cyan */
+  --cyan-400: #66efff;
+  --cyan-600: #00bfe0;
+
+  --violet-500: #9d4eff;   /* tertiary — laser violet */
+  --violet-400: #bd83ff;
+  --violet-600: #7a27e6;
+
+  --lime-500: #4dff5a;     /* acid-lime accent (from green logo) — use sparingly */
+
+  /* ---- Neutral / text ---- */
+  --white: #ffffff;
+  --pink-white: #ffeffb;   /* faintly pink off-white for body on dark */
+  --grey-300: #c9bdda;     /* muted text */
+  --grey-400: #9a8cb0;     /* dimmer text */
+  --grey-500: #6d6088;     /* disabled / placeholder */
+
+  /* ---- Semantic feedback ---- */
+  --success: #4dff5a;
+  --warning: #ffc24d;
+  --danger:  #ff4d6d;
+  --info:    #19e3ff;
+
+  /* ---- Signature gradients ---- */
+  --gradient-tears:   linear-gradient(120deg, var(--magenta-500) 0%, var(--violet-500) 50%, var(--cyan-500) 100%);
+  --gradient-tears-v: linear-gradient(180deg, var(--cyan-500) 0%, var(--violet-500) 55%, var(--magenta-500) 100%);
+  --gradient-drip:    linear-gradient(180deg, var(--white) 0%, var(--cyan-400) 40%, var(--magenta-500) 100%);
+  --gradient-night:   radial-gradient(120% 90% at 50% -10%, #2a0f4a 0%, #120c1f 45%, var(--ink-900) 100%);
+  --gradient-haze:    radial-gradient(60% 60% at 50% 50%, rgba(157,78,255,.45) 0%, rgba(157,78,255,0) 70%); /* @kind color */
+
+  /* ---- Glow shadows (the brand lives on glow) ---- */
+  --glow-magenta: 0 0 24px rgba(255,43,214,.55), 0 0 4px rgba(255,43,214,.9);
+  --glow-cyan:    0 0 24px rgba(25,227,255,.55), 0 0 4px rgba(25,227,255,.9);
+  --glow-violet:  0 0 28px rgba(157,78,255,.55), 0 0 6px rgba(157,78,255,.9);
+
+  /* ---- Semantic aliases ---- */
+  --bg-page: var(--ink-900);
+  --bg-surface: var(--ink-800);
+  --bg-surface-raised: var(--ink-700);
+  --bg-surface-hover: var(--ink-600);
+
+  --text-strong: var(--white);
+  --text-body: var(--pink-white);
+  --text-muted: var(--grey-300);
+  --text-dim: var(--grey-400);
+  --text-disabled: var(--grey-500);
+
+  --border-subtle: rgba(255,255,255,.08);
+  --border-default: var(--ink-500);
+  --border-neon: var(--magenta-500);
+
+  --accent-primary: var(--magenta-500);
+  --accent-secondary: var(--cyan-500);
+  --accent-tertiary: var(--violet-500);
+
+  --focus-ring: var(--cyan-500);
+}
