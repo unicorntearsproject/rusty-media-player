@@ -3,6 +3,7 @@
 //! [`Decoder`] takes NAL units (Annex B byte streams, or length-prefixed samples with an avcC record) and
 //! produces decoded frames in output order.
 
+mod cabac_syntax;
 pub mod deblock;
 mod deblock_tables;
 mod direct;
@@ -314,7 +315,7 @@ impl Decoder {
             slice_num,
         );
         let r = if pps.cabac {
-            Err(Error::Unsupported("CABAC"))
+            sd.decode_cabac(rbsp, hdr.data_bit_pos.div_ceil(8))
         } else {
             let mut br = crate::bitstream::BitReader::new(rbsp);
             br.skip(hdr.data_bit_pos as u32);

@@ -1,4 +1,5 @@
 //! Slice decoding: the macroblock loop, syntax parsing, residual decoding and reconstruction.
+use super::cabac_syntax::Cabac;
 use super::entropy::{Cat, Cavlc, Entropy};
 use super::intra::{self, AV_LEFT, AV_TOP, AV_TOPLEFT};
 use super::mbinfo::*;
@@ -168,6 +169,34 @@ impl<'a> SliceDecoder<'a> {
             }
             if !ent.r.more_rbsp_data() {
                 return Ok(());
+            }
+        }
+    }
+
+    /// Decode a CABAC slice. `data` is the slice RBSP and `start` the byte offset of the first
+    /// `slice_data()` byte after `cabac_alignment_one_bit`.
+    pub fn decode_cabac(&mut self, data: &[u8], start: usize) -> Result<()> {
+        let intra_slice = self.slice_type.is_intra();
+        let init_idc = if intra_slice { None } else { Some(self.hdr.cabac_init_idc) };
+        let mut ent = Cabac::new(data, start, self.qp, init_idc);
+        let total = self.mbw * self.mbh;
+        let mut addr = self.hdr.first_mb_in_slice as usize;
+        loop {
+            if addr >= total {
+                return Err(Error::Invalid("slice runs past the end of the picture"));
+            }
+            self.start_mb(addr);
+            if !intra_slice && ent.skip_flag(self) {
+                self.decode_skip_mb()?;
+            } else {
+                self.decode_mb(&mut ent)?;
+            }
+            addr += 1;
+            if ent.end_of_slice() {
+                return Ok(());
+            }
+            if ent.dec.overrun() {
+                return Err(Error::Truncated);
             }
         }
     }

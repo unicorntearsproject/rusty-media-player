@@ -23,6 +23,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod bitstream;
+pub mod cabac;
 pub mod cavlc;
 pub mod decoder;
 pub mod error;
@@ -36,7 +37,7 @@ use rvp_core::VideoCodec;
 pub const CODEC: VideoCodec = VideoCodec::H264;
 
 /// Highest implemented stage (see `docs/PLAN.md` M6); 0 means nothing yet.
-pub const STAGE: u8 = 3;
+pub const STAGE: u8 = 5;
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
