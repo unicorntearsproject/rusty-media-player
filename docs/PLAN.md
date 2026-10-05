@@ -271,19 +271,27 @@ Each milestone ends with a commit and push. "Done when" is a concrete, automatab
 passes on native, `cargo check --target wasm32-unknown-unknown` passes for the wasm-capable crates, the
 `theme` crate is generated from the tokens and a test proves the generated file is in sync.
 
-**M1 Core types, clock, host traits.** `rvp-core` types, `MasterClock`, `RingBuffer`, `rvp-host` traits and
+**M1 Core types, clock, host traits.** *(done 2026-10-05)* `rvp-core` types, `MasterClock`, `RingBuffer`, `rvp-host` traits and
 mock host, the cooperative task poller, headless host skeleton with virtual clock. *Done when:* clock
 unit tests pass (audio-master re-anchoring with jittery `queued_frames` stays within 1 ms/s of ideal; pause,
 rate change, seek, discontinuity all re-anchor correctly), and a mock-host test runs the poller for 10
 virtual seconds with tasks that wake in the expected order with no real sleeping (< 100 ms wall time).
 
-**M2 Demux: MP4, MKV, WebM.** `rvp-demux` probing + incremental demuxers (moov/fragmented MP4, sample
+**M2 Demux: MP4, MKV, WebM.** *(done 2026-10-05; see the notes below)* `rvp-demux` probing + incremental demuxers (moov/fragmented MP4, sample
 tables, edit lists; EBML, SimpleBlock/BlockGroup, lacing, Cues, Tracks, codec private data), seeking to the
 nearest keyframe, AVCC/HVCC-less H.264 (AVCC) and AV1/VP9 config extraction. *Done when:* for a generated
 fixture set (`h264+aac mp4`, `fragmented mp4`, `av1+opus webm`, `vp9+vorbis webm`, `h264+flac mkv`), the demuxer's
 stream list, durations, and the per-packet (track, pts, dts, size, keyframe) sequence equal `ffprobe -show_packets`
 exactly; random-seek tests land on a keyframe <= target for 1000 random targets; a `Source` that returns
 1-byte reads and one that returns `Pending` for 3 polls first still produce identical results.
+
+*M2 notes (deviations from the text above, all intentional):* packets are emitted in file order and compared
+with ffprobe **per stream** (ffprobe interleaves differently); `dts` is compared for MP4 only (Matroska has no
+decode timestamps, so `dts == pts` there); the container duration matches ffprobe within 1 ms (100 ms for
+fragmented MP4, where ffprobe estimates it); Matroska seeking uses a cluster index built at open instead of
+`Cues`; Opus `CodecDelay` is subtracted from audio timestamps (as ffprobe does); fixtures come from
+`cargo xtask fixtures` (ffmpeg) and are not committed; a truncation/corruption test checks for panics. The
+test suite also needs `ffmpeg` and `ffprobe` (set `RVP_SKIP_FIXTURES=1` to skip).
 
 **M3 Audio decode and output.** `AudioDecoder` trait; AAC/MP3/FLAC/Vorbis via symphonia, Opus via
 `opus-decoder`; channel mapping to stereo; resampler; `AudioPipeline` (queue target, volume, mute);

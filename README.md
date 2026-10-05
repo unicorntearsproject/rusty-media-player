@@ -8,7 +8,7 @@ native (for tests), and, once its app ABI exists, as an app inside [Rusty Bucket
 - Its own UI, drawn with the Unicorn Tears design-system tokens (`crates/theme`).
 - Clean-room: VLC is an architecture reference only; no VLC code is used.
 
-Status: Milestone 0 (plan and scaffold). Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and the
+Status: Milestones 0-2 done (plan, scaffold, host/clock/executor, MP4 and Matroska/WebM demuxers). Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and the
 milestone list, and [`CLAUDE.md`](CLAUDE.md) for project rules.
 
 ## Layout
@@ -23,7 +23,7 @@ milestone list, and [`CLAUDE.md`](CLAUDE.md) for project rules.
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
 | `crates/rvp-ui`, `crates/theme` | the UI and the generated design tokens |
 | `crates/rvp-host-{headless,web,rb}` | hosts: native test harness, browser, Rusty Bucket |
-| `xtask` | `cargo xtask theme | check` |
+| `xtask`, `tools/` | `cargo xtask theme | check | fixtures` |
 
 ## Build and test
 
@@ -32,6 +32,7 @@ The Rust toolchain lives in `~/.cargo/bin`: `source ~/.cargo/env` first.
 ```sh
 cargo test --workspace          # native tests
 cargo xtask check               # also checks wasm32-unknown-unknown and no_std (x86_64-unknown-none)
+cargo xtask fixtures            # ffmpeg-generated test media into target/fixtures (made on demand by tests)
 cargo xtask theme               # regenerate crates/theme/src/tokens.rs from crates/theme/tokens/*.css
 cargo xtask theme --sync        # first refresh the CSS snapshot from the design system
 ```

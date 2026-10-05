@@ -39,6 +39,24 @@ pub enum AudioCodec {
     Vorbis,
 }
 
+/// Video-specific stream parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoInfo {
+    /// Coded width in pixels.
+    pub width: u32,
+    /// Coded height in pixels.
+    pub height: u32,
+}
+
+/// Audio-specific stream parameters, as declared by the container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioInfo {
+    /// Sample rate in Hz.
+    pub sample_rate: u32,
+    /// Channel count.
+    pub channels: u16,
+}
+
 /// Description of one elementary stream, as reported by a demuxer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamInfo {
@@ -52,8 +70,15 @@ pub struct StreamInfo {
     pub time_base: Rational,
     /// BCP-47-ish language tag if the container has one.
     pub language: Option<String>,
-    /// Codec configuration record (avcC, av1C, AudioSpecificConfig, OpusHead, ...).
+    /// Codec configuration record (avcC, av1C, vpcC, AudioSpecificConfig, Opus `dOps`/`OpusHead`,
+    /// FLAC `dfLa`/header blocks, Vorbis headers, ...) exactly as stored in the container.
     pub extra_data: Vec<u8>,
+    /// Present for video streams.
+    pub video: Option<VideoInfo>,
+    /// Present for audio streams.
+    pub audio: Option<AudioInfo>,
+    /// Track duration in microseconds, if the container states or implies one.
+    pub duration_us: Option<Timestamp>,
 }
 
 /// One compressed access unit from a demuxer.

@@ -20,8 +20,8 @@ pub use clock::{ClockSource, MasterClock};
 pub use codec::{AudioDecoder, VideoDecoder};
 pub use error::{Error, Result};
 pub use media::{
-    AudioBuffer, AudioCodec, AudioParams, ColorMatrix, ColorRange, Packet, PixelFormat, StreamInfo,
-    StreamKind, VideoCodec, VideoFrame,
+    AudioBuffer, AudioCodec, AudioInfo, AudioParams, ColorMatrix, ColorRange, Packet, PixelFormat,
+    StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
 };
 pub use ring::RingBuffer;
 pub use time::{Rational, Timestamp};

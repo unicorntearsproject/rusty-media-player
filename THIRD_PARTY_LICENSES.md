@@ -9,6 +9,7 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 | Component | License | Notes |
 | --- | --- | --- |
 | `wasm-bindgen` (`rvp-host-web`, wasm32 only) | MIT OR Apache-2.0 | |
+| `serde_json` (dev-dependency of `rvp-demux`, tests only) | MIT OR Apache-2.0 | |
 | Unicorn Tears design-system tokens (`crates/theme/tokens/*.css`) | Project-owner material, included under this project's license | Vendored snapshot of `claude-design-system/tokens` (colours, type scale, spacing). Logos, mascot art, and stream thumbnails are **not** included and stay separately owned. |
 
 ## Planned (see `docs/PLAN.md` section 8)

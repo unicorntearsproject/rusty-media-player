@@ -32,6 +32,13 @@ impl Rational {
         round_div(n, d) as i64
     }
 
+    /// Convert microseconds to ticks of this time base, rounding toward negative infinity.
+    pub fn us_to_ticks_floor(self, us: Timestamp) -> i64 {
+        let n = us as i128 * self.den as i128;
+        let d = self.num.max(1) as i128 * 1_000_000;
+        n.div_euclid(d) as i64
+    }
+
     /// Value as `f64`.
     pub fn as_f64(self) -> f64 {
         self.num as f64 / self.den as f64
@@ -53,6 +60,8 @@ mod tests {
         assert_eq!(tb.ticks_to_us(90_000), 1_000_000);
         assert_eq!(tb.us_to_ticks(1_000_000), 90_000);
         assert_eq!(tb.ticks_to_us(-45_000), -500_000);
+        assert_eq!((tb.us_to_ticks(11_111), tb.us_to_ticks_floor(11_111)), (1000, 999));
+        assert_eq!(tb.us_to_ticks_floor(-1), -1);
         let ntsc = Rational::new(1001, 30_000);
         assert_eq!(ntsc.ticks_to_us(30), 1_001_000);
     }

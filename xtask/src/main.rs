@@ -9,16 +9,16 @@ const USAGE: &str = "usage: cargo xtask <command>
                    (--sync first refreshes the CSS snapshot from the design system;
                    set UT_DESIGN_SYSTEM to override its path)
   check            cargo check for the host, and for wasm32 / no_std targets where applicable
-  fixtures | web | serve | licenses   not implemented yet (see docs/PLAN.md)";
+  fixtures [dir]   generate ffmpeg test media into target/fixtures (tools/gen-fixtures.sh)
+  web | serve | licenses   not implemented yet (see docs/PLAN.md)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("theme") => theme::run(args.iter().any(|a| a == "--sync")),
         Some("check") => check(),
-        Some(cmd @ ("fixtures" | "web" | "serve" | "licenses")) => {
-            Err(format!("`{cmd}` is not implemented yet"))
-        }
+        Some("fixtures") => fixtures(&args[1..]),
+        Some(cmd @ ("web" | "serve" | "licenses")) => Err(format!("`{cmd}` is not implemented yet")),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -31,6 +31,12 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn fixtures(extra: &[String]) -> Result<(), String> {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/gen-fixtures.sh");
+    let status = Command::new("bash").arg(script).args(extra).status().map_err(|e| e.to_string())?;
+    status.success().then_some(()).ok_or_else(|| "fixture generation failed".to_string())
 }
 
 fn cargo(args: &[&str]) -> Result<(), String> {
