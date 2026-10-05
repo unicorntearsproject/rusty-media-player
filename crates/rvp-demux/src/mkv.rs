@@ -156,7 +156,7 @@ fn codec_name(id: &str) -> String {
         "A_AC3" => "ac3",
         "A_EAC3" => "eac3",
         "S_TEXT/UTF8" => "subrip",
-        "S_TEXT/WEBVTT" => "webvtt",
+        "S_TEXT/WEBVTT" | "D_WEBVTT/SUBTITLES" | "D_WEBVTT/CAPTIONS" => "webvtt",
         "S_TEXT/ASS" | "S_TEXT/SSA" => "ass",
         s if s.starts_with("A_AAC") => "aac",
         s if s.starts_with("V_MPEG4/ISO/") => "mpeg4",

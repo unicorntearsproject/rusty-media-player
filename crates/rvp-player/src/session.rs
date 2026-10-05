@@ -18,6 +18,14 @@ use rvp_core::{
 };
 use rvp_demux::{Demuxer, open};
 use rvp_host::{AudioSink, Host, Source, VideoSink};
+use rvp_subs::{Cue, CueList};
+
+/// First id given to subtitle tracks that do not come from the container (sidecar files).
+pub const EXTERNAL_TRACK_BASE: u32 = 0x1000_0000;
+/// Largest sidecar subtitle file read, bytes.
+const MAX_SUB_FILE: usize = 8 << 20;
+/// A cue without a known duration stays up this long, microseconds.
+const DEFAULT_CUE_US: i64 = 3_000_000;
 
 /// Packets buffered between the demuxer and a decoder.
 const MAX_PACKETS: usize = 128;
@@ -54,8 +62,72 @@ pub enum SessionState {
     Failed,
 }
 
+/// A subtitle track: from the container or from a sidecar file.
+#[derive(Debug, Clone)]
+pub struct SubtitleTrack {
+    /// Container track id, or an id from [`EXTERNAL_TRACK_BASE`] up for sidecar files.
+    pub id: u32,
+    /// Language tag if known.
+    pub language: Option<String>,
+    /// Display name: the language, the file name, or "Subtitles n".
+    pub label: String,
+    /// True for sidecar files.
+    pub external: bool,
+}
+
+struct SubSlot {
+    track: SubtitleTrack,
+    cues: CueList,
+    /// Packets are MP4 `tx3g` samples rather than plain text.
+    mov_text: bool,
+}
+
+/// English name of a language tag (ISO 639-1/2 for the common ones), or the tag itself.
+pub fn language_name(tag: &str) -> String {
+    let t = tag.to_ascii_lowercase();
+    let base = t.split(['-', '_']).next().unwrap_or("");
+    let name = match base {
+        "en" | "eng" => "English",
+        "es" | "spa" => "Spanish",
+        "fr" | "fre" | "fra" => "French",
+        "de" | "ger" | "deu" => "German",
+        "it" | "ita" => "Italian",
+        "pt" | "por" => "Portuguese",
+        "nl" | "dut" | "nld" => "Dutch",
+        "sv" | "swe" => "Swedish",
+        "pl" | "pol" => "Polish",
+        "ru" | "rus" => "Russian",
+        "ja" | "jpn" => "Japanese",
+        "ko" | "kor" => "Korean",
+        "zh" | "chi" | "zho" => "Chinese",
+        "ar" | "ara" => "Arabic",
+        "hi" | "hin" => "Hindi",
+        "tr" | "tur" => "Turkish",
+        _ => return String::from(tag),
+    };
+    String::from(name)
+}
+
+/// Something that happened that a UI or host may want to react to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionEvent {
+    /// The subtitle on screen changed; `text` is `None` when it cleared. `at_us` is the stream position at which
+    /// the change was noticed.
+    Subtitle {
+        /// Stream position when noticed, microseconds.
+        at_us: Timestamp,
+        /// The new text, if any.
+        text: Option<String>,
+    },
+}
+
 #[derive(Default)]
 struct Shared {
+    subs: Vec<SubSlot>,
+    sel_sub: Option<u32>,
+    next_external: u32,
+    /// Bumped when the selected audio stream changes; the audio task rebuilds its decoder.
+    audio_epoch: u32,
     opened: bool,
     streams: Vec<StreamInfo>,
     duration_us: Option<Timestamp>,
@@ -103,6 +175,23 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
         s.duration_us = d.duration_us();
         s.sel_audio = s.streams.iter().find(|i| i.kind == StreamKind::Audio).cloned();
         s.sel_video = s.streams.iter().find(|i| i.kind == StreamKind::Video).cloned();
+        let tracks: Vec<StreamInfo> =
+            s.streams.iter().filter(|i| i.kind == StreamKind::Subtitle).cloned().collect();
+        for (n, st) in tracks.iter().enumerate() {
+            if !matches!(st.codec.as_str(), "subrip" | "webvtt" | "mov_text") {
+                s.warnings.push(alloc::format!("subtitle track {} ({}) is not supported", st.id, st.codec));
+                continue;
+            }
+            let label = match &st.language {
+                Some(l) if !l.is_empty() && l != "und" => language_name(l),
+                _ => alloc::format!("Subtitles {}", n + 1),
+            };
+            s.subs.push(SubSlot {
+                track: SubtitleTrack { id: st.id, language: st.language.clone(), label, external: false },
+                cues: CueList::new(),
+                mov_text: st.codec == "mov_text",
+            });
+        }
         s.opened = true;
         s.progress += 1;
     }
@@ -146,6 +235,16 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
                             s.audio_in.push_back(p);
                         } else if s.sel_video.as_ref().is_some_and(|v| v.id == p.stream_id) {
                             s.video_in.push_back(p);
+                        } else if let Some(slot) = s.subs.iter_mut().find(|t| t.track.id == p.stream_id) {
+                            let text = match p.data.get(4..8) {
+                                Some(b"vttc") | Some(b"vtte") => rvp_subs::decode_wvtt_sample(&p.data),
+                                _ if slot.mov_text => rvp_subs::decode_mov_text(&p.data),
+                                _ => rvp_subs::decode_mkv_text(&p.data),
+                            };
+                            if let Some(text) = text {
+                                let end = p.pts + if p.duration > 0 { p.duration } else { DEFAULT_CUE_US };
+                                slot.cues.insert(Cue { start: p.pts, end, text });
+                            }
                         }
                         s.progress += 1;
                     }
@@ -165,21 +264,41 @@ async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
     while !sh.borrow().opened {
         yield_now().await;
     }
-    let info = sh.borrow().sel_audio.clone();
-    let mut dec = match info.as_ref().map(|i| codecs.audio(i)) {
-        Some(Ok(d)) => d,
-        other => {
-            let mut s = sh.borrow_mut();
-            if let Some(Err(e)) = other {
-                s.warnings.push(alloc::format!("audio disabled: {e}"));
+    let mut audio_epoch = sh.borrow().audio_epoch;
+    let mut dec = {
+        let info = sh.borrow().sel_audio.clone();
+        match info.as_ref().map(|i| codecs.audio(i)) {
+            Some(Ok(d)) => d,
+            other => {
+                let mut s = sh.borrow_mut();
+                if let Some(Err(e)) = other {
+                    s.warnings.push(alloc::format!("audio disabled: {e}"));
+                }
+                s.sel_audio = None;
+                s.audio_done = true;
+                return;
             }
-            s.sel_audio = None;
-            s.audio_done = true;
-            return;
         }
     };
     let mut epoch = sh.borrow().generation;
     loop {
+        if sh.borrow().audio_epoch != audio_epoch {
+            // Another audio track was selected: build its decoder.
+            audio_epoch = sh.borrow().audio_epoch;
+            let info = sh.borrow().sel_audio.clone();
+            match info.as_ref().map(|i| codecs.audio(i)) {
+                Some(Ok(d)) => dec = d,
+                other => {
+                    let mut s = sh.borrow_mut();
+                    if let Some(Err(e)) = other {
+                        s.warnings.push(alloc::format!("audio disabled: {e}"));
+                    }
+                    s.sel_audio = None;
+                    s.audio_done = true;
+                    return;
+                }
+            }
+        }
         let packet = {
             let mut s = sh.borrow_mut();
             if s.generation != epoch {
@@ -322,6 +441,14 @@ pub struct Session {
     video_trace: Option<Vec<VideoTraceEntry>>,
     shown_preview: bool,
     last_presented: Option<Timestamp>,
+    events: VecDeque<SessionEvent>,
+    shown_subtitle: Option<String>,
+    /// Frame steps requested and not yet shown: +1 forward, -1 back (consumed one at a time while paused).
+    steps: VecDeque<i8>,
+    /// A frame step moved the position, so resuming must re-seek to restart audio there.
+    stepped: bool,
+    /// A-B loop: when playback reaches B it jumps back to A.
+    ab_loop: Option<(Timestamp, Timestamp)>,
 }
 
 impl Session {
@@ -351,7 +478,127 @@ impl Session {
             video_trace: None,
             shown_preview: false,
             last_presented: None,
+            events: VecDeque::new(),
+            shown_subtitle: None,
+            steps: VecDeque::new(),
+            stepped: false,
+            ab_loop: None,
         }
+    }
+
+    /// Loop between `a` and `b` (stream microseconds, `a < b`), or clear the loop with `None`.
+    pub fn set_loop(&mut self, range: Option<(Timestamp, Timestamp)>) {
+        self.ab_loop = range.filter(|(a, b)| a < b);
+    }
+
+    /// The active A-B loop.
+    pub fn loop_range(&self) -> Option<(Timestamp, Timestamp)> {
+        self.ab_loop
+    }
+
+    /// Show the next (`forward`) or previous frame and stay paused. Playing is paused first by the caller.
+    pub fn step_frame(&mut self, forward: bool) {
+        if self.steps.len() < 8 {
+            self.steps.push_back(if forward { 1 } else { -1 });
+        }
+    }
+
+    /// Next pending event, if any.
+    pub fn poll_event(&mut self) -> Option<SessionEvent> {
+        self.events.pop_front()
+    }
+
+    /// Subtitle tracks: container tracks that we can decode, then sidecar files.
+    pub fn subtitle_tracks(&self) -> Vec<SubtitleTrack> {
+        self.sh.borrow().subs.iter().map(|t| t.track.clone()).collect()
+    }
+
+    /// The selected subtitle track, `None` when subtitles are off.
+    pub fn selected_subtitle(&self) -> Option<u32> {
+        self.sh.borrow().sel_sub
+    }
+
+    /// Select a subtitle track, or `None` to turn subtitles off.
+    pub fn select_subtitle(&mut self, id: Option<u32>) {
+        let mut s = self.sh.borrow_mut();
+        s.sel_sub = id.filter(|i| s.subs.iter().any(|t| t.track.id == *i));
+    }
+
+    /// The text of the selected subtitle track at stream time `t`.
+    pub fn subtitle_text_at(&self, t: Timestamp) -> Option<String> {
+        let s = self.sh.borrow();
+        let id = s.sel_sub?;
+        s.subs.iter().find(|x| x.track.id == id)?.cues.text_at(t)
+    }
+
+    /// The subtitle text currently on screen (as of the last tick).
+    pub fn subtitle_text(&self) -> Option<&str> {
+        self.shown_subtitle.as_deref()
+    }
+
+    /// Load a sidecar subtitle file (SRT or WebVTT) as a new track and select it once it is parsed. Returns the
+    /// track id. The file is read by a task of this session, so it may arrive a little later.
+    pub fn add_subtitle_source<S: Source + 'static>(&mut self, mut source: S, name: &str) -> u32 {
+        let id = {
+            let mut s = self.sh.borrow_mut();
+            let id = EXTERNAL_TRACK_BASE + s.next_external;
+            s.next_external += 1;
+            s.subs.push(SubSlot {
+                track: SubtitleTrack { id, language: None, label: String::from(name), external: true },
+                cues: CueList::new(),
+                mov_text: false,
+            });
+            id
+        };
+        let sh = self.sh.clone();
+        let name = String::from(name);
+        self.exec.spawn(async move {
+            let mut data: Vec<u8> = Vec::new();
+            let mut buf = alloc::vec![0u8; 64 * 1024];
+            while data.len() < MAX_SUB_FILE {
+                match source.read_at(data.len() as u64, &mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => data.extend_from_slice(&buf[..n]),
+                }
+            }
+            let text = String::from_utf8_lossy(&data);
+            let cues = rvp_subs::parse(&text);
+            let mut s = sh.borrow_mut();
+            if let Some(slot) = s.subs.iter_mut().find(|t| t.track.id == id) {
+                if cues.is_empty() {
+                    slot.track.label = alloc::format!("{name} (no cues)");
+                }
+                slot.cues = CueList::from_cues(cues);
+            }
+            // The new file is what the user just asked for.
+            s.sel_sub = Some(id);
+            s.progress += 1;
+        });
+        id
+    }
+
+    /// Audio tracks in the container.
+    pub fn audio_tracks(&self) -> Vec<StreamInfo> {
+        self.sh.borrow().streams.iter().filter(|i| i.kind == StreamKind::Audio).cloned().collect()
+    }
+
+    /// Switch to another audio track and resume from the current position (a short rebuffer).
+    pub fn select_audio(&mut self, id: u32, now_us: Timestamp) {
+        let pos = self.position_us(now_us);
+        {
+            let mut s = self.sh.borrow_mut();
+            let Some(info) = s.streams.iter().find(|i| i.id == id && i.kind == StreamKind::Audio).cloned()
+            else {
+                return;
+            };
+            if s.sel_audio.as_ref().is_some_and(|a| a.id == id) {
+                return;
+            }
+            s.sel_audio = Some(info);
+            s.audio_epoch = s.audio_epoch.wrapping_add(1);
+            s.warnings.retain(|w| !w.starts_with("audio disabled"));
+        }
+        self.seek(pos);
     }
 
     /// Record the audio chunks written (tests).
@@ -425,6 +672,11 @@ impl Session {
         if self.ended {
             self.ended = false;
             self.seek(0);
+        } else if self.stepped && !self.running {
+            // Frame steps moved the picture without audio: restart everything from where the picture is.
+            self.stepped = false;
+            let pos = self.clock.now_stream(0).max(0);
+            self.seek(pos);
         }
         self.want_play = true;
     }
@@ -664,6 +916,21 @@ impl Session {
             }
         }
 
+        // 7b. A-B loop: past B, jump back to A and keep playing.
+        if let (true, Some((a, b))) = (self.running, self.ab_loop) {
+            if self.clock.now_stream(now) >= b {
+                self.seek(a);
+            }
+        }
+
+        // 8. Subtitles: report changes.
+        let pos = self.clock.now_stream(now);
+        let text = self.subtitle_text_at(pos);
+        if text != self.shown_subtitle {
+            self.events.push_back(SessionEvent::Subtitle { at_us: pos, text: text.clone() });
+            self.shown_subtitle = text;
+        }
+
         host.clock().request_wake(now + TICK_US);
     }
 }
@@ -677,6 +944,10 @@ impl Session {
     /// no better candidate is coming.
     fn present_video<H: Host>(&mut self, host: &mut H, now: Timestamp) {
         let pos = self.clock.now_stream(now);
+        if !self.steps.is_empty() && !self.running {
+            self.run_steps(host, now);
+            return;
+        }
         let mut s = self.sh.borrow_mut();
         if s.sel_video.is_none() || !s.opened || s.seeking {
             return;
@@ -711,6 +982,91 @@ impl Session {
                 t.push(VideoTraceEntry { clock_us: pos, pts: f.pts });
             }
             self.last_presented = Some(f.pts);
+            self.shown_preview = true;
+        }
+    }
+}
+
+impl Session {
+    /// Carry out pending frame steps while paused. A forward step needs the next decoded frame; a backward step
+    /// is an exact seek to just before the frame on screen, which shows the frame before it.
+    fn run_steps<H: Host>(&mut self, host: &mut H, now: Timestamp) {
+        let (seeking, has_video, opened) = {
+            let s = self.sh.borrow();
+            (s.seeking, s.sel_video.is_some(), s.opened)
+        };
+        if seeking || !has_video || !opened {
+            if opened && !has_video {
+                self.steps.clear();
+            }
+            return;
+        }
+        // A step only makes sense once the picture for the current position is up.
+        if !self.shown_preview {
+            let pos = self.clock.now_stream(now);
+            let s = self.sh.borrow_mut();
+            let may_show = s.video_dec.iter().any(|f| f.pts > pos) || s.video_done;
+            if !may_show {
+                return;
+            }
+            drop(s);
+            self.show_preview(host, pos);
+            return;
+        }
+        let Some(&dir) = self.steps.front() else { return };
+        let cur = self.last_presented.unwrap_or(0);
+        if dir > 0 {
+            let frame = {
+                let mut s = self.sh.borrow_mut();
+                while s.video_dec.front().is_some_and(|f| f.pts <= cur) {
+                    s.video_dec.pop_front();
+                }
+                match s.video_dec.pop_front() {
+                    Some(f) => Some(f),
+                    None => {
+                        if s.video_done {
+                            self.steps.pop_front();
+                        }
+                        None
+                    }
+                }
+            };
+            if let Some(f) = frame {
+                self.steps.pop_front();
+                let pts = f.pts;
+                host.video().present(&f);
+                self.stats.presented += 1;
+                self.last_presented = Some(pts);
+                self.clock.seek(pts, now);
+                self.clock.pause(now);
+                self.stepped = true;
+                if let Some(t) = &mut self.video_trace {
+                    t.push(VideoTraceEntry { clock_us: pts, pts });
+                }
+            }
+        } else {
+            self.steps.pop_front();
+            if cur > 0 {
+                self.seek((cur - 1).max(0));
+                self.stepped = true;
+            }
+        }
+    }
+
+    /// Show the last decoded frame at or before `pos` (the preview after a seek).
+    fn show_preview<H: Host>(&mut self, host: &mut H, pos: Timestamp) {
+        let mut s = self.sh.borrow_mut();
+        let mut candidate = None;
+        while s.video_dec.front().is_some_and(|f| f.pts <= pos) {
+            candidate = s.video_dec.pop_front();
+        }
+        drop(s);
+        if let Some(f) = candidate {
+            host.video().present(&f);
+            self.stats.presented += 1;
+            self.last_presented = Some(f.pts);
+            self.shown_preview = true;
+        } else {
             self.shown_preview = true;
         }
     }

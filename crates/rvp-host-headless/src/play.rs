@@ -3,7 +3,9 @@ use crate::{FileSource, HeadlessHost, VirtualClock};
 use rvp_core::{
     AudioDecoder, CodecFactory, Error, Packet, Result, StreamInfo, Timestamp, VideoDecoder, VideoFrame,
 };
-use rvp_player::{Session, SessionState, TraceEntry, VideoStats, VideoTraceEntry};
+use rvp_player::{
+    Session, SessionEvent, SessionState, SubtitleTrack, TraceEntry, VideoStats, VideoTraceEntry,
+};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -81,6 +83,14 @@ pub struct PlayOptions {
     pub tick_us: Option<Timestamp>,
     /// Playback rate (default 1.0).
     pub rate: Option<f64>,
+    /// A sidecar SRT/WebVTT file to load and show.
+    pub subtitle_file: Option<String>,
+    /// Select this container subtitle track id once the file is open.
+    pub subtitle_track: Option<u32>,
+    /// Select this container audio track id once the file is open.
+    pub audio_track: Option<u32>,
+    /// Loop between these stream times (A, B) from the start.
+    pub ab_loop: Option<(Timestamp, Timestamp)>,
 }
 
 /// Result of a run.
@@ -102,6 +112,10 @@ pub struct PlayReport {
     pub virtual_us: Timestamp,
     /// Final state.
     pub state: SessionState,
+    /// Session events with the virtual host time at which they were raised.
+    pub events: Vec<(Timestamp, SessionEvent)>,
+    /// Subtitle tracks known at the end.
+    pub subtitle_tracks: Vec<SubtitleTrack>,
     /// Container duration.
     pub duration_us: Option<Timestamp>,
     /// First error, if any.
@@ -120,12 +134,31 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
     if let Some(r) = opts.rate {
         session.set_rate(r, 0);
     }
+    if let Some(path) = &opts.subtitle_file {
+        let name = Path::new(path).file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+        session.add_subtitle_source(FileSource::open(path)?, &name);
+    }
+    session.set_loop(opts.ab_loop);
     session.play();
+    let mut applied = false;
+    let mut events = Vec::new();
     let mut seeks = opts.seeks.iter().copied().peekable();
     let mut max_us = opts.max_virtual_us;
     loop {
         session.tick(&mut host);
         let now = rvp_host::HostClock::now_us(&*clock);
+        if !applied && session.state() != SessionState::Opening {
+            applied = true;
+            if let Some(id) = opts.subtitle_track {
+                session.select_subtitle(Some(id));
+            }
+            if let Some(id) = opts.audio_track {
+                session.select_audio(id, now);
+            }
+        }
+        while let Some(e) = session.poll_event() {
+            events.push((now, e));
+        }
         if max_us.is_none() {
             if let Some(d) = session.duration_us() {
                 max_us = Some(d * 2 + 20_000_000 + opts.seeks.iter().map(|s| s.0).sum::<i64>());
@@ -156,6 +189,8 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         warnings: session.warnings(),
         virtual_us: now,
         state: session.state(),
+        events,
+        subtitle_tracks: session.subtitle_tracks(),
         duration_us: session.duration_us(),
         error: session.error(),
     })

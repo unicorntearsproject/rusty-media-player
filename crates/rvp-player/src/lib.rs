@@ -11,7 +11,10 @@ pub mod exec;
 pub mod session;
 
 pub use audio::{AudioOut, TraceEntry};
-pub use session::{Session, SessionState, VideoStats, VideoTraceEntry};
+pub use session::{
+    EXTERNAL_TRACK_BASE, Session, SessionEvent, SessionState, SubtitleTrack, VideoStats, VideoTraceEntry,
+    language_name,
+};
 
 use alloc::collections::VecDeque;
 use rvp_core::Timestamp;

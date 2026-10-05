@@ -787,7 +787,10 @@ impl Ui {
         }
         if let Some(a) = actions::shortcut_for(key, mods) {
             // Holding a key repeats seeks, volume and speed steps; play/pause, mute, fullscreen and open do not.
-            let repeatable = matches!(a, Action::SeekBy(_) | Action::VolumeBy(_) | Action::SpeedStep(_));
+            let repeatable = matches!(
+                a,
+                Action::SeekBy(_) | Action::VolumeBy(_) | Action::SpeedStep(_) | Action::FrameStep(_)
+            );
             if !repeat || repeatable {
                 out.push(a);
             }

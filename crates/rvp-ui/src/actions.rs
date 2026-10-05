@@ -47,6 +47,16 @@ pub enum Action {
     SelectAudio(u32),
     /// A specific subtitle track, or off.
     SelectSubtitle(Option<u32>),
+    /// Step one frame forward (+1) or back (-1) and stay paused.
+    FrameStep(i8),
+    /// The loop key: first press marks A, second marks B (the loop starts), third clears.
+    LoopMark,
+    /// Mark the loop start at the current position.
+    SetLoopA,
+    /// Mark the loop end at the current position.
+    SetLoopB,
+    /// Clear the A-B loop.
+    ClearLoop,
 }
 
 /// The physical key of a shortcut.
@@ -111,6 +121,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::Char('\\'), Action::ResetSpeed),
     sc(ShortKey::Char('a'), Action::CycleAudio),
     sc(ShortKey::Char('s'), Action::CycleSubtitles),
+    sc(ShortKey::Char('.'), Action::FrameStep(1)),
+    sc(ShortKey::Char(','), Action::FrameStep(-1)),
+    sc(ShortKey::Char('i'), Action::LoopMark),
 ];
 
 /// The action bound to a key press, if any. Browser-style combinations (Ctrl, Alt or Meta with a letter)
@@ -346,6 +359,21 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::act("Forward 30 s", Action::SeekBy(30_000)),
         MenuItem::act("To start", Action::SeekStart).sep(),
         MenuItem::act("To end", Action::SeekEnd),
+        MenuItem::act("Next frame", Action::FrameStep(1)).sep(),
+        MenuItem::act("Previous frame", Action::FrameStep(-1)),
+    ];
+    let loop_state = if model.loop_b.is_some() {
+        "Loop: on"
+    } else if model.loop_a.is_some() {
+        "Loop: A set"
+    } else {
+        "Loop: off"
+    };
+    let looping = alloc::vec![
+        MenuItem::act(loop_state, Action::LoopMark),
+        MenuItem::act("Set start (A)", Action::SetLoopA).sep(),
+        MenuItem::act("Set end (B)", Action::SetLoopB),
+        MenuItem::act("Clear loop", Action::ClearLoop).enabled(model.loop_a.is_some()).sep(),
     ];
     let volume = alloc::vec![
         MenuItem::act("Louder", Action::VolumeBy(5)),
@@ -356,6 +384,7 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::act("Open file\u{2026}", Action::OpenFile),
         play.sep(),
         MenuItem::parent("Seek", seek).enabled(has),
+        MenuItem::parent("A-B loop", looping).enabled(has),
         MenuItem::parent("Speed", speed_menu(model)).enabled(has),
         MenuItem::parent("Volume", volume),
         MenuItem::parent("Audio track", audio_menu(model)).sep().enabled(has),

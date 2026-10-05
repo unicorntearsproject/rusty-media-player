@@ -19,7 +19,7 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use rvp_core::{CodecFactory, Error, StreamKind, Timestamp};
+use rvp_core::{CodecFactory, Error, Timestamp};
 use rvp_host::{FrameSink, Host, InputEvent, OpenRequest, Rect};
 use rvp_player::{Session, SessionState};
 use rvp_ui::{Action, Cursor, FrameBuffer, MediaState, SPEEDS, TrackItem, Ui, UiConfig, UiModel};
@@ -56,6 +56,8 @@ pub struct App {
     last_drawn: Option<UiModel>,
     last_has_media: bool,
     warnings_seen: usize,
+    loop_a: Option<Timestamp>,
+    loop_b: Option<Timestamp>,
     now: Timestamp,
     frames_drawn: u64,
     perf: Perf,
@@ -103,6 +105,8 @@ impl App {
             last_drawn: None,
             last_has_media: false,
             warnings_seen: 0,
+            loop_a: None,
+            loop_b: None,
             now: 0,
             frames_drawn: 0,
             perf: Perf::default(),
@@ -162,7 +166,20 @@ impl App {
     {
         use rvp_host::Source;
         let now = host.clock().now_us();
+        // A subtitle file dropped onto a playing video joins it instead of replacing it.
+        let lower = source.name().to_ascii_lowercase();
+        if (lower.ends_with(".srt") || lower.ends_with(".vtt")) && self.session.is_some() {
+            let name = source.name().to_string();
+            if let Some(s) = &mut self.session {
+                s.add_subtitle_source(source, &name);
+            }
+            self.ui.show_toast(&format!("Subtitles: {name}"), now);
+            self.refresh_model(now);
+            return;
+        }
         self.title = source.name().to_string();
+        self.loop_a = None;
+        self.loop_b = None;
         let mut s = Session::new(source, self.codecs.clone());
         s.set_volume(self.volume);
         s.set_muted(self.muted);
@@ -314,24 +331,122 @@ impl App {
             Action::SpeedStep(d) => self.set_speed(Ui::next_speed(self.rate as f32, d) as f64, now),
             Action::SetSpeed(r) => self.set_speed(r as f64, now),
             Action::ResetSpeed => self.set_speed(1.0, now),
-            Action::CycleAudio | Action::SelectAudio(_) => {
-                let n = self.model.audio_tracks.len();
-                let msg = if n <= 1 {
-                    "Only one audio track in this file."
-                } else {
-                    "Switching audio tracks lands in M8."
-                };
-                self.ui.show_toast(msg, now);
+            Action::FrameStep(d) => {
+                if let Some(s) = &mut self.session {
+                    if matches!(s.state(), SessionState::Playing | SessionState::Buffering) {
+                        s.pause(now);
+                    }
+                    s.step_frame(d > 0);
+                }
             }
-            Action::CycleSubtitles | Action::SelectSubtitle(_) => {
-                let msg = if self.model.subtitle_tracks.is_empty() {
-                    "No subtitles in this file."
+            Action::LoopMark => match (self.loop_a, self.loop_b) {
+                (None, _) => self.set_loop_point(true, now),
+                (Some(_), None) => self.set_loop_point(false, now),
+                (Some(_), Some(_)) => self.clear_loop(now),
+            },
+            Action::SetLoopA => self.set_loop_point(true, now),
+            Action::SetLoopB => self.set_loop_point(false, now),
+            Action::ClearLoop => self.clear_loop(now),
+            Action::CycleAudio => {
+                let tracks = self.model.audio_tracks.clone();
+                if tracks.len() <= 1 {
+                    self.ui.show_toast("Only one audio track in this file.", now);
                 } else {
-                    "Subtitles land in M8."
-                };
-                self.ui.show_toast(msg, now);
+                    let cur = tracks.iter().position(|t| Some(t.id) == self.model.selected_audio);
+                    let next = &tracks[cur.map_or(0, |i| (i + 1) % tracks.len())];
+                    self.select_audio(next.id, &next.label.clone(), now);
+                }
+            }
+            Action::SelectAudio(id) => {
+                let label = self
+                    .model
+                    .audio_tracks
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.label.clone())
+                    .unwrap_or_default();
+                self.select_audio(id, &label, now);
+            }
+            Action::CycleSubtitles => {
+                let tracks = self.model.subtitle_tracks.clone();
+                if tracks.is_empty() {
+                    self.ui.show_toast("No subtitles in this file.", now);
+                } else {
+                    // Off -> first -> second -> ... -> off.
+                    let next = match self.model.selected_subtitle {
+                        None => Some(tracks[0].id),
+                        Some(cur) => {
+                            let i = tracks.iter().position(|t| t.id == cur).unwrap_or(tracks.len());
+                            tracks.get(i + 1).map(|t| t.id)
+                        }
+                    };
+                    self.select_subtitle(next, now);
+                }
+            }
+            Action::SelectSubtitle(id) => self.select_subtitle(id, now),
+        }
+    }
+
+    fn set_loop_point(&mut self, is_a: bool, now: Timestamp) {
+        let Some(s) = &self.session else { return };
+        let pos = s.position_us(now);
+        if is_a {
+            self.loop_a = Some(pos);
+            if self.loop_b.is_some_and(|b| b <= pos) {
+                self.loop_b = None;
+            }
+            self.ui.show_toast(&format!("Loop start {}", rvp_ui::format_time(pos)), now);
+        } else {
+            match self.loop_a {
+                Some(a) if pos > a + 200_000 => {
+                    self.loop_b = Some(pos);
+                    self.ui.show_toast(
+                        &format!("Looping {} to {}", rvp_ui::format_time(a), rvp_ui::format_time(pos)),
+                        now,
+                    );
+                }
+                Some(_) => {
+                    self.ui.show_toast("Loop end must come after the start.", now);
+                    return;
+                }
+                None => {
+                    self.ui.show_toast("Set the loop start first (I).", now);
+                    return;
+                }
             }
         }
+        if let (Some(a), Some(b), Some(s)) = (self.loop_a, self.loop_b, &mut self.session) {
+            s.set_loop(Some((a, b)));
+        } else if let Some(s) = &mut self.session {
+            s.set_loop(None);
+        }
+    }
+
+    fn clear_loop(&mut self, now: Timestamp) {
+        self.loop_a = None;
+        self.loop_b = None;
+        if let Some(s) = &mut self.session {
+            s.set_loop(None);
+        }
+        self.ui.show_toast("Loop cleared", now);
+    }
+
+    fn select_audio(&mut self, id: u32, label: &str, now: Timestamp) {
+        if let Some(s) = &mut self.session {
+            s.select_audio(id, now);
+        }
+        self.ui.show_toast(&format!("Audio: {label}"), now);
+    }
+
+    fn select_subtitle(&mut self, id: Option<u32>, now: Timestamp) {
+        if let Some(s) = &mut self.session {
+            s.select_subtitle(id);
+        }
+        let msg = match id.and_then(|i| self.model.subtitle_tracks.iter().find(|t| t.id == i)) {
+            Some(t) => format!("Subtitles: {}", t.label),
+            None => "Subtitles off".to_string(),
+        };
+        self.ui.show_toast(&msg, now);
     }
 
     fn clamp_pos(t: Timestamp, dur: Option<Timestamp>) -> Timestamp {
@@ -365,6 +480,8 @@ impl App {
             volume: self.volume,
             muted: self.muted,
             rate: self.rate as f32,
+            loop_a: self.loop_a,
+            loop_b: self.loop_b,
             fullscreen: self.fullscreen,
             ..UiModel::default()
         };
@@ -390,9 +507,11 @@ impl App {
             if m.state == MediaState::Failed {
                 m.error = s.error().map(|e| friendly_error(&e));
             }
-            let audio_streams = s.streams();
-            for (n, st) in audio_streams.iter().filter(|st| st.kind == StreamKind::Audio).enumerate() {
-                let name = st.language.clone().unwrap_or_else(|| format!("Audio {}", n + 1));
+            for (n, st) in s.audio_tracks().iter().enumerate() {
+                let name = match &st.language {
+                    Some(l) if !l.is_empty() && l != "und" => rvp_player::language_name(l),
+                    _ => format!("Audio {}", n + 1),
+                };
                 let layout = match st.audio.map(|a| a.channels) {
                     Some(1) => ", mono".to_string(),
                     Some(2) => ", stereo".to_string(),
@@ -402,6 +521,11 @@ impl App {
                 m.audio_tracks.push(TrackItem { id: st.id, label: format!("{name} ({}{layout})", st.codec) });
             }
             m.selected_audio = s.selected_audio();
+            for t in s.subtitle_tracks() {
+                m.subtitle_tracks.push(TrackItem { id: t.id, label: t.label });
+            }
+            m.selected_subtitle = s.selected_subtitle();
+            m.subtitle = s.subtitle_text().map(|t| t.to_string());
             let warnings = s.warnings();
             if warnings.len() > self.warnings_seen {
                 for w in &warnings[self.warnings_seen..] {
@@ -468,7 +592,10 @@ impl App {
         self.last_drawn = Some(cmp);
         let tb1 = host.clock().now_us();
         // Watching with the controls away: the picture layer is the whole frame, so skip the copy and the chrome.
-        let bare = self.model.state == MediaState::Playing && self.model.has_video && !self.ui.has_overlay();
+        let bare = self.model.state == MediaState::Playing
+            && self.model.has_video
+            && self.model.subtitle.is_none()
+            && !self.ui.has_overlay();
         if !bare {
             self.fb.copy_from(&self.base);
             self.ui.draw_overlay(&mut self.fb, &self.model);

@@ -5,7 +5,7 @@
 //! frame is `origin + frames_since_origin / rate`. Packet timestamps are only trusted to detect jumps, because a
 //! container rounds them to its tick (1 ms in Matroska), which would make a clock built on them jitter.
 use alloc::vec::Vec;
-use rvp_core::{AudioBuffer, AudioParams, Resampler, Timestamp};
+use rvp_core::{AudioBuffer, AudioParams, Resampler, TimeStretcher, Timestamp};
 use rvp_host::AudioSink;
 
 /// A timestamp discontinuity larger than this re-anchors the timeline.
@@ -38,8 +38,9 @@ pub struct AudioOut {
     written: u64,
     discard_until: Timestamp,
     trace: Option<Vec<TraceEntry>>,
-    /// Playback rate: the input is consumed `rate` times faster than real time (varispeed: pitch follows).
+    /// Playback rate: the input is consumed `rate` times faster than real time (pitch is kept by WSOLA).
     rate: f64,
+    stretcher: Option<TimeStretcher>,
 }
 
 impl AudioOut {
@@ -58,14 +59,16 @@ impl AudioOut {
             discard_until: 0,
             trace: None,
             rate: 1.0,
+            stretcher: None,
         }
     }
 
     /// Set the playback rate. Only call this right after [`AudioOut::reset`]: audio already queued keeps the
-    /// old rate. Rates other than 1.0 resample the input (so the pitch changes; time-stretching is M8).
+    /// old rate. Rates other than 1.0 time-stretch the input with WSOLA, so the pitch is unchanged.
     pub fn set_rate(&mut self, rate: f64) {
         self.rate = rate.clamp(0.1, 8.0);
-        self.resampler = None;
+        self.stretcher = (self.rate != 1.0)
+            .then(|| TimeStretcher::new(self.sink.sample_rate, self.sink.channels as usize, self.rate));
     }
 
     /// Stream microseconds covered by `frames` output frames at the current rate.
@@ -100,6 +103,9 @@ impl AudioOut {
         self.discard_until = discard_until;
         if let Some(r) = &mut self.resampler {
             r.reset();
+        }
+        if let Some(t) = &mut self.stretcher {
+            t.reset();
         }
     }
 
@@ -153,16 +159,20 @@ impl AudioOut {
 
         let mixed = mix(samples, in_ch, self.sink.channels as usize);
         let before = self.pending.len();
-        // At rate r the input is played r times faster, which is the same as resampling from `in_rate * r`.
-        let eff_rate = if self.rate == 1.0 { in_rate } else { ((in_rate as f64 * self.rate) as u32).max(1) };
-        if eff_rate == self.sink.sample_rate {
-            self.pending.extend_from_slice(&mixed);
+        // First to the sink rate, then (for rates other than 1) time-stretched there.
+        let at_sink: alloc::borrow::Cow<'_, [f32]> = if in_rate == self.sink.sample_rate {
+            alloc::borrow::Cow::Borrowed(&mixed)
         } else {
             let sink_ch = self.sink.channels as usize;
-            let r = self
-                .resampler
-                .get_or_insert_with(|| Resampler::new(eff_rate, self.sink.sample_rate, sink_ch));
-            r.process(&mixed, &mut self.pending);
+            let r =
+                self.resampler.get_or_insert_with(|| Resampler::new(in_rate, self.sink.sample_rate, sink_ch));
+            let mut tmp = Vec::new();
+            r.process(&mixed, &mut tmp);
+            alloc::borrow::Cow::Owned(tmp)
+        };
+        match &mut self.stretcher {
+            Some(t) => t.process(&at_sink, &mut self.pending),
+            None => self.pending.extend_from_slice(&at_sink),
         }
         let added = (self.pending.len() - before) / self.sink.channels as usize;
         if self.origin.is_none() {

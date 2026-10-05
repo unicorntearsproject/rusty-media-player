@@ -71,6 +71,19 @@ impl App {
             ui.controls_opacity()
         );
         j += &format!("\"menu_open\":{},\"has_video\":{},", ui.menu_open(), m.has_video);
+        let tracks = |v: &[rvp_ui::TrackItem]| -> String {
+            let items: alloc::vec::Vec<String> =
+                v.iter().map(|t| format!("{{\"id\":{},\"label\":{}}}", t.id, esc(&t.label))).collect();
+            format!("[{}]", items.join(","))
+        };
+        j += &format!(
+            "\"audio_tracks\":{},\"selected_audio\":{},\"subtitle_tracks\":{},\"selected_subtitle\":{},\"subtitle\":{},",
+            tracks(&m.audio_tracks),
+            m.selected_audio.map_or("null".to_string(), |i| i.to_string()),
+            tracks(&m.subtitle_tracks),
+            m.selected_subtitle.map_or("null".to_string(), |i| i.to_string()),
+            m.subtitle.as_deref().map_or("null".to_string(), esc),
+        );
         j += &match &m.error {
             Some(e) => format!("\"error\":{},", esc(e)),
             None => "\"error\":null,".to_string(),

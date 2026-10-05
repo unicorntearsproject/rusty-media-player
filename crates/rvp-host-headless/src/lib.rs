@@ -433,5 +433,5 @@ mod tests {
 
 pub mod play;
 pub use play::{DefaultCodecs, PlayOptions, PlayReport, play_file, write_wav_f32};
-pub use rvp_player::SessionState;
 pub use rvp_player::TraceEntry as TraceEntryRef;
+pub use rvp_player::{SessionEvent, SessionState, SubtitleTrack};

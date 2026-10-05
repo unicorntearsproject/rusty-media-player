@@ -67,6 +67,12 @@ pub struct UiModel {
     pub subtitle_tracks: Vec<TrackItem>,
     /// Selected subtitle track id (`None` = off).
     pub selected_subtitle: Option<u32>,
+    /// The subtitle text on screen right now.
+    pub subtitle: Option<String>,
+    /// A-B loop start, microseconds.
+    pub loop_a: Option<i64>,
+    /// A-B loop end, microseconds.
+    pub loop_b: Option<i64>,
     /// Why playback failed, in the player's own voice.
     pub error: Option<String>,
 }

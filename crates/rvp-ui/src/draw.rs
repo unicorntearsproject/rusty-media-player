@@ -46,6 +46,9 @@ impl Ui {
                 MediaState::Buffering | MediaState::Opening => self.draw_spinner(fb, &l),
                 _ => {}
             }
+            if model.subtitle.is_some() && model.state != MediaState::Failed {
+                self.draw_subtitle(fb, &l, model);
+            }
             if self.controls_alpha > 0.005 && model.state != MediaState::Failed {
                 self.draw_top(fb, &l, model);
                 self.draw_bar(fb, &l, model);
@@ -321,6 +324,38 @@ impl Ui {
             let played = RectF::new(track.x, track.y, (px - track.x).max(th), th);
             fb.fill_rrect(played, th * 0.5, Paint::Horizontal(t::MAGENTA_500, t::VIOLET_400), a);
         }
+        // The A-B loop: a cyan band between the marks, and a tick at each mark.
+        if let Some(d) = model.duration_us.filter(|d| *d > 0) {
+            let at = |us: i64| track.x + track.w * (us as f32 / d as f32).clamp(0.0, 1.0);
+            match (model.loop_a, model.loop_b) {
+                (Some(la), Some(lb)) => {
+                    let (xa, xb) = (at(la), at(lb));
+                    fb.fill_rect_paint(
+                        RectF::new(xa, track.y, (xb - xa).max(1.0), th),
+                        Paint::Solid(fade(t::CYAN_500, 0.55)),
+                        a,
+                    );
+                    for x in [xa, xb] {
+                        fb.fill_rrect(
+                            RectF::new(x - 1.0 * s, tr.cy() - 9.0 * s, 2.0 * s, 18.0 * s),
+                            1.0 * s,
+                            Paint::Solid(t::CYAN_500),
+                            a,
+                        );
+                    }
+                }
+                (Some(la), None) => {
+                    let x = at(la);
+                    fb.fill_rrect(
+                        RectF::new(x - 1.0 * s, tr.cy() - 9.0 * s, 2.0 * s, 18.0 * s),
+                        1.0 * s,
+                        Paint::Solid(t::CYAN_500),
+                        a,
+                    );
+                }
+                _ => {}
+            }
+        }
         if hot {
             // The handle: a cyan knob with the only glow on the bar.
             let k = RectF::new(px - 7.0 * s, tr.cy() - 7.0 * s, 14.0 * s, 14.0 * s);
@@ -477,6 +512,51 @@ impl Ui {
                     self.focus_ring(fb, rr, 10.0 * s, a);
                 }
             }
+        }
+    }
+
+    /// Subtitles: centred lines on dark pills, above the bar while it is showing and near the bottom otherwise.
+    fn draw_subtitle(&mut self, fb: &mut FrameBuffer, l: &Layout, model: &UiModel) {
+        let Some(text) = model.subtitle.as_deref() else { return };
+        let s = l.s;
+        let size = (l.h / s * 0.042).clamp(15.0, 34.0);
+        let max_w = l.w * 0.86;
+        // Word-wrap each line to the window.
+        let mut lines: Vec<String> = Vec::new();
+        for raw in text.split('\n') {
+            let mut cur = String::new();
+            for word in raw.split_whitespace() {
+                let candidate =
+                    if cur.is_empty() { String::from(word) } else { alloc::format!("{cur} {word}") };
+                if cur.is_empty() || self.text_w(Face::SansMedium, size, &candidate, 0.0) <= max_w {
+                    cur = candidate;
+                } else {
+                    lines.push(core::mem::take(&mut cur));
+                    cur = String::from(word);
+                }
+            }
+            if !cur.is_empty() {
+                lines.push(cur);
+            }
+        }
+        if lines.is_empty() {
+            return;
+        }
+        let line_h = size * 1.5 * s;
+        let bottom = if self.controls_alpha > 0.05 { l.bar_top + 40.0 * s } else { l.h - 36.0 * s };
+        let bottom = bottom.min(l.h - 24.0 * s);
+        let top = bottom - line_h * lines.len() as f32;
+        for (i, line) in lines.iter().enumerate() {
+            let tw = self.text_w(Face::SansMedium, size, line, 0.0);
+            let cy = top + line_h * (i as f32 + 0.5);
+            let r = RectF::new(
+                l.w * 0.5 - tw * 0.5 - 12.0 * s,
+                cy - line_h * 0.5 + 2.0 * s,
+                tw + 24.0 * s,
+                line_h - 4.0 * s,
+            );
+            fb.fill_rrect(r, 8.0 * s, Paint::Solid(fade(Rgba::new(7, 6, 13, 255), 0.78)), 1.0);
+            self.text(fb, Face::SansMedium, size, r.x + 12.0 * s, cy, line, t::TEXT_STRONG, 1.0, 0.0);
         }
     }
 

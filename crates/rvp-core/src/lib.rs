@@ -15,6 +15,7 @@ pub mod error;
 pub mod media;
 pub mod resample;
 pub mod ring;
+pub mod stretch;
 pub mod task;
 pub mod time;
 
@@ -27,4 +28,5 @@ pub use media::{
 };
 pub use resample::Resampler;
 pub use ring::RingBuffer;
+pub use stretch::TimeStretcher;
 pub use time::{Rational, Timestamp};

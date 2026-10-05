@@ -41,6 +41,7 @@ rvp-codec-av1 = { path = "crates/rvp-codec-av1" }
 rvp-codec-h264 = { path = "crates/rvp-codec-h264" }
 rvp-codec-vp9 = { path = "crates/rvp-codec-vp9" }
 rvp-demux = { path = "crates/rvp-demux" }
+rvp-subs = { path = "crates/rvp-subs" }
 rvp-player = { path = "crates/rvp-player" }
 rvp-ui = { path = "crates/rvp-ui" }
 rvp-app = { path = "crates/rvp-app" }

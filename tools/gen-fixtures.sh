@@ -2,7 +2,8 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=core|h264|vp9|all   which set to build (default all); the H.264 set goes to <outdir>/h264, VP9 to <outdir>/vp9
+#   RVP_FIXTURE_SET=core|h264|vp9|m8|all   which set to build (default all); H.264 goes to <outdir>/h264, VP9 to <outdir>/vp9, M8 (subtitles,
+#                                       tracks, gapless) to <outdir>/m8
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -213,8 +214,103 @@ PY
   echo "vp9 fixtures in $d"
 }
 
+# ---------------------------------------------------------------------------------------------------------
+# M8: subtitles (embedded and sidecar), several audio tracks, gapless pieces, chapters.
+gen_m8() {
+  local d="$out/m8"
+  mkdir -p "$d"
+  [[ -s "$d/.done" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
+  # Sidecar subtitle files with known timing (also the source of the embedded ones).
+  cat > "$d/sub.srt" <<'SRT'
+1
+00:00:01,000 --> 00:00:02,000
+Hello
+
+2
+00:00:03,000 --> 00:00:04,500
+<i>World</i>
+two lines
+
+3
+00:00:05,000 --> 00:00:05,500
+Last one
+SRT
+  cat > "$d/sub_es.srt" <<'SRT'
+1
+00:00:01,000 --> 00:00:02,000
+Hola
+
+2
+00:00:03,000 --> 00:00:04,500
+Mundo
+SRT
+  cat > "$d/sub.vtt" <<'VTT'
+WEBVTT
+
+NOTE a comment
+
+intro
+00:00:01.000 --> 00:00:02.000 align:start
+Hello
+
+00:00:03.000 --> 00:00:04.500
+<i>World</i>
+two lines
+
+00:00:05.000 --> 00:00:05.500
+Last one
+VTT
+  local v=(-f lavfi -i "testsrc2=size=320x240:rate=25:duration=6")
+  local a=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=6")
+  local h=(-c:v libx264 -preset veryfast -g 25 -pix_fmt yuv420p)
+  # Embedded text subtitles: Matroska SRT (two languages) and WebVTT, MP4 mov_text and wvtt.
+  ff "${v[@]}" "${a[@]}" -i "$d/sub.srt" -i "$d/sub_es.srt" -map 0 -map 1 -map 2 -map 3 "${h[@]}" -c:a aac -b:a 64k -c:s srt \
+     -metadata:s:s:0 language=eng -metadata:s:s:1 language=spa "$d/subs_srt.mkv"
+  ff "${v[@]}" "${a[@]}" -i "$d/sub.vtt" -map 0 -map 1 -map 2 "${h[@]}" -c:a aac -b:a 64k -c:s webvtt -metadata:s:s:0 language=eng "$d/subs_vtt.mkv"
+  ff "${v[@]}" "${a[@]}" -i "$d/sub.srt" -map 0 -map 1 -map 2 "${h[@]}" -c:a aac -b:a 64k -c:s mov_text -metadata:s:s:0 language=eng "$d/subs_movtext.mp4"
+  # Two audio tracks: 440 Hz (English) and 880 Hz (Spanish), Opus in Matroska, with video.
+  ff "${v[@]}" "${a[@]}" -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=6" -map 0 -map 1 -map 2 "${h[@]}" -c:a libopus -b:a 64k -ac 2 \
+     -metadata:s:a:0 language=eng -metadata:s:a:1 language=spa "$d/two_audio.mkv"
+  # Gapless pieces: three 2 s FLAC pieces (and Opus pieces) cut from one continuous 440 Hz sine (sample exact).
+  ff -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=6" -c:a pcm_s16le "$d/sine_full.wav"
+  for i in 0 1 2; do
+    ff -ss $((i * 2)) -i "$d/sine_full.wav" -t 2 -c:a flac "$d/gap_$i.mkv"
+    ff -ss $((i * 2)) -i "$d/sine_full.wav" -t 2 -c:a libopus -b:a 96k "$d/gap_opus_$i.webm"
+    ff -ss $((i * 2)) -i "$d/sine_full.wav" -t 2 -c:a aac -b:a 96k "$d/gap_aac_$i.mp4"
+  done
+  # Chapters.
+  cat > "$d/chapters.txt" <<'CH'
+;FFMETADATA1
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=2000
+title=Intro
+[CHAPTER]
+TIMEBASE=1/1000
+START=2000
+END=4000
+title=Middle
+[CHAPTER]
+TIMEBASE=1/1000
+START=4000
+END=6000
+title=End
+CH
+  ff "${v[@]}" "${a[@]}" -i "$d/chapters.txt" -map_metadata 2 -map_chapters 2 -map 0 -map 1 "${h[@]}" -c:a aac -b:a 64k "$d/chapters.mkv"
+  ff "${v[@]}" "${a[@]}" -i "$d/chapters.txt" -map_metadata 2 -map_chapters 2 -map 0 -map 1 "${h[@]}" -c:a aac -b:a 64k "$d/chapters.mp4"
+  # Tags and cover art in audio-only MP4/MKV for the now-playing model.
+  ff "${a[@]}" -f lavfi -i "color=c=magenta:size=64x64:d=1,format=yuvj420p" -frames:v 1 "$d/cover.jpg"
+  ff "${a[@]}" -i "$d/cover.jpg" -map 0:a -map 1:v -c:a aac -b:a 64k -c:v mjpeg -disposition:v:0 attached_pic \
+     -metadata title="Sine Song" -metadata artist="The Tones" -metadata album="Pure" "$d/tagged.m4a"
+  ff "${a[@]}" -c:a libopus -b:a 64k -metadata title="Sine Song" -metadata artist="The Tones" -metadata album="Pure" "$d/tagged.webm"
+  touch "$d/.done"
+  echo "m8 fixtures in $d"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
 if [[ "$fixture_set" == all || "$fixture_set" == h264 ]]; then gen_h264; fi
 if [[ "$fixture_set" == all || "$fixture_set" == vp9 ]]; then gen_vp9; fi
+if [[ "$fixture_set" == all || "$fixture_set" == m8 ]]; then gen_m8; fi
 echo "fixtures in $out"
