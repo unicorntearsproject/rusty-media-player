@@ -98,11 +98,19 @@ impl App {
         }
         j += "],";
         if let Some(s) = self.session() {
-            if let Some(f) =
-                s.streams().iter().find(|i| i.kind == rvp_core::StreamKind::Video).and_then(|i| i.video)
-            {
-                let v = ui.video_rect(f.width, f.height);
-                j += &format!("\"video_rect\":{},", rect(v));
+            // The picture's own size wins over the container's: it can change mid-stream.
+            let size = if self.drawn_size.0 > 0 {
+                Some(self.drawn_size)
+            } else {
+                s.streams()
+                    .iter()
+                    .find(|i| i.kind == rvp_core::StreamKind::Video)
+                    .and_then(|i| i.video)
+                    .map(|f| (f.width, f.height))
+            };
+            if let Some((w, h)) = size {
+                let v = ui.video_rect(w, h);
+                j += &format!("\"video_rect\":{},\"frame_size\":[{w},{h}],", rect(v));
             }
             let st = s.video_stats();
             j += &format!(

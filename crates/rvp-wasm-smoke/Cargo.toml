@@ -20,3 +20,4 @@ rvp-demux.workspace = true
 rvp-host = { workspace = true }
 rvp-codec-av1.workspace = true
 rvp-codec-h264.workspace = true
+rvp-codec-vp9.workspace = true

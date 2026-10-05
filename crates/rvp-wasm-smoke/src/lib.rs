@@ -1,4 +1,4 @@
-//! A WebAssembly smoke test for the codec stack: demux an AV1 (rav1d) or H.264 (our own decoder) file held in
+//! A WebAssembly smoke test for the codec stack: demux an AV1 (rav1d), H.264 (our own decoder) or VP9 (rusty_vp9) file held in
 //! memory and decode every frame, returning a count and a hash. Native and wasm32 builds must agree
 //! (`cargo xtask wasm-smoke`). The same module doubles as the wasm benchmark (`tools/wasm-smoke.mjs ... --bench`).
 //!
@@ -22,6 +22,7 @@ pub fn decode_video(file: Vec<u8>) -> Result<(u32, u64), String> {
             d.streams().iter().find(|s| s.kind == StreamKind::Video).cloned().ok_or("no video stream")?;
         let mut dec = match info.codec.as_str() {
             "h264" => rvp_codec_h264::h264_decoder(&info),
+            "vp9" => rvp_codec_vp9::vp9_decoder(&info),
             _ => rvp_codec_av1::av1_decoder(&info),
         }
         .map_err(|e| e.to_string())?;

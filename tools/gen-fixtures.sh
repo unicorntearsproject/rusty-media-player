@@ -2,7 +2,7 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=core|h264|all       which set to build (default all); the H.264 set goes to <outdir>/h264
+#   RVP_FIXTURE_SET=core|h264|vp9|all   which set to build (default all); the H.264 set goes to <outdir>/h264, VP9 to <outdir>/vp9
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -128,7 +128,93 @@ gen_h264() {
   echo "h264 fixtures in $d"
 }
 
+# ---------------------------------------------------------------------------------------------------------
+# VP9 conformance matrix: libvpx-encoded streams (profile 0 unless named otherwise), in WebM, video only unless named.
+# Same busy synthetic source as the H.264 set. Resize streams are two encodes of different sizes joined at a key
+# frame (ffmpeg's libvpx wrapper cannot do in-stream reference scaling).
+gen_vp9() {
+  local d="$out/vp9"
+  mkdir -p "$d"
+  # enc <name> <WxH> <frames> <ffmpeg args...>
+  enc() {
+    local name="$1" size="$2" frames="$3"; shift 3
+    local dst="$d/$name.webm"
+    if [[ -s "$dst" && -z "${RVP_FIXTURE_FORCE:-}" ]]; then return; fi
+    ff -f lavfi -i "testsrc2=size=$size:rate=30" -vf "noise=alls=${NOISE:-9}:allf=t,format=${PIXFMT:-yuv420p}" -frames:v "$frames" \
+       -an -c:v libvpx-vp9 -threads 1 -pix_fmt "${PIXFMT:-yuv420p}" "$@" "$dst"
+  }
+  # sizes
+  enc s_64x64 64x64 20 -deadline good -cpu-used 2 -crf 30 -b:v 0 -g 10
+  enc s_176x144 176x144 30 -deadline good -cpu-used 2 -crf 30 -b:v 0 -g 15
+  enc s_352x288 352x288 30 -deadline good -cpu-used 2 -crf 30 -b:v 0 -g 15
+  enc s_8x8 8x8 10 -deadline good -cpu-used 2 -crf 30 -b:v 0 -g 5
+  enc s_odd_327x245 327x245 24 -deadline good -cpu-used 2 -crf 30 -b:v 0 -g 12
+  enc s_odd_130x66 130x66 24 -deadline good -cpu-used 2 -crf 30 -b:v 0 -g 12
+  enc s_odd_17x9 17x9 12 -deadline good -cpu-used 2 -crf 30 -b:v 0 -g 6
+  NOISE=14 enc s_720p 1280x720 30 -deadline good -cpu-used 4 -crf 32 -b:v 0 -g 30
+  NOISE=2 enc s_720p_typ 1280x720 60 -deadline good -cpu-used 4 -crf 33 -b:v 0 -g 60 -tile-columns 2
+  NOISE=2 enc s_1080p_typ 1920x1080 60 -deadline good -cpu-used 4 -crf 33 -b:v 0 -g 60 -tile-columns 2 -tile-rows 1
+  # settings (352x288)
+  local base=(-deadline good -cpu-used 2 -crf 30 -b:v 0)
+  enc t_altref 352x288 40 "${base[@]}" -g 40 -auto-alt-ref 1 -lag-in-frames 16 -arnr-maxframes 5 -arnr-strength 3
+  enc t_rt 352x288 40 -deadline realtime -cpu-used 8 -b:v 400k -g 40
+  enc t_best 352x288 20 -deadline best -crf 28 -b:v 0 -g 20
+  enc t_errres 352x288 30 "${base[@]}" -g 15 -error-resilient default
+  enc t_frameparallel 352x288 30 "${base[@]}" -g 15 -frame-parallel 1
+  enc t_aq_cyclic 352x288 40 -deadline realtime -cpu-used 7 -aq-mode 3 -b:v 300k -g 40
+  enc t_aq_variance 352x288 30 "${base[@]}" -g 30 -aq-mode 1
+  enc t_aq_complexity 352x288 30 "${base[@]}" -g 30 -aq-mode 2
+  enc t_lossless 352x288 12 -lossless 1 -g 12
+  enc t_q4 352x288 12 -deadline good -cpu-used 2 -crf 4 -b:v 0 -g 12
+  enc t_q63 352x288 20 -deadline good -cpu-used 2 -crf 63 -b:v 0 -g 20
+  enc t_sharp7 352x288 20 "${base[@]}" -g 20 -sharpness 7
+  enc t_static 352x288 30 "${base[@]}" -g 30 -static-thresh 800
+  enc t_screen 352x288 20 "${base[@]}" -g 20 -tune-content screen
+  enc t_gop1 352x288 10 "${base[@]}" -g 1
+  enc t_cbr 352x288 40 -deadline realtime -cpu-used 6 -b:v 200k -minrate 200k -maxrate 200k -g 40
+  enc t_tiles4 1280x720 20 -deadline realtime -cpu-used 8 -b:v 1500k -g 20 -tile-columns 2 -tile-rows 2
+  # colour tags in the key frame: BT.709 full range, and BT.2020 limited
+  enc c_bt709_full 352x288 10 -deadline good -cpu-used 4 -crf 30 -b:v 0 -g 10 -colorspace bt709 -color_range pc
+  enc c_bt2020 352x288 10 -deadline good -cpu-used 4 -crf 30 -b:v 0 -g 10 -colorspace bt2020nc -color_range tv
+  # profile 2 (10-bit 4:2:0) and profile 1 (4:4:4): decoded or rejected cleanly by the wrapper
+  PIXFMT=yuv420p10le enc x_profile2_10bit 352x288 12 -profile:v 2 -deadline good -cpu-used 4 -crf 30 -b:v 0 -g 12
+  PIXFMT=yuv444p enc x_profile1_444 352x288 12 -profile:v 1 -deadline good -cpu-used 4 -crf 30 -b:v 0 -g 12
+  # VP9 + Opus in WebM (A/V playback)
+  if [[ ! -s "$d/av_opus.webm" || -n "${RVP_FIXTURE_FORCE:-}" ]]; then
+    ff -f lavfi -i "testsrc2=size=320x240:rate=25:duration=6" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=6" \
+       -c:v libvpx-vp9 -threads 1 -deadline good -cpu-used 4 -crf 33 -b:v 0 -g 25 -pix_fmt yuv420p -c:a libopus -b:a 64k -ac 2 -shortest "$d/av_opus.webm"
+  fi
+  # Resize at a key frame: 320x240 then 480x270 then 200x120 (Matroska with a size change mid-stream).
+  if [[ ! -s "$d/r_keyframe.ivf" || -n "${RVP_FIXTURE_FORCE:-}" ]]; then
+    for part in "a 320x240" "b 480x270" "c 200x120"; do
+      set -- $part
+      ff -f lavfi -i "testsrc2=size=$2:rate=30" -vf "noise=alls=9:allf=t,format=yuv420p" -frames:v 15 -an -c:v libvpx-vp9 -threads 1 \
+         -deadline good -cpu-used 4 -crf 32 -b:v 0 -g 15 -f ivf "$d/.r_$1.ivf"
+    done
+    python3 - "$d" <<'PY'
+import struct, sys
+d = sys.argv[1]
+out = bytearray(); n = 0; hdr = None
+for part in "abc":
+    b = open(f"{d}/.r_{part}.ivf", "rb").read()
+    if hdr is None: hdr = bytearray(b[:32])
+    pos = 32
+    while pos < len(b):
+        sz = struct.unpack_from("<I", b, pos)[0]
+        out += struct.pack("<I", sz) + struct.pack("<Q", n) + b[pos + 12 : pos + 12 + sz]
+        pos += 12 + sz; n += 1
+struct.pack_into("<I", hdr, 24, n)
+open(f"{d}/r_keyframe.ivf", "wb").write(bytes(hdr) + bytes(out))
+PY
+    rm -f "$d"/.r_*.ivf
+    ff -i "$d/r_keyframe.ivf" -c copy "$d/r_keyframe.webm"
+  fi
+  touch "$out/.vp9.done"
+  echo "vp9 fixtures in $d"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
 if [[ "$fixture_set" == all || "$fixture_set" == h264 ]]; then gen_h264; fi
+if [[ "$fixture_set" == all || "$fixture_set" == vp9 ]]; then gen_vp9; fi
 echo "fixtures in $out"

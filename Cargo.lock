@@ -338,6 +338,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "rusty_vp9"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4f7698cee9ea00ee8ee104766c47fced2fb60486a2ce6e854ab453533dbd63b"
+
+[[package]]
 name = "rvp-app"
 version = "0.0.1"
 dependencies = [
@@ -383,7 +389,10 @@ dependencies = [
 name = "rvp-codec-vp9"
 version = "0.0.1"
 dependencies = [
+ "rusty_vp9",
  "rvp-core",
+ "rvp-demux",
+ "rvp-host",
 ]
 
 [[package]]
@@ -417,6 +426,7 @@ dependencies = [
  "rvp-codec-audio",
  "rvp-codec-av1",
  "rvp-codec-h264",
+ "rvp-codec-vp9",
  "rvp-core",
  "rvp-demux",
  "rvp-host",
@@ -437,6 +447,7 @@ dependencies = [
  "rvp-codec-audio",
  "rvp-codec-av1",
  "rvp-codec-h264",
+ "rvp-codec-vp9",
  "rvp-core",
  "rvp-host",
  "rvp-ui",
@@ -477,6 +488,7 @@ version = "0.0.1"
 dependencies = [
  "rvp-codec-av1",
  "rvp-codec-h264",
+ "rvp-codec-vp9",
  "rvp-core",
  "rvp-demux",
  "rvp-host",

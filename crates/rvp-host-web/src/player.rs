@@ -23,6 +23,7 @@ impl CodecFactory for WebCodecs {
         match info.codec.as_str() {
             "av1" => rvp_codec_av1::av1_decoder(info),
             "h264" => rvp_codec_h264::h264_decoder(info),
+            "vp9" => rvp_codec_vp9::vp9_decoder(info),
             other => Err(Error::Unsupported(format!("video codec `{other}`"))),
         }
     }

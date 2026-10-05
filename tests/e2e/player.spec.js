@@ -13,6 +13,9 @@ const SHORT = path.join(FIXTURES, "av1_opus.webm"); // 6 s
 const GOLDEN = path.join(__dirname, "golden", "player-paused.png");
 const H264_AAC = path.join(FIXTURES, "h264_aac.mp4"); // 6 s, 320x240, x264 Main/High with B-frames + AAC
 const H264_FLAC = path.join(FIXTURES, "h264_flac.mkv"); // the same video in Matroska with FLAC
+const VP9_OPUS = path.join(FIXTURES, "vp9", "av_opus.webm"); // 6 s, 320x240, libvpx VP9 + Opus
+const VP9_VORBIS = path.join(FIXTURES, "vp9_vorbis.webm"); // 6 s, 320x240, VP9 + Vorbis
+const VP9_RESIZE = path.join(FIXTURES, "vp9", "r_keyframe.webm"); // 1.5 s, 320x240 then 480x270 then 200x120, video only
 
 const snap = (page) => page.evaluate(() => window.rvp.snapshot());
 const waitFor = (page, fn, arg, timeout) =>
@@ -133,8 +136,13 @@ test.describe("player", () => {
     expect(errors).toEqual([]);
   });
 
-  for (const [name, file] of [["MP4 + AAC", H264_AAC], ["Matroska + FLAC", H264_FLAC]]) {
-    test(`H.264 (${name}): our own decoder shows a moving picture at 1x and a seek lands`, async ({ page }) => {
+  for (const [codec, name, file] of [
+    ["H.264", "MP4 + AAC", H264_AAC],
+    ["H.264", "Matroska + FLAC", H264_FLAC],
+    ["VP9", "WebM + Opus", VP9_OPUS],
+    ["VP9", "WebM + Vorbis", VP9_VORBIS],
+  ]) {
+    test(`${codec} (${name}): shows a moving picture at 1x and a seek lands`, async ({ page }) => {
       expect(fs.existsSync(file), `${file} is missing: run cargo xtask fixtures`).toBeTruthy();
       const errors = await load(page, file);
       const s0 = await snap(page);
@@ -170,6 +178,32 @@ test.describe("player", () => {
       expect(errors).toEqual([]);
     });
   }
+
+  test("VP9: a resolution change at a key frame plays through and the picture follows it", async ({ page }) => {
+    expect(fs.existsSync(VP9_RESIZE), `${VP9_RESIZE} is missing: run cargo xtask fixtures`).toBeTruthy();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    await page.goto("/");
+    await waitFor(page, () => window.rvp && window.rvp.ready);
+    // Record every picture size the page shows from the moment the file opens.
+    await page.evaluate(() => {
+      window.__sizes = [];
+      setInterval(() => {
+        const f = window.rvp.snapshot().frame_size;
+        const last = window.__sizes[window.__sizes.length - 1];
+        if (f && (!last || last[0] !== f[0] || last[1] !== f[1])) window.__sizes.push(f);
+      }, 10);
+    });
+    await page.setInputFiles("#file", VP9_RESIZE);
+    await waitState(page, "ended");
+    const sizes = await page.evaluate(() => window.__sizes);
+    expect(sizes).toEqual([[320, 240], [480, 270], [200, 120]]);
+    const s = await snap(page);
+    expect(s.error).toBeFalsy();
+    expect(s.video.presented).toBeGreaterThan(30);
+    expect(errors).toEqual([]);
+  });
 
   test("keyboard: arrows, j/k/l, m, f, Home/End", async ({ page }) => {
     await load(page, LONG, { play: false });
@@ -350,7 +384,8 @@ test.describe("player", () => {
     // Double click: fullscreen (and the first click's toggle is undone by the second).
     await page.mouse.dblclick(640, 300);
     await waitFor(page, () => window.rvp.snapshot().fullscreen === true);
-    expect((await snap(page)).state).toBe("playing");
+    // Entering fullscreen re-composes at the new size, which can briefly stall a busy machine ("buffering").
+    await waitState(page, "playing");
     await page.keyboard.press("Escape");
     await waitFor(page, () => window.rvp.snapshot().fullscreen === false);
 

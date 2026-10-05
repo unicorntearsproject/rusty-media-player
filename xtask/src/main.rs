@@ -10,7 +10,7 @@ const USAGE: &str = "usage: cargo xtask <command>
                    (--sync first refreshes the CSS snapshot from the design system;
                    set UT_DESIGN_SYSTEM to override its path)
   check            cargo check for the host, and for wasm32 / no_std targets where applicable
-  wasm-smoke       decode AV1 and H.264 fixtures inside WebAssembly (Node) and compare with the native decoder
+  wasm-smoke       decode AV1, H.264 and VP9 fixtures inside WebAssembly (Node) and compare with the native decoder
   fixtures [dir]   generate ffmpeg test media into target/fixtures (tools/gen-fixtures.sh)
   web [--no-opt]   build the browser player into target/web (wasm32 release, wasm-bindgen, wasm-opt if installed)
   serve [--port N] [--dir D]   serve target/web (default port 8080) with the headers a wasm page likes
@@ -57,7 +57,18 @@ fn wasm_smoke() -> Result<(), String> {
     cargo(&["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "rvp-wasm-smoke"])?;
     let wasm = root.join("target/wasm32-unknown-unknown/release/rvp_wasm_smoke.wasm");
     // AV1 and H.264 (CAVLC Baseline, CABAC Main with B-frames, High with 8x8 transform and scaling matrices).
-    for name in ["av1_opus.webm", "av1_10bit.webm", "h264/i_base_cif.mp4", "h264/b_cavlc_pyramid.mp4", "h264/c_main_b.mp4", "h264/h_high_cqm_jvt.mp4"] {
+    for name in [
+        "av1_opus.webm",
+        "av1_10bit.webm",
+        "h264/i_base_cif.mp4",
+        "h264/b_cavlc_pyramid.mp4",
+        "h264/c_main_b.mp4",
+        "h264/h_high_cqm_jvt.mp4",
+        "vp9/s_352x288.webm",
+        "vp9/t_altref.webm",
+        "vp9/s_odd_327x245.webm",
+        "vp9/r_keyframe.webm",
+    ] {
         let file = root.join("target/fixtures").join(name);
         if !file.exists() {
             fixtures(&[])?;

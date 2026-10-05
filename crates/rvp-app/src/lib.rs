@@ -49,6 +49,8 @@ pub struct App {
     fullscreen: bool,
     effects: Vec<Effect>,
     drawn_video: u64,
+    /// Size of the picture last drawn (it can change mid-stream at a key frame).
+    drawn_size: (u32, u32),
     base_dirty: bool,
     force_draw: bool,
     last_drawn: Option<UiModel>,
@@ -95,6 +97,7 @@ impl App {
             fullscreen: false,
             effects: Vec::new(),
             drawn_video: u64::MAX,
+            drawn_size: (0, 0),
             base_dirty: true,
             force_draw: true,
             last_drawn: None,
@@ -449,6 +452,7 @@ impl App {
             let frame = (video.width > 0).then_some((video.rgba.as_slice(), video.width, video.height));
             self.ui.draw_base(&mut self.base, &self.model, frame);
             self.drawn_video = video.count;
+            self.drawn_size = (video.width, video.height);
             self.base_dirty = false;
         }
         // The seek bar and clock move while playing with the controls up; otherwise position changes are invisible.

@@ -1,6 +1,6 @@
 # rusty-video-player: Plan
 
-> Status: Milestone 6 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
+> Status: Milestones 0 to 7 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
 > M7 to M12). Decisions live in `CLAUDE.md`; this file is the architecture and the milestone list. Update it when
 > a decision changes.
 
@@ -58,7 +58,7 @@ Workspace layout (`crates/*`, plus `xtask`). All crates are `MIT OR Apache-2.0`.
 | `rvp-codec-audio` | std (wasm32 ok) | `AudioDecoder` impls: AAC, MP3, FLAC, Vorbis (symphonia codec crates, unmodified), Opus (`opus-decoder`). Resampler (rubato). |
 | `rvp-codec-h264` | `no_std + alloc` | **Our own** H.264 decoder (M6), `forbid(unsafe_code)`. Public modules that an encoder can share (Rusty Bucket plans one): `bitstream` (NAL/AVCC/Annex B, RBSP escaping, `BitReader` and `BitWriter`, Exp-Golomb), `params` (SPS with VUI, PPS, scaling lists, slice header, pred weight table, MMCO: each has `parse` and `write`), `transform` (inverse and forward 4x4/8x8/DC transforms, quantisation, dequantisation, scans), `cavlc` (tables plus `read_residual_block` and `write_residual_block`), `cabac` (context init tables, arithmetic decoder, arithmetic encoder, binarisation offsets). The picture decoder is `decoder` (macroblock layer, intra/inter prediction, direct modes, deblocking, DPB, output order); `h264_decoder()` adapts it to `VideoDecoder`. |
 | `rvp-codec-av1` | std (wasm32 ok) | rav1d wrapper (needs a wasm32 patch, see risk R1). |
-| `rvp-codec-vp9` | no_std + alloc preferred | VP9 behind our `VideoDecoder` trait: adopt `rusty_vp9` (Apache-2.0) or `vp9dec` (MIT) after benchmarking; own port only if both fail (M7). |
+| `rvp-codec-vp9` | std (wasm32 ok) | VP9 behind our `VideoDecoder` trait (M7): wraps `rusty_vp9` (Apache-2.0, pinned `=0.1.1`), adds the superframe pull loop, `VideoFrame` conversion with colour tags, size caps and key-frame gating. Both candidate crates are `std`-only, so this crate is not `no_std`. |
 | `rvp-subs` | `no_std + alloc` | SRT and WebVTT parsers, cue timeline. |
 | `rvp-viz` | `no_std + alloc` | (M8, M10) Visualizer analysis and effects: FFT (own radix-2 or `microfft`), band energies, beat/onset and tempo summary from the visualizer tap; in M10 the effect set drawn into an RGBA buffer by `rvp-ui` (Unicorn Viz spirit). |
 | `rvp-library` | `no_std + alloc` | (M10) Library model: scan results, track/album/artist index, tags and cover art (via symphonia metadata, behind a std feature), queue, playlists with M3U/M3U8/PLS import and export. Persistence goes through `Storage`; directory walking through the `Library` host capability. |
@@ -242,8 +242,8 @@ rate, playlist). The same API is exposed to JS by `rvp-host-web` for page integr
 | **`rav1d`** | 1.1.0 | BSD-2-Clause | no | **fails** (38 errors: `libc::{ptrdiff_t, intptr_t, off_t, ENOENT, ...}` missing on wasm32-unknown-unknown, plus ambiguous `.abs()`) | **Use, with a patch.** The failures are libc type/errno imports; the fix is small (replace with `core::ffi`/local consts) and BSD-2 allows a vendored patched copy in `third_party/rav1d` (and an upstream PR). Build with `default-features = false, features = ["bitdepth_8","bitdepth_16"]` (no `asm`), 1 thread. This is risk R1; resolved in M4. |
 | `rav1d-safe` | 0.6.0 | **AGPL-3.0 OR commercial** | no | n/a | **Rejected** (licence). |
 | `dav1d` | 0.11 | MIT (bindings to C dav1d) | no | n/a | Rejected: C dependency does not fit wasm32-unknown-unknown without a C toolchain target. |
-| `rusty_vp9` | 0.1.1 | Apache-2.0 | no | builds | **Preferred VP9 candidate** ("bit-exact against all 315 libvpx conformance vectors", ~31k lines). Benchmark and read before adopting (M7). |
-| `vp9dec` | 0.1.1 | MIT | no | builds | Second VP9 candidate (clean-room, zero deps, ~14k lines). |
+| **`rusty_vp9`** | 0.1.1 | Apache-2.0 | no (`std`: `Vec`, `Arc`, `OnceLock`, `catch_unwind`) | builds and runs in Node | **Used for VP9** (M7): bit-exact on every profile 0 fixture (33 files in all), 3 to 4 times faster than `vp9dec`. See the M7 notes. |
+| `vp9dec` | 0.1.1 | MIT | no (`std`, uses `std::thread` for tiles and the loop filter, which fall back to one thread on wasm32) | builds and runs in Node | **Not used** (M7): also bit-exact, but 3 to 4 times slower. Kept as a possible second oracle. |
 | `rvp9-decoder` | 0.2.0-alpha.3 | BSD-3-Clause | no | untested | Third option; alpha, needs Rust 1.95. |
 | `rusty_h264-decoder` | 0.16.0 | BSD-2-Clause | optional (`std` feature) | builds | **Not shipped and not used**: our own decoder (M6) is checked against ffmpeg alone, which proved enough. |
 | `h264-reader` | 0.9.0 | MIT/Apache-2.0 | no | builds | NAL/SPS/PPS parsing only; we may use it for bitstream-level cross-checks, not required. |
@@ -497,13 +497,43 @@ the deblocking filter, table masking in the CABAC engine); no SIMD or threads. T
 (about 25% in `decision`), typical ones by prediction and deblocking. 1080p stress in a browser tab sharing a thread
 with the UI is the case M9 still has to win.
 
-**M7 VP9.** Benchmark `rusty_vp9` and `vp9dec` on the VP9 fixtures against: licence, correctness
+**M7 VP9.** *(done 2026-10-05; see the notes below)* Benchmark `rusty_vp9` and `vp9dec` on the VP9 fixtures against: licence, correctness
 (ffmpeg `framemd5`), speed, wasm32 build, `no_std` support and memory; wrap the winner as `rvp-codec-vp9` behind
 `CodecFactory`. Fixtures: profile 0, 8-bit, several sizes and encoder settings, odd sizes, and resolution change
 mid-stream if the crate supports it. If neither is acceptable, report why and propose options before porting our
 own (stage like M6). *Done when:* VP9 (profile 0, 8-bit) fixtures decode bit-exact to `framemd5`, 1080p30 decodes
 at >= 30 fps native release single thread, a headless test plays a VP9+Opus WebM end to end, and the browser E2E
 passes with it.
+
+*M7 notes (done 2026-10-05).* **Choice: `rusty_vp9` 0.1.1.** Both candidates were benchmarked in a scratch crate (native, one pinned core, AVX2 paths on; wasm32 in Node/V8, plain build) on the libvpx-made fixtures
+(`tools/gen-fixtures.sh`, set `vp9`, never committed) against ffmpeg's `-f rawvideo` output (equivalent to `framemd5`, stricter on message):
+
+| | `rusty_vp9` | `vp9dec` |
+| --- | --- | --- |
+| Licence | Apache-2.0 (compatible; one of our two options) | MIT |
+| Correctness | bit-exact on every fixture | bit-exact on every fixture |
+| Native 1080p typical, ms/frame | 8.6 | 34.5 |
+| Native 720p typical, ms/frame | 3.5 | 15.7 |
+| Native 720p stress (noise), ms/frame | 18.7 | 39.1 |
+| wasm 1080p typical, ms/frame (Node) | 33.6 | 121.6 |
+| wasm 720p stress, ms/frame (Node) | 30.4 | 75.8 |
+| wasm32 build | yes, same output hashes as native | yes, same hashes (its threads fall back to one) |
+| `no_std` | no | no |
+| Size | about 31k lines incl. an encoder we do not use | about 14k lines |
+| Malformed input | `catch_unwind` safety net inside (useless on wasm, where panics abort) | returns errors |
+
+Both crates claim and (on our streams) show conformance with the 315 libvpx vectors; `rusty_vp9` won on speed alone, by 3 to 4 times. Through our wrapper (`rvp-codec-vp9`), native single thread: 1080p typical 7.1 ms/frame (140 fps), 720p
+typical 2.9 ms, 720p stress 17 ms; wasm (Node, including demux): 1080p typical 34.6 ms/frame (29 fps), 720p typical 14.4 ms, so
+1080p30 VP9 in wasm is at the edge and is an M9 (SIMD128) target.
+Fixtures: sizes 8x8 to 1080p, odd sizes (327x245, 130x66, 17x9), good/best/realtime/CBR, hidden alt-ref frames (superframes), tiles (columns and rows),
+error-resilient, frame-parallel, cyclic/variance/complexity AQ (segmentation), lossless, q 4 and 63, sharpness, static threshold, screen content, all-intra, BT.709/BT.2020 and full-range tags, profile 2
+(10-bit 4:2:0, decoded to `Yuv420p10`), profile 1 (4:4:4, rejected with `Unsupported`), VP9+Opus and VP9+Vorbis, and a resolution change at key frames (320x240, 480x270,
+200x120). Reference scaling inside a stream (inter frames of a new size) cannot be produced by ffmpeg's libvpx wrapper and is not covered by our fixtures; `rusty_vp9` claims it through the libvpx `resize_*` vectors.
+Wrapper behaviour: profiles 1 and 3, 4:2:2/4:4:0/4:4:4 and 12-bit are rejected; the decoder is reset after any error and ignores inter frames until the next key frame; pictures above 8192x4352 are refused; the colour matrix and range
+come from the key frame header (peeked by the wrapper, as `rusty_vp9` drops the range bit). Fuzzing (`tests/robust.rs`: truncation, bit flips, header flips, garbage, dropped and swapped packets, mid-stream starts; 9000 streams run once) never made `rusty_vp9` panic, so the abort-on-panic wasm behaviour is not a practical
+problem so far; the test asserts zero contained panics. Tests: `crates/rvp-codec-vp9/tests/{conformance,robust}.rs`, `crates/rvp-host-headless/tests/vp9.rs` (bit-exact frames through the session, A/V sync, seek, resize, damaged file), two Playwright tests
+(VP9 with Opus and with Vorbis, plus a resize test that watches the picture size change), and `cargo xtask wasm-smoke` (native and wasm hashes agree). `window.rvp.snapshot()` gained `frame_size`.
+Bench: `cargo run --release -p rvp-codec-vp9 --example vp9_bench -- file.webm`. Done criteria met (bit-exact profile 0, 1080p30 at 140 fps native, browser E2E).
 
 **M8 Playlist, seek, subtitles, gapless, now-playing, visualizer tap.** `Playlist` (add/remove/reorder, repeat,
 shuffle, drag to add), resume positions in `Storage`, accurate seek (decode forward to the exact frame), frame

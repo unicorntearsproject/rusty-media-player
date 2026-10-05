@@ -1,6 +1,6 @@
 [package]
 name = "rvp-codec-vp9"
-description = "VP9 decoding behind the VideoDecoder trait"
+description = "VP9 decoding behind the VideoDecoder trait, wrapping rusty_vp9 (Apache-2.0)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,3 +13,9 @@ workspace = true
 
 [dependencies]
 rvp-core.workspace = true
+# Pure Rust, zero dependencies, Apache-2.0; chosen over vp9dec in M7 (docs/PLAN.md section 8). Pinned exactly.
+rusty_vp9 = "=0.1.1"
+
+[dev-dependencies]
+rvp-demux.workspace = true
+rvp-host = { workspace = true }

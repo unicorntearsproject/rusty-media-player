@@ -11,6 +11,7 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 | `symphonia-core`, `-codec-aac`, `-codec-vorbis`, `-bundle-flac`, `-bundle-mp3`, plus its `-common`, `-metadata` 0.6.1 | MPL-2.0 | Used unmodified from crates.io. The license text and a pointer to the upstream source (https://github.com/pdeljanov/Symphonia) must accompany binary distributions. |
 | `ropus` 0.12 (Opus decoder, port of libopus) and its dependency `wide` | BSD-3-Clause; MIT OR Zlib OR Apache-2.0 | Keep the copyright notice and conditions in binary distributions. |
 | `rav1d` 1.1.0, vendored and patched in `third_party/rav1d` (see its `PATCHES.md`) | BSD-2-Clause (`third_party/rav1d/COPYING`) | Keep the copyright notice and conditions; patches are recorded. Its dependencies (`atomig`, `parking_lot`, `paste`, `strum`, `zerocopy`, `assert_matches`, `bitflags`, `cfg-if`, `to_method`) are MIT/Apache-2.0 (`zerocopy`: BSD-2-Clause OR Apache-2.0 OR MIT), except `to_method` which is CC0-1.0 (public-domain dedication). |
+| `rusty_vp9` 0.1.1 (`rvp-codec-vp9`, VP9 decoder; zero dependencies; the encoder half of the crate is not used) | Apache-2.0 (Mata Network; `LICENSE` in the crate) | Used unmodified from crates.io, pinned with `=0.1.1`. Keep the Apache-2.0 text and any NOTICE with binary distributions. Apache-2.0 is compatible with this project's `MIT OR Apache-2.0` (it is one of the two options; a downstream user taking the MIT option must still satisfy this dependency's Apache-2.0 terms). |
 | `libm` 0.2 (`rvp-core`, `no_std` sin/cos for the resampler) | MIT | |
 | Transitive crates of the above (`bitflags`, `bytemuck`, `lazy_static`, `log`, `num-complex`, `num-traits`, `once_cell`, `smallvec`, `thiserror`, `autocfg`, `cfg-if`, ...) | MIT, Apache-2.0, Zlib, or `MIT OR Apache-2.0` | Checked with `cargo metadata` on 2026-10-05: nothing outside MIT/Apache-2.0/Zlib/MPL-2.0/Unlicense/Unicode-3.0. |
 | `serde_json` (dev-dependency of `rvp-demux`, tests only) | MIT OR Apache-2.0 | |
@@ -26,13 +27,12 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 
 | Component | License | Obligation |
 | --- | --- | --- |
-| `rusty_vp9` 0.1.x or `vp9dec` 0.1.x | Apache-2.0 / MIT | Whichever is adopted in M7. |
 | `hashbrown`, `libm`, `spin`, `bitflags`, `thiserror` | MIT or MIT OR Apache-2.0 | As needed. |
 | Anton (display) | SIL OFL 1.1 | Not embedded (M5 uses Space Grotesk Bold for headings); same obligations if it is added. |
 
 Dev/test only (not shipped): `@playwright/test` 1.63 (Apache-2.0, `tests/e2e`, with a Chromium build it downloads), `matroska-demuxer` (Zlib OR MIT OR Apache-2.0), `mp4` (MIT),
 `ffmpeg`/`ffprobe` (with its libx264 encoder) as external binary oracles and fixture makers (never linked, never distributed, no source read).
-`rusty_h264-decoder` (BSD-2-Clause) and `h264-reader` (MIT/Apache-2.0) were considered as extra oracles and are not used.
+`vp9dec` 0.1.1 (MIT) was the other M7 VP9 candidate: bit-exact too, but 3 to 4 times slower, so not used (kept as an oracle option). `rusty_h264-decoder` (BSD-2-Clause) and `h264-reader` (MIT/Apache-2.0) were considered as extra oracles and are not used.
 
 ## Rejected
 
