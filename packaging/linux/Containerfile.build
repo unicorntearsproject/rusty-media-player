@@ -1,0 +1,15 @@
+# The Linux build baseline for the packages that carry a binary (.deb, .rpm, AppImage, tarball): Ubuntu 22.04 (glibc 2.35), so the
+# binary runs on that and anything newer. CI builds on the ubuntu-22.04 runner with the same packages; `cargo xtask dist linux-bin
+# --container` builds this image and runs the build in it.
+# BASE can point at a mirror of the same image (public.ecr.aws/ubuntu/ubuntu:22.04) where Docker Hub is not reachable.
+ARG BASE=docker.io/library/ubuntu:22.04
+FROM ${BASE}
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential pkg-config curl ca-certificates git \
+      libasound2-dev libdbus-1-dev libxkbcommon-dev libwayland-dev \
+    && rm -rf /var/lib/apt/lists/*
+# Stable Rust, installed once into the image (the repository's own build uses whatever `rustup` says; packages use stable).
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.0
+WORKDIR /work

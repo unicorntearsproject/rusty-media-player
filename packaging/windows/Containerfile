@@ -1,0 +1,7 @@
+# Cross-builds rvp.exe (x86_64-pc-windows-gnu, MinGW-w64) and runs Inno Setup under wine, on a Linux machine. `cargo xtask dist windows`
+# and `cargo xtask dist installer` build this image on first use and mount the repository, the Rust toolchain and a wine prefix.
+# CI does not use it: the Windows job runs on a windows-latest runner with the MSVC toolchain and a native Inno Setup.
+ARG BASE=registry.fedoraproject.org/fedora:44
+FROM ${BASE}
+RUN dnf install -y --setopt=install_weak_deps=False wine wine-core mingw64-gcc mingw64-winpthreads-static xorg-x11-server-Xvfb \
+      curl ca-certificates p7zip cabextract gcc make pkgconf-pkg-config git file tar xz && dnf clean all

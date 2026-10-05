@@ -1,4 +1,5 @@
 //! Repo automation. Run as `cargo xtask <command>`.
+mod dist;
 mod theme;
 mod web;
 
@@ -23,6 +24,8 @@ const USAGE: &str = "usage: cargo xtask <command>
                    build the page with threads and play each perf stream at 1x in the browser, reporting dropped frames
                    (default: the threaded page, 60 s each; --single the single-threaded baseline, --both both)
   fuzz [target|all] [secs]   run cargo-fuzz targets (fuzz/, nightly + cargo-fuzz) for `secs` each (default 600)
+  dist <target>    release packages: deb, rpm, appimage, flatpak, windows, installer, pwa, ... (`cargo xtask dist` lists them;
+                   docs/packaging.md explains each)
   licenses         not implemented yet (see docs/PLAN.md)";
 
 fn main() -> ExitCode {
@@ -40,6 +43,7 @@ fn main() -> ExitCode {
         Some("perf-fixtures") => fixtures_perf(),
         Some("perf-web") => web::perf(&args[1..]),
         Some("fuzz") => fuzz(&args[1..]),
+        Some("dist") => dist::run(&args[1..]),
         Some(cmd @ "licenses") => Err(format!("`{cmd}` is not implemented yet")),
         _ => {
             eprintln!("{USAGE}");

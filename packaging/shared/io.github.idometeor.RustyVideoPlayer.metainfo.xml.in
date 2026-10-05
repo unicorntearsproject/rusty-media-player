@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- @VERSION@ and @DATE@ are stamped by `cargo xtask dist` from Cargo.toml and the commit date. -->
+<component type="desktop-application">
+  <id>io.github.idometeor.RustyVideoPlayer</id>
+  <name>Rusty Video Player</name>
+  <summary>Play video and music with a library, a queue and a visualizer</summary>
+  <developer id="io.github.idometeor">
+    <name>Rusty Video Player contributors</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <description>
+    <p>
+      Rusty Video Player plays video and music. It is written in Rust, decodes H.264, AV1, VP9, AAC, MP3, FLAC, Opus and
+      Vorbis with its own portable decoders, and needs no codec packs, no account and no network.
+    </p>
+    <p>It has two faces that you switch between with one key:</p>
+    <ul>
+      <li>The player for video: seeking, speed, subtitles (SRT, WebVTT and embedded), audio tracks, chapters, frame stepping and A-B loop.</li>
+      <li>The music library: albums, artists, tracks and search, cover art, saved playlists (M3U, M3U8, PLS), a queue with gapless playback, and a full-window audio visualizer.</li>
+    </ul>
+    <p>
+      Everything works with the keyboard alone and with the pointer alone. Media keys, the desktop's media widget and playerctl
+      control it through MPRIS. It remembers your queue and where you stopped.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.idometeor.RustyVideoPlayer.desktop</launchable>
+  <icon type="stock">io.github.idometeor.RustyVideoPlayer</icon>
+  <url type="homepage">https://github.com/iDoMeteor/rusty-video-player</url>
+  <url type="bugtracker">https://github.com/iDoMeteor/rusty-video-player/issues</url>
+  <url type="vcs-browser">https://github.com/iDoMeteor/rusty-video-player</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Video</category>
+    <category>Player</category>
+  </categories>
+  <keywords>
+    <keyword>video</keyword>
+    <keyword>audio</keyword>
+    <keyword>music</keyword>
+    <keyword>movie</keyword>
+    <keyword>player</keyword>
+    <keyword>playlist</keyword>
+    <keyword>visualizer</keyword>
+  </keywords>
+  <provides>
+    <binary>rvp</binary>
+    <mediatype>video/mp4</mediatype>
+    <mediatype>video/x-m4v</mediatype>
+    <mediatype>video/x-matroska</mediatype>
+    <mediatype>video/webm</mediatype>
+    <mediatype>audio/x-matroska</mediatype>
+    <mediatype>audio/mpeg</mediatype>
+    <mediatype>audio/flac</mediatype>
+    <mediatype>audio/x-flac</mediatype>
+    <mediatype>audio/ogg</mediatype>
+    <mediatype>audio/x-vorbis+ogg</mediatype>
+    <mediatype>audio/x-opus+ogg</mediatype>
+    <mediatype>audio/vnd.wave</mediatype>
+    <mediatype>audio/x-wav</mediatype>
+    <mediatype>audio/wav</mediatype>
+    <mediatype>audio/aac</mediatype>
+    <mediatype>audio/mp4</mediatype>
+    <mediatype>audio/x-m4b</mediatype>
+    <mediatype>audio/x-mpegurl</mediatype>
+    <mediatype>application/vnd.apple.mpegurl</mediatype>
+    <mediatype>audio/x-scpls</mediatype>
+    <mediatype>application/x-subrip</mediatype>
+    <mediatype>text/vtt</mediatype>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/iDoMeteor/rusty-video-player/main/docs/screenshots/desktop/01-library-albums.png</image>
+      <caption>The music library: albums with their cover art</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/iDoMeteor/rusty-video-player/main/docs/screenshots/desktop/02-now-playing.png</image>
+      <caption>Now playing, with what comes next</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/iDoMeteor/rusty-video-player/main/docs/screenshots/desktop/03-visualizer.png</image>
+      <caption>The audio visualizer, full window</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/iDoMeteor/rusty-video-player/main/docs/screenshots/desktop/04-video.png</image>
+      <caption>The video player</caption>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#ff5ce0</color>
+    <color type="primary" scheme_preference="dark">#9d4eff</color>
+  </branding>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">480</display_length>
+  </requires>
+  <releases>
+    <release version="@VERSION@" date="@DATE@">
+      <description>
+        <p>Desktop release: the standalone app for Linux and Windows, with the music library, the queue and position kept between runs,
+        MPRIS and system media controls, and system fonts for Japanese, Chinese, Korean and other scripts.</p>
+      </description>
+    </release>
+  </releases>
+</component>

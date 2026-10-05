@@ -1,0 +1,101 @@
+.TH RVP 1 "@DATE@" "Rusty Video Player @VERSION@" "User Commands"
+.SH NAME
+rvp \- play video and music
+.SH SYNOPSIS
+.B rvp
+[\fIOPTIONS\fR] [\fIFILE\fR|\fIFOLDER\fR|\fBfile://\fR\fIURI\fR]...
+.SH DESCRIPTION
+.B rvp
+is Rusty Video Player: a standalone player for video and music with a library, a queue and a visualizer. It decodes H.264, AV1 and
+VP9 video and AAC, MP3, FLAC, Opus, Vorbis and PCM audio in MP4, Matroska, WebM, Ogg, WAV and raw audio files with its own decoders,
+so no codec packages are needed.
+.PP
+Files given on the command line become the queue and the first one plays. Subtitle files (\fI.srt\fR, \fI.vtt\fR) join the video that
+is playing and playlist files (\fI.m3u\fR, \fI.m3u8\fR, \fI.pls\fR) are imported. A folder is added to the music library and scanned.
+With no arguments the queue and the position of the last run come back, paused.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print a short help and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the version and exit.
+.TP
+.B \-\-fullscreen
+Start in full screen.
+.TP
+.BI \-\-window " WxH"
+Initial window size in logical pixels (default 1280x720; otherwise the size of the last run).
+.TP
+.B \-\-no\-audio
+Do not open an audio device. Video plays and the clock runs, silently.
+.TP
+.B \-\-no\-media\-keys
+Do not register with MPRIS (Linux) or the System Media Transport Controls (Windows).
+.TP
+.BI \-\-data\-dir " DIR"
+Keep settings, the library index and the saved queue in \fIDIR\fR.
+.SS For scripts and tests
+.TP
+.BI \-\-exit\-after " SEC"
+Quit after \fISEC\fR seconds.
+.TP
+.BI \-\-screenshot " PNG"
+Write the window's picture to \fIPNG\fR, at \fB\-\-screenshot\-after\fR seconds or at exit.
+.TP
+.BI \-\-report " JSON"
+Write a short report (state, position, frames shown, audio clock rate) at exit.
+.TP
+.B \-\-paused
+Open the first file paused.
+.TP
+.BI \-\-press " SEC:KEY"
+Press a key \fISEC\fR seconds into the run. May be repeated.
+.SH KEYS
+.TP
+.B Space, K
+Play or pause.
+.TP
+.B F, F11, Alt+Enter
+Full screen.
+.TP
+.B B
+Switch between the player and the music library.
+.TP
+.B O
+Open files.
+.TP
+.B Left, Right (Shift: 30 s)
+Seek 5 seconds; J and L seek 10 seconds.
+.TP
+.B Up, Down, M
+Volume, mute.
+.TP
+.B [ ], backslash
+Slower, faster, normal speed.
+.TP
+.B S, A
+Next subtitle track, next audio track.
+.TP
+.B N, P, R, Z, Q
+Next, previous, repeat, shuffle, the queue.
+.TP
+.B 1 to 7, V, /
+In the library: albums, artists, tracks, playlists, queue, now playing, the visualizer; V also starts the visualizer; / searches.
+.PP
+Right-click anything for a menu with every action. See the project README for the complete list.
+.SH FILES
+.TP
+.I ~/.local/share/rvp/
+Settings, the library index, cover thumbnails, the saved queue and resume positions (on Windows
+.I %APPDATA%\\rvp\\data\fR).
+.SH ENVIRONMENT
+.TP
+.B RVP_REDUCE_MOTION=1
+Calmer animations and no beat pulses in the visualizer.
+.SH EXIT STATUS
+0 on a normal exit, 1 if the window could not be opened, 2 for a bad command line.
+.SH BUGS
+https://github.com/iDoMeteor/rusty-video-player/issues
+.SH COPYRIGHT
+MIT OR Apache-2.0.

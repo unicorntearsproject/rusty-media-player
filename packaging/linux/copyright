@@ -1,0 +1,22 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: rusty-video-player
+Upstream-Contact: https://github.com/iDoMeteor/rusty-video-player/issues
+Source: https://github.com/iDoMeteor/rusty-video-player
+
+Files: *
+Copyright: Rusty Video Player contributors
+License: MIT or Apache-2.0
+ Rusty Video Player is licensed under either of the Apache License, Version 2.0
+ or the MIT license, at your option. The full texts are in
+ /usr/share/doc/rusty-video-player/LICENSE-APACHE and
+ /usr/share/doc/rusty-video-player/LICENSE-MIT, and on Debian systems the
+ Apache-2.0 text is also in /usr/share/common-licenses/Apache-2.0.
+
+Files: usr/share/doc/rusty-video-player/THIRD_PARTY_LICENSES.md
+Copyright: various, see the file
+License: MIT or Apache-2.0
+ The binary statically contains third-party Rust crates (symphonia, rav1d,
+ rusty_vp9, ropus, fontdue, winit, cpal, souvlaki, ...) and the Space Grotesk,
+ JetBrains Mono and Noto Sans fonts (SIL OFL 1.1). Their licenses, versions and
+ obligations are listed in THIRD_PARTY_LICENSES.md, which is installed next to
+ this file.

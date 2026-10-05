@@ -1,6 +1,6 @@
 [package]
 name = "rvp-host-desktop"
-description = "Native desktop host (Linux and Windows) and the `rvp` binary: winit window, softbuffer surface, cpal audio, rfd dialogs, system media controls"
+description = "Rusty Video Player: a video and music player (the desktop app and its Linux and Windows host)"
 version.workspace = true
 edition.workspace = true
 rust-version = "1.89"
@@ -37,9 +37,66 @@ png = "0.18"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation"] }
 
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 embed-resource = "3"
 
 [[bin]]
 name = "rvp"
 path = "src/main.rs"
+
+# ---- packages (`cargo xtask dist deb` and `rpm` run these against the tree `cargo xtask dist stage` makes) ----------------------------
+[package.metadata.deb]
+name = "rusty-video-player"
+maintainer = "Rusty Video Player contributors <noreply@users.noreply.github.com>"
+license-file = ["../../packaging/linux/copyright", "0"]
+section = "video"
+priority = "optional"
+extended-description = """\
+Rusty Video Player plays video and music: a library with albums, artists and playlists, a queue with gapless playback,
+subtitles, audio-track switching, MPRIS and a full-window visualizer. H.264, AV1, VP9, AAC, MP3, FLAC, Opus and Vorbis are
+decoded by the player itself, so no codec packages are needed."""
+depends = "libc6 (>= 2.35), libgcc-s1, libasound2 | libasound2t64, libdbus-1-3, libxkbcommon0, libxkbcommon-x11-0"
+recommends = "libwayland-client0, libx11-6, libxcursor1, libxi6, libxrandr2, xdg-desktop-portal, fonts-noto-cjk | fonts-noto-core"
+suggests = "pipewire-alsa | pulseaudio"
+assets = [
+    ["../../target/dist/linux/stage/usr/bin/rvp", "usr/bin/", "755"],
+    ["../../target/dist/linux/stage/usr/share/applications/io.github.idometeor.RustyVideoPlayer.desktop", "usr/share/applications/", "644"],
+    ["../../target/dist/linux/stage/usr/share/metainfo/io.github.idometeor.RustyVideoPlayer.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["../../target/dist/linux/stage/usr/share/icons/hicolor/**/*", "usr/share/icons/hicolor/", "644"],
+    ["../../target/dist/linux/stage/usr/share/man/man1/rvp.1.gz", "usr/share/man/man1/", "644"],
+    ["../../target/dist/linux/stage/usr/share/doc/rusty-video-player/README.md", "usr/share/doc/rusty-video-player/", "644"],
+    ["../../target/dist/linux/stage/usr/share/doc/rusty-video-player/THIRD_PARTY_LICENSES.md", "usr/share/doc/rusty-video-player/", "644"],
+    ["../../target/dist/linux/stage/usr/share/doc/rusty-video-player/LICENSE-MIT", "usr/share/doc/rusty-video-player/", "644"],
+    ["../../target/dist/linux/stage/usr/share/doc/rusty-video-player/LICENSE-APACHE", "usr/share/doc/rusty-video-player/", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "rusty-video-player"
+summary = "Video and music player with a library, a queue and a visualizer"
+license = "MIT OR Apache-2.0"
+url = "https://github.com/iDoMeteor/rusty-video-player"
+assets = [
+    { source = "target/dist/linux/stage/usr/bin/rvp", dest = "/usr/bin/rvp", mode = "0755" },
+    { source = "target/dist/linux/stage/usr/share/applications/io.github.idometeor.RustyVideoPlayer.desktop", dest = "/usr/share/applications/io.github.idometeor.RustyVideoPlayer.desktop", mode = "0644" },
+    { source = "target/dist/linux/stage/usr/share/metainfo/io.github.idometeor.RustyVideoPlayer.metainfo.xml", dest = "/usr/share/metainfo/io.github.idometeor.RustyVideoPlayer.metainfo.xml", mode = "0644" },
+    { source = "target/dist/linux/stage/usr/share/icons/hicolor/*/apps/*", dest = "/usr/share/icons/hicolor/", mode = "0644" },
+    { source = "target/dist/linux/stage/usr/share/man/man1/rvp.1.gz", dest = "/usr/share/man/man1/rvp.1.gz", mode = "0644", doc = true },
+    { source = "target/dist/linux/stage/usr/share/doc/rusty-video-player/README.md", dest = "/usr/share/doc/rusty-video-player/README.md", mode = "0644", doc = true },
+    { source = "target/dist/linux/stage/usr/share/doc/rusty-video-player/THIRD_PARTY_LICENSES.md", dest = "/usr/share/doc/rusty-video-player/THIRD_PARTY_LICENSES.md", mode = "0644", doc = true },
+    { source = "target/dist/linux/stage/usr/share/licenses/rusty-video-player/LICENSE-MIT", dest = "/usr/share/licenses/rusty-video-player/LICENSE-MIT", mode = "0644", license = true },
+    { source = "target/dist/linux/stage/usr/share/licenses/rusty-video-player/LICENSE-APACHE", dest = "/usr/share/licenses/rusty-video-player/LICENSE-APACHE", mode = "0644", license = true },
+]
+post_install_script = "gtk-update-icon-cache -q -t /usr/share/icons/hicolor 2>/dev/null || true; update-desktop-database -q /usr/share/applications 2>/dev/null || true"
+post_uninstall_script = "gtk-update-icon-cache -q -t /usr/share/icons/hicolor 2>/dev/null || true; update-desktop-database -q /usr/share/applications 2>/dev/null || true"
+
+[package.metadata.generate-rpm.requires]
+# The window system libraries are loaded at run time, so the soname scan does not see them.
+libxkbcommon-x11 = "*"
+
+[package.metadata.generate-rpm.recommends]
+libX11 = "*"
+libXcursor = "*"
+libXi = "*"
+libXrandr = "*"
+libwayland-client = "*"
+xdg-desktop-portal = "*"

@@ -60,6 +60,13 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 
+# What the desktop packages are built with (`cargo xtask dist`): the release profile, but unwinding, so a panic on a helper thread (the
+# media-controls service, a dialog) cannot take the whole player down, and stripped.
+[profile.dist]
+inherits = "release"
+panic = "unwind"
+strip = true
+
 # Third-party codecs (rav1d, opus-decoder, symphonia) are far too slow unoptimised and dominate test time;
 # our own crates stay at opt-level 0 for debuggability. rav1d's debug assertions track every disjoint borrow
 # at runtime and make decoding about 15x slower, so they are off for dependencies.
