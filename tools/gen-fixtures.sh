@@ -26,6 +26,9 @@ ff "${vsrc[@]}" "${asrc[@]}" -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -g 1
    -c:a libvorbis -b:a 64k -ac 2 -shortest "$out/vp9_vorbis.webm"
 ff "${vsrc[@]}" "${asrc[@]}" "${h264[@]}" -c:a flac -ac 2 -shortest "$out/h264_flac.mkv"
 
+# Audio-only MP3 in Matroska.
+ff "${asrc[@]}" -c:a libmp3lame -b:a 128k -ac 2 "$out/mp3.mkv"
+
 for f in "$out"/*.mp4 "$out"/*.webm "$out"/*.mkv; do
   ffprobe -v error -show_format -show_streams -show_packets -of json "$f" > "$f.probe.json"
 done

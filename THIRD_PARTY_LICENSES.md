@@ -9,6 +9,10 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 | Component | License | Notes |
 | --- | --- | --- |
 | `wasm-bindgen` (`rvp-host-web`, wasm32 only) | MIT OR Apache-2.0 | |
+| `symphonia-core`, `-codec-aac`, `-codec-vorbis`, `-bundle-flac`, `-bundle-mp3`, plus its `-common`, `-metadata` 0.6.1 | MPL-2.0 | Used unmodified from crates.io. The license text and a pointer to the upstream source (https://github.com/pdeljanov/Symphonia) must accompany binary distributions. |
+| `opus-decoder` 0.1.1 | MIT OR Apache-2.0 | |
+| `libm` 0.2 (`rvp-core`, `no_std` sin/cos for the resampler) | MIT | |
+| Transitive crates of the above (`bitflags`, `bytemuck`, `lazy_static`, `log`, `num-complex`, `num-traits`, `once_cell`, `smallvec`, `thiserror`, `autocfg`, `cfg-if`, ...) | MIT, Apache-2.0, Zlib, or `MIT OR Apache-2.0` | Checked with `cargo metadata` on 2026-10-05: nothing outside MIT/Apache-2.0/Zlib/MPL-2.0/Unlicense/Unicode-3.0. |
 | `serde_json` (dev-dependency of `rvp-demux`, tests only) | MIT OR Apache-2.0 | |
 | Unicorn Tears design-system tokens (`crates/theme/tokens/*.css`) | Project-owner material, included under this project's license | Vendored snapshot of `claude-design-system/tokens` (colours, type scale, spacing). Logos, mascot art, and stream thumbnails are **not** included and stay separately owned. |
 
@@ -16,9 +20,6 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 
 | Component | License | Obligation |
 | --- | --- | --- |
-| `symphonia` 0.6.x (AAC, MP3, FLAC, Vorbis decode) | MPL-2.0 | Unmodified dependency: keep the license text and source availability notice. Modified files would have to stay MPL-2.0. |
-| `opus-decoder` 0.1.x | MIT OR Apache-2.0 | |
-| `rubato` 5.x | MIT OR Apache-2.0 | |
 | `rav1d` 1.1.x (patched for wasm32, vendored under `third_party/rav1d`) | BSD-2-Clause | Keep the copyright notice and conditions with source and binary distributions; record the patch. |
 | `rusty_vp9` 0.1.x or `vp9dec` 0.1.x | Apache-2.0 / MIT | Whichever is adopted in M7. |
 | `fontdue` 0.9.x | MIT OR Apache-2.0 OR Zlib | |

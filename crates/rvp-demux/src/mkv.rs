@@ -121,8 +121,9 @@ fn children(body: &[u8]) -> Result<Vec<(u32, &[u8])>> {
 struct MkTrack {
     number: u64,
     default_duration_ns: u64,
-    /// Encoder delay (Opus pre-skip) in timescale ticks; subtracted from every timestamp of the track.
-    delay_ticks: i64,
+    /// Encoder delay (Opus pre-skip, MP3 decoder delay) in microseconds, subtracted from every timestamp of
+    /// the track. Kept at full precision: Matroska ticks are usually 1 ms but delays are a few hundred samples.
+    delay_us: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,7 +138,7 @@ struct ClusterIdx {
 
 /// A keyframe found while scanning a cluster during a seek.
 struct Hit {
-    pts_ticks: i64,
+    pts_us: Timestamp,
     offset: u64,
 }
 
@@ -164,7 +165,7 @@ fn codec_name(id: &str) -> String {
     n.to_string()
 }
 
-fn parse_track_entry(body: &[u8], tb: Rational, timescale_ns: u64) -> Result<Option<(MkTrack, StreamInfo)>> {
+fn parse_track_entry(body: &[u8], tb: Rational) -> Result<Option<(MkTrack, StreamInfo)>> {
     let (mut number, mut ty, mut codec_id, mut private) = (0u64, 0u64, String::new(), Vec::new());
     let (mut default_ns, mut language, mut codec_delay_ns) = (0u64, None, 0u64);
     let (mut video, mut audio) = (None, None);
@@ -226,12 +227,7 @@ fn parse_track_entry(body: &[u8], tb: Rational, timescale_ns: u64) -> Result<Opt
         duration_us: None,
     };
     Ok(Some((
-        MkTrack {
-            number,
-            default_duration_ns: default_ns,
-            delay_ticks: ((codec_delay_ns as u128 * 2 + timescale_ns as u128)
-                / (2 * timescale_ns.max(1) as u128)) as i64,
-        },
+        MkTrack { number, default_duration_ns: default_ns, delay_us: (codec_delay_ns / 1000) as i64 },
         info,
     )))
 }
@@ -333,7 +329,7 @@ impl<S: Source> MkvDemuxer<S> {
         let tracks_body = tracks_body.ok_or(Error::Invalid("segment without Tracks".to_string()))?;
         for (id, b) in children(&tracks_body)? {
             if id == ID_TRACK_ENTRY {
-                if let Some((t, s)) = parse_track_entry(b, time_base, timescale)? {
+                if let Some((t, s)) = parse_track_entry(b, time_base)? {
                     tracks.push(t);
                     streams.push(s);
                 }
@@ -517,7 +513,7 @@ impl<S: Source> MkvDemuxer<S> {
     }
 
     fn make_packet(&self, ti: usize, ticks: i64, keyframe: bool, dur_ticks: i64, data: Vec<u8>) -> Packet {
-        let pts = self.time_base.ticks_to_us(ticks - self.tracks[ti].delay_ticks);
+        let pts = self.time_base.ticks_to_us(ticks) - self.tracks[ti].delay_us;
         Packet {
             stream_id: self.tracks[ti].number as u32,
             pts,
@@ -555,7 +551,8 @@ impl<S: Source> MkvDemuxer<S> {
         let c = self.clusters[idx];
         let mut pos = c.data_start;
         let mut ts = c.ts;
-        let delay = self.tracks.iter().find(|t| t.number == number).map_or(0, |t| t.delay_ticks);
+        let delay_us = self.tracks.iter().find(|t| t.number == number).map_or(0, |t| t.delay_us);
+        let tb = self.time_base;
         let mut hits = Vec::new();
         let mut hb = [0u8; 32];
         while pos < c.end {
@@ -573,7 +570,7 @@ impl<S: Source> MkvDemuxer<S> {
                     if let Ok((Some(tn), tl)) = vint(b) {
                         if tn == number && b.len() >= tl + 3 && b[tl + 2] & 0x80 != 0 {
                             let tc = i16::from_be_bytes([b[tl], b[tl + 1]]) as i64;
-                            hits.push(Hit { pts_ticks: ts + tc - delay, offset: pos });
+                            hits.push(Hit { pts_us: tb.ticks_to_us(ts + tc) - delay_us, offset: pos });
                         }
                     }
                 }
@@ -585,7 +582,10 @@ impl<S: Source> MkvDemuxer<S> {
                             if let Ok((Some(tn), tl)) = vint(b) {
                                 if tn == number && !has_ref && b.len() >= tl + 3 {
                                     let tc = i16::from_be_bytes([b[tl], b[tl + 1]]) as i64;
-                                    hits.push(Hit { pts_ticks: ts + tc - delay, offset: pos });
+                                    hits.push(Hit {
+                                        pts_us: tb.ticks_to_us(ts + tc) - delay_us,
+                                        offset: pos,
+                                    });
                                 }
                             }
                         }
@@ -667,13 +667,15 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
             return Ok(0);
         }
         let number = self.tracks[self.primary()].number;
-        let target_ticks = self.time_base.us_to_ticks_floor(target_us);
+        let delay = self.tracks[self.primary()].delay_us;
+        // Raw (undelayed) time of the target in ticks, for comparing with cluster timestamps.
+        let target_ticks = self.time_base.us_to_ticks_floor(target_us + delay);
         let mut idx = self.clusters.partition_point(|c| c.ts <= target_ticks).saturating_sub(1);
         // Walk back until a cluster holds a keyframe at or before the target.
         let mut best: Option<(usize, Hit)> = None;
         loop {
             let hits = self.scan_keys(idx, number).await?;
-            if let Some(h) = hits.into_iter().rev().find(|h| h.pts_ticks <= target_ticks) {
+            if let Some(h) = hits.into_iter().rev().find(|h| h.pts_us <= target_us) {
                 best = Some((idx, h));
                 break;
             }
@@ -688,9 +690,9 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
         let mut j = idx + 1;
         while j < self.clusters.len() && self.clusters[j].ts <= target_ticks + slack {
             if let Some(h) =
-                self.scan_keys(j, number).await?.into_iter().rev().find(|h| h.pts_ticks <= target_ticks)
+                self.scan_keys(j, number).await?.into_iter().rev().find(|h| h.pts_us <= target_us)
             {
-                if best.as_ref().is_none_or(|(_, b)| h.pts_ticks > b.pts_ticks) {
+                if best.as_ref().is_none_or(|(_, b)| h.pts_us > b.pts_us) {
                     best = Some((j, h));
                 }
             }
@@ -715,6 +717,6 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
         };
         self.enter_cluster(ci);
         self.pos = hit.offset;
-        Ok(self.time_base.ticks_to_us(hit.pts_ticks))
+        Ok(hit.pts_us)
     }
 }

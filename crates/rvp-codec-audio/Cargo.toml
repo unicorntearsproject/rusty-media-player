@@ -1,6 +1,6 @@
 [package]
 name = "rvp-codec-audio"
-description = "AAC, MP3, FLAC, Vorbis, Opus decoders behind the AudioDecoder trait"
+description = "AAC, MP3, FLAC, Vorbis (symphonia) and Opus (opus-decoder) behind rvp_core::AudioDecoder"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,3 +13,9 @@ workspace = true
 
 [dependencies]
 rvp-core.workspace = true
+symphonia-core = "0.6"
+symphonia-codec-aac = "0.6"
+symphonia-codec-vorbis = "0.6"
+symphonia-bundle-flac = "0.6"
+symphonia-bundle-mp3 = { version = "0.6", default-features = false, features = ["mp3"] }
+opus-decoder = "0.1"

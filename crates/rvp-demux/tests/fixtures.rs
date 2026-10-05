@@ -17,6 +17,7 @@ const FIXTURES: &[(&str, bool)] = &[
     ("av1_opus.webm", false),
     ("vp9_vorbis.webm", false),
     ("h264_flac.mkv", false),
+    ("mp3.mkv", false),
 ];
 
 fn dir() -> PathBuf {
@@ -118,7 +119,10 @@ fn streams_and_packets_match_ffprobe() {
                 assert_eq!(a.sample_rate as i64, num(&w["sample_rate"]).unwrap(), "{ctx}: rate");
                 assert_eq!(a.channels as i64, num(&w["channels"]).unwrap(), "{ctx}: channels");
             }
-            assert!(!g.extra_data.is_empty() || g.codec == "vp9", "{ctx}: codec config present");
+            assert!(
+                !g.extra_data.is_empty() || matches!(g.codec.as_str(), "vp9" | "mp3"),
+                "{ctx}: codec config present"
+            );
 
             // Packets of this stream, in order, against ffprobe.
             let mine: Vec<&Packet> = got.packets.iter().filter(|p| p.stream_id == g.id).collect();
@@ -127,7 +131,12 @@ fn streams_and_packets_match_ffprobe() {
             assert_eq!(mine.len(), theirs.len(), "{ctx}: packet count");
             for (n, (m, t)) in mine.iter().zip(&theirs).enumerate() {
                 let pc = format!("{ctx} packet {n}");
-                assert_eq!(m.pts, tb.ticks_to_us(num(&t["pts"]).unwrap()), "{pc}: pts");
+                // Audio in Matroska can carry an encoder delay (CodecDelay: Opus, MP3, Vorbis). ffprobe rounds the
+                // shifted timestamp to a tick; we keep the exact delay, so it may differ by up to one tick.
+                let delayed = name.ends_with(".webm") || name.ends_with(".mkv");
+                let tol = if delayed && g.kind == StreamKind::Audio { 1000 } else { 0 };
+                let want_pts = tb.ticks_to_us(num(&t["pts"]).unwrap());
+                assert!((m.pts - want_pts).abs() <= tol, "{pc}: pts {} vs {want_pts}", m.pts);
                 if has_dts {
                     assert_eq!(m.dts, tb.ticks_to_us(num(&t["dts"]).unwrap()), "{pc}: dts");
                 }
@@ -170,22 +179,16 @@ fn random_seeks_land_on_a_keyframe_at_or_before_the_target() {
         return;
     }
     for &(name, _) in FIXTURES {
-        let want = probe(name);
-        let tb = parse_tb(want["streams"][0]["time_base"].as_str().unwrap());
-        // Keyframe pts of stream 0 (the video stream), ascending.
-        let mut keys: Vec<i64> = want["packets"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|p| p["stream_index"] == 0 && p["flags"].as_str().unwrap().starts_with('K'))
-            .map(|p| tb.ticks_to_us(num(&p["pts"]).unwrap()))
-            .collect();
+        // The packet scan above is checked against ffprobe by `streams_and_packets_match_ffprobe`; here we
+        // use it as the truth for which packets are keyframes of the seek stream (first video stream, else
+        // the first stream) and when.
+        let full = demux(MemSource::new(bytes(name)));
+        let video_id =
+            full.streams.iter().find(|s| s.kind == StreamKind::Video).unwrap_or(&full.streams[0]).id;
+        let mut keys: Vec<i64> =
+            full.packets.iter().filter(|p| p.stream_id == video_id && p.keyframe).map(|p| p.pts).collect();
         keys.sort();
         assert!(keys.len() >= 10, "{name}: fixture should have many keyframes");
-        let video_id = {
-            let d = demux(MemSource::new(bytes(name)));
-            d.streams.iter().find(|s| s.kind == StreamKind::Video).unwrap().id
-        };
 
         let mut d: AnyDemuxer<MemSource> = block_on(open(MemSource::new(bytes(name)))).unwrap();
         let mut seed = 0x2545_F491_4F6C_DD1Du64;

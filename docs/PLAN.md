@@ -293,12 +293,21 @@ fragmented MP4, where ffprobe estimates it); Matroska seeking uses a cluster ind
 `cargo xtask fixtures` (ffmpeg) and are not committed; a truncation/corruption test checks for panics. The
 test suite also needs `ffmpeg` and `ffprobe` (set `RVP_SKIP_FIXTURES=1` to skip).
 
-**M3 Audio decode and output.** `AudioDecoder` trait; AAC/MP3/FLAC/Vorbis via symphonia, Opus via
+**M3 Audio decode and output.** *(done 2026-10-05; see the notes below)* `AudioDecoder` trait; AAC/MP3/FLAC/Vorbis via symphonia, Opus via
 `opus-decoder`; channel mapping to stereo; resampler; `AudioPipeline` (queue target, volume, mute);
 headless WAV sink; optional native `cpal` sink. *Done when:* audio-only playback of every codec fixture
 through `rvp-headless` matches `ffmpeg -f f32le` output (lossless FLAC bit-exact; others within the codec's
 tolerance: RMS error < -60 dBFS, length within 1 frame), and a seek in the middle resumes within 1
 packet of the target with no gap > 20 ms in the WAV timeline.
+
+*M3 notes:* the resampler is our own (`rvp-core::resample`, 32-tap windowed sinc) instead of `rubato`, so the
+player core stays `no_std`; codecs are injected through `rvp_core::CodecFactory` instead of cargo features,
+so `rvp-player` depends on no codec crate; no `cpal` sink yet (optional). Opus pre-skip, MP3/Vorbis decoder
+delay and AAC priming all come from container timestamps (Matroska `CodecDelay`, MP4 edit lists) and the
+player trims audio before stream time zero. End padding is not trimmed (Opus +648, Vorbis +320 samples,
+MP3 +47 against ffmpeg), all under one codec frame. AAC is LC only with at most 2 channels (a symphonia
+limit). Verified: FLAC bit-exact; AAC -159 dBFS, Vorbis -164, Opus -101, MP3 -150 RMS error versus ffmpeg;
+seek to 4.0 s resumes at 4.0 s with no gap over 20 ms (`crates/rvp-host-headless/tests/audio.rs`).
 
 **M4 AV1 and the video path.** Patch rav1d for wasm32 (R1), `rvp-codec-av1`, YUV (4:2:0 8/10-bit) ->
 RGBA conversion with colour matrix/range, `VideoQueue`, present/drop/hold policy, first full A/V sync in

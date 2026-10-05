@@ -1,5 +1,6 @@
 //! Decoder traits implemented by the codec crates and driven by the player.
-use crate::{AudioBuffer, Packet, Result, VideoFrame};
+use crate::{AudioBuffer, Packet, Result, StreamInfo, VideoFrame};
+use alloc::boxed::Box;
 
 /// A video decoder. Send packets in decode order, receive frames in presentation order.
 pub trait VideoDecoder {
@@ -19,4 +20,13 @@ pub trait AudioDecoder {
     fn receive_buffer(&mut self) -> Result<Option<AudioBuffer>>;
     /// Drop all internal state.
     fn flush(&mut self);
+}
+
+/// Creates decoders for streams. Implemented by the app or host that links the codec crates, so the
+/// player core stays free of codec dependencies.
+pub trait CodecFactory {
+    /// A decoder for an audio stream, or `Unsupported`.
+    fn audio(&self, info: &StreamInfo) -> Result<Box<dyn AudioDecoder>>;
+    /// A decoder for a video stream, or `Unsupported`.
+    fn video(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>>;
 }

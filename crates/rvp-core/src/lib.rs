@@ -12,16 +12,18 @@ pub mod clock;
 pub mod codec;
 pub mod error;
 pub mod media;
+pub mod resample;
 pub mod ring;
 pub mod task;
 pub mod time;
 
 pub use clock::{ClockSource, MasterClock};
-pub use codec::{AudioDecoder, VideoDecoder};
+pub use codec::{AudioDecoder, CodecFactory, VideoDecoder};
 pub use error::{Error, Result};
 pub use media::{
     AudioBuffer, AudioCodec, AudioInfo, AudioParams, ColorMatrix, ColorRange, Packet, PixelFormat,
     StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
 };
+pub use resample::Resampler;
 pub use ring::RingBuffer;
 pub use time::{Rational, Timestamp};

@@ -62,6 +62,8 @@ pub struct NullAudio {
     /// Last volume set.
     pub volume: f32,
     capacity_frames: u64,
+    /// When set, every accepted sample is appended here (interleaved `f32`).
+    pub capture: Option<Vec<f32>>,
 }
 
 impl NullAudio {
@@ -76,6 +78,7 @@ impl NullAudio {
             latency_us: 20_000,
             volume: 1.0,
             capacity_frames: 0,
+            capture: None,
         }
     }
 
@@ -126,6 +129,9 @@ impl AudioSink for NullAudio {
         let n = frames.min(room);
         self.queued += n as u64;
         self.written += n as u64;
+        if let Some(c) = &mut self.capture {
+            c.extend_from_slice(&interleaved[..n * p.channels.max(1) as usize]);
+        }
         n
     }
 
@@ -347,3 +353,8 @@ mod tests {
         assert_eq!(a.frames[0].0, 40_000);
     }
 }
+
+pub mod play;
+pub use play::{DefaultCodecs, PlayOptions, PlayReport, play_file, write_wav_f32};
+pub use rvp_player::SessionState;
+pub use rvp_player::TraceEntry as TraceEntryRef;
