@@ -32,6 +32,9 @@ use picture::{Picture, RefState};
 use poc::{PocResult, PocState};
 use slice::SliceDecoder;
 
+/// Largest picture accepted by default, in macroblocks (level 5.1: 4096x2304). Bounds memory for hostile streams.
+pub const DEFAULT_MAX_MBS: usize = 36_864;
+
 /// A decoded, cropped output picture.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Frame {
@@ -94,6 +97,7 @@ pub struct Decoder {
     scale: Option<(Rc<Sps>, Rc<Pps>, LevelScale)>,
     scratch: Vec<u8>,
     stats: Stats,
+    max_mbs: usize,
 }
 
 impl Default for Decoder {
@@ -139,12 +143,18 @@ impl Decoder {
             scale: None,
             scratch: Vec::new(),
             stats: Stats::default(),
+            max_mbs: DEFAULT_MAX_MBS,
         }
     }
 
     /// The pictures currently held: `(poc, is_reference, waiting_for_output)`. For tests and debugging.
     pub fn dpb_snapshot(&self) -> Vec<(i32, bool, bool)> {
         self.dpb.iter().map(|p| (p.poc, p.is_ref(), p.needed_for_output)).collect()
+    }
+
+    /// Limit the picture size (in macroblocks) this decoder will allocate; larger streams fail with `Unsupported`.
+    pub fn set_max_mbs(&mut self, mbs: usize) {
+        self.max_mbs = mbs;
     }
 
     /// Diagnostic counters.
@@ -257,8 +267,13 @@ impl Decoder {
 
     fn decode_slice(&mut self, nal: NalHeader, rbsp: &[u8], pts: i64) -> Result<()> {
         let (hdr, sps, pps) = SliceHeader::parse(rbsp, nal, &self.sets)?;
-        if hdr.field_pic || !sps.frame_mbs_only {
+        // Frame pictures of a stream that merely allows interlace (frame_mbs_only_flag 0 without MBAFF) decode like
+        // progressive ones; field pictures and macroblock-adaptive frame/field pairs are not supported.
+        if hdr.field_pic || sps.mb_adaptive_frame_field {
             return Err(Error::Unsupported("interlaced video (PAFF/MBAFF)"));
+        }
+        if sps.width_mbs() * sps.height_mbs() > self.max_mbs {
+            return Err(Error::Unsupported("picture larger than the decoder's size limit"));
         }
         if sps.chroma_format_idc != 1 || sps.separate_colour_plane {
             return Err(Error::Unsupported("chroma format other than 4:2:0"));

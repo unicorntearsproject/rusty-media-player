@@ -8,7 +8,7 @@ native (for tests), and, once its app ABI exists, as an app inside [Rusty Bucket
 - Its own UI, drawn with the Unicorn Tears design-system tokens (`crates/theme`).
 - Clean-room: VLC is an architecture reference only; no VLC code is used.
 
-Status: Milestones 0-5 done (plan, scaffold, host/clock/executor, demuxers, audio, AV1, A/V sync, headless host, and the browser host with the themed UI). Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and the
+Status: Milestones 0-6 done (plan, scaffold, host/clock/executor, demuxers, audio, AV1, A/V sync, headless host, the browser host with the themed UI, and our own pure-Rust H.264 decoder: Baseline/Main/High, progressive 8-bit 4:2:0, bit-exact with ffmpeg). Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and the
 milestone list, and [`CLAUDE.md`](CLAUDE.md) for project rules.
 
 ## Layout
@@ -18,7 +18,7 @@ milestone list, and [`CLAUDE.md`](CLAUDE.md) for project rules.
 | `crates/rvp-core` | types, master clock, ring buffer, decoder traits |
 | `crates/rvp-host` | host trait set (source, audio, video, surface, input, storage, clock) |
 | `crates/rvp-demux` | MP4 and Matroska/WebM demuxers |
-| `crates/rvp-codec-*` | audio, H.264, AV1, VP9 decoders |
+| `crates/rvp-codec-*` | audio, H.264 (own decoder; its bitstream, parameter-set, transform, CAVLC and CABAC modules are reusable by an encoder), AV1, VP9 decoders |
 | `crates/rvp-subs` | SRT and WebVTT |
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
 | `crates/rvp-ui`, `crates/theme` | the UI (drawn into a pixel surface) and the generated design tokens |
@@ -34,7 +34,7 @@ The Rust toolchain lives in `~/.cargo/bin`: `source ~/.cargo/env` first.
 ```sh
 cargo test --workspace          # native tests
 cargo xtask check               # also checks wasm32-unknown-unknown and no_std (x86_64-unknown-none)
-cargo xtask fixtures            # ffmpeg-generated test media into target/fixtures (made on demand by tests)
+cargo xtask fixtures            # ffmpeg-generated test media (incl. the x264 H.264 matrix) into target/fixtures (made on demand by tests)
 cargo xtask theme               # regenerate crates/theme/src/tokens.rs from crates/theme/tokens/*.css
 cargo xtask theme --sync        # first refresh the CSS snapshot from the design system
 cargo xtask web                 # build the browser player into target/web (needs wasm-bindgen-cli 0.2.129)

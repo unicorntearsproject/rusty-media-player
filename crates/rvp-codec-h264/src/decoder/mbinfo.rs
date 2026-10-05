@@ -16,6 +16,8 @@ pub const F_DIRECT: u16 = 32;
 pub const F_I4: u16 = 64;
 /// Intra 8x8.
 pub const F_I8: u16 = 128;
+/// Inter macroblock whose 16 4x4 blocks all share one motion (a deblocking shortcut).
+pub const F_UNIFORM: u16 = 256;
 
 /// Everything later macroblocks and the deblocking filter need to know about a decoded macroblock.
 #[derive(Clone, Copy)]

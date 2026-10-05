@@ -1,6 +1,6 @@
 # rusty-video-player: Plan
 
-> Status: Milestone 5 done, 2026-10-05. Decisions live in `CLAUDE.md`; this file is the architecture and the
+> Status: Milestone 6 done, 2026-10-05. Decisions live in `CLAUDE.md`; this file is the architecture and the
 > milestone list. Update it when a decision changes.
 
 ## 1. Goal and non-goals
@@ -41,7 +41,7 @@ Workspace layout (`crates/*`, plus `xtask`). All crates are `MIT OR Apache-2.0`.
 | `rvp-host` | `no_std + alloc` | The **host trait set** (section 4): `Source`, `AudioSink`, `VideoSink`, `Surface`, `InputEvents`, `Storage`, `HostClock`. Mock implementations for tests. |
 | `rvp-demux` | `no_std + alloc` | Our own incremental demuxers: ISO BMFF (MP4/M4A), Matroska/WebM (EBML), plus probing. Async over `Source`. |
 | `rvp-codec-audio` | std (wasm32 ok) | `AudioDecoder` impls: AAC, MP3, FLAC, Vorbis (symphonia codec crates, unmodified), Opus (`opus-decoder`). Resampler (rubato). |
-| `rvp-codec-h264` | `no_std + alloc` | **Our own** H.264 decoder. Pure Rust, `forbid(unsafe_code)` where feasible, staged (M6). |
+| `rvp-codec-h264` | `no_std + alloc` | **Our own** H.264 decoder (M6), `forbid(unsafe_code)`. Public modules that an encoder can share (Rusty Bucket plans one): `bitstream` (NAL/AVCC/Annex B, RBSP escaping, `BitReader` and `BitWriter`, Exp-Golomb), `params` (SPS with VUI, PPS, scaling lists, slice header, pred weight table, MMCO: each has `parse` and `write`), `transform` (inverse and forward 4x4/8x8/DC transforms, quantisation, dequantisation, scans), `cavlc` (tables plus `read_residual_block` and `write_residual_block`), `cabac` (context init tables, arithmetic decoder, arithmetic encoder, binarisation offsets). The picture decoder is `decoder` (macroblock layer, intra/inter prediction, direct modes, deblocking, DPB, output order); `h264_decoder()` adapts it to `VideoDecoder`. |
 | `rvp-codec-av1` | std (wasm32 ok) | rav1d wrapper (needs a wasm32 patch, see risk R1). |
 | `rvp-codec-vp9` | no_std + alloc preferred | VP9 behind our `VideoDecoder` trait: adopt `rusty_vp9` (Apache-2.0) or `vp9dec` (MIT) after benchmarking; own port only if both fail (M7). |
 | `rvp-subs` | `no_std + alloc` | SRT and WebVTT parsers, cue timeline. |
@@ -203,7 +203,7 @@ rate, playlist). The same API is exposed to JS by `rvp-host-web` for page integr
 | `rusty_vp9` | 0.1.1 | Apache-2.0 | no | builds | **Preferred VP9 candidate** ("bit-exact against all 315 libvpx conformance vectors", ~31k lines). Benchmark and read before adopting (M7). |
 | `vp9dec` | 0.1.1 | MIT | no | builds | Second VP9 candidate (clean-room, zero deps, ~14k lines). |
 | `rvp9-decoder` | 0.2.0-alpha.3 | BSD-3-Clause | no | untested | Third option; alpha, needs Rust 1.95. |
-| `rusty_h264-decoder` | 0.16.0 | BSD-2-Clause | optional (`std` feature) | builds | **Not shipped**: CLAUDE.md says our own H.264 decoder. Used as an optional **differential-test oracle** (and a licensing-compatible reference) from M6. |
+| `rusty_h264-decoder` | 0.16.0 | BSD-2-Clause | optional (`std` feature) | builds | **Not shipped and not used**: our own decoder (M6) is checked against ffmpeg alone, which proved enough. |
 | `h264-reader` | 0.9.0 | MIT/Apache-2.0 | no | builds | NAL/SPS/PPS parsing only; we may use it for bitstream-level cross-checks, not required. |
 | `fontdue` | 0.9.4 | MIT OR Apache-2.0 OR Zlib | **yes** (default `hashbrown`, `simd`) | builds | **Use** for UI text (the same choice as `../rust-os`). |
 | `tiny-skia` | 0.12.0 | BSD-3-Clause | `no-std-float` feature | expected | Optional for vector icons/paths in `rvp-ui` (decide in M5; own rect/gradient/glow code is enough for chrome). |
@@ -367,20 +367,74 @@ drops a few frames while starting; real-time HD is M9. Screenshots: `docs/screen
 **M6 H.264 (our own decoder), staged.** Each stage has its own conformance gate against ffmpeg `framemd5`
 (and the optional `rusty_h264-decoder` oracle); decoded pictures must be **bit-exact**.
 - **6a** NAL/SPS/PPS/slice-header parsing, bit reader, Exp-Golomb, CAVLC, intra 4x4/16x16/PCM, integer
-  transforms, deblocking, I-frame-only streams (`x264 --keyint 1 --profile baseline`). *Done when:* the I-only fixtures
-  (CIF and 720p, 30 frames) are bit-exact and decode 720p in < 40 ms/frame native release.
-- **6b** P slices: inter prediction, multiple reference frames, ref list init + reordering, MMCO and sliding
-  window, quarter-pel luma/chroma interpolation, skip/direct-less P, long-term refs. Baseline/Constrained
-  Baseline streams. *Done when:* x264 `--profile baseline --bframes 0 --ref 4` fixtures bit-exact.
-- **6c** B slices: direct spatial/temporal, weighted prediction (explicit + implicit), DPB with output
-  ordering (POC types 0/1/2), `max_num_reorder_frames`. Main profile (CAVLC) streams. *Done when:* x264
-  `--profile main --no-cabac --bframes 3 --weightp 2` fixtures bit-exact; display order and pts correct.
+  transforms, deblocking, I-frame-only streams. *Done when:* the I-only fixtures (CIF and 720p) are bit-exact and decode
+  720p in < 40 ms/frame native release.
+- **6b** P slices: inter prediction, multiple reference frames, list init + reordering, MMCO and sliding window,
+  quarter-pel luma/chroma interpolation, long-term refs. *Done when:* x264 `--profile baseline --bframes 0 --ref 4`
+  fixtures are bit-exact.
+- **6c** B slices: direct spatial/temporal, weighted prediction (explicit + implicit), DPB with output ordering
+  (POC types 0/1/2). *Done when:* x264 `--profile main --no-cabac --bframes 3 --weightp 2` fixtures are bit-exact with
+  correct display order and pts.
 - **6d** CABAC: context init tables, binarization, all syntax elements, slice data. *Done when:* x264 default
-  `--profile main` fixtures (CABAC) bit-exact, including 1080p.
-- **6e** High profile: 8x8 transform, 8x8 intra pred, scaling matrices, 4:2:0 8-bit; High 10 as a stretch.
-  *Done when:* x264 `--profile high` fixtures (8x8dct, scaling lists) bit-exact. Then wire into `rvp-player`:
-  MP4/MKV H.264+AAC plays in the browser (re-run M5's Playwright test with an H.264 fixture).
-- 6f (post-v1) interlaced PAFF/MBAFF, 4:2:2/4:4:4, FMO/ASO never.
+  `--profile main` fixtures (CABAC) are bit-exact, including 1080p.
+- **6e** High profile: 8x8 transform, 8x8 intra prediction, scaling matrices. *Done when:* x264 `--profile high`
+  fixtures (8x8dct, scaling lists) are bit-exact; then wired into the hosts (MP4/MKV H.264+AAC/FLAC plays in the
+  browser, Playwright test with an H.264 fixture).
+- 6f (post-v1) interlaced PAFF/MBAFF, 4:2:2/4:4:4, high bit depth; FMO/ASO never.
+
+*M6 notes (done 2026-10-05, all stages bit-exact against ffmpeg).* Clean-room: written from ITU-T H.264 (03/2010);
+the VLC, CABAC-init, deblocking and scan/default-matrix tables are generated from the spec's text by
+`tools/gen-h264-tables.py` (the spec PDF is not committed); no FFmpeg/openh264/VLC/JM source was read, ffmpeg and
+ffprobe are binary oracles only, and `rusty_h264-decoder` was not needed.
+
+*Conformance.* Fixtures come from `tools/gen-fixtures.sh` (50 x264 MP4s in `target/fixtures/h264`, never committed):
+Baseline/Main/High, CAVLC and CABAC, intra-only, P with 1/4/16 refs, B with spatial/temporal/auto direct, B-pyramid,
+weightp and weightb, 8x8dct, JVT scaling matrices, multiple slices, constrained intra, deblock offsets, no-deblock,
+odd (cropped) sizes, QP 5 to 48, 720p and 1080p. Every decoded plane of every frame equals `ffmpeg -f rawvideo`
+(`crates/rvp-codec-h264/tests/stage_{a..e}.rs`, plus an end-to-end test through the player in
+`rvp-host-headless/tests/video.rs` and two Playwright tests). x264 never emits many syntax features, so
+`tests/synth.rs` builds streams with this crate's own writers (I_PCM pictures plus zero-motion P/B macroblocks, so
+each output macroblock shows exactly which reference was used; random residual macroblocks with CAVLC) and compares
+with ffmpeg: about 5000 random streams cover POC types 0/1/2, frame_num wrap, sliding window and MMCO 1-6, long-term
+references, reference list modification with long-term entries, explicit and implicit weights, spatial and temporal
+direct, up to 3 slices per picture with every deblocking mode, CABAC I_PCM/skip, I slices inside P pictures,
+frame pictures of interlace-capable streams, and 4x4/8x8 transforms with SPS- and PPS-level scaling matrices (fall-back
+rules A and B). Truncation, bit-flip, zero/0xFF-run, shuffle and random-NAL fuzzing (`tests/robust.rs`, also run in
+release with overflow checks on) finds no panic. Two places where ffmpeg differs from the specification and the
+generators therefore steer clear of: it identifies long-term pictures by array position, so with sparse
+`LongTermFrameIdx` (>= number of long-term pictures) the deblocking filter treats distinct long-term pictures as one
+(long-term indices stay below 2 in the tests); and for CAVLC it appears to use the coded block pattern rather than the
+coefficients for bS 2 of 8x8-transform blocks that are coded but all zero (generators never produce those; encoders do
+not either). This decoder follows the specification in both.
+
+*Deviations and limits.* Progressive 8-bit 4:2:0 only. Rejected cleanly with `Unsupported` (tests in
+`tests/robust.rs`): field pictures and MBAFF (x264 `--interlaced`), High 10/4:2:2/4:4:4/monochrome, lossless
+(transform bypass), FMO/ASO/slice groups, data partitioning, SP/SI slices. Frame pictures of a stream with
+`frame_mbs_only_flag` 0 (no MBAFF) decode as progressive. Redundant slices are ignored. Lost data is concealed (missing
+macroblocks copy the newest reference, missing references fall back to an existing or grey picture, `frame_num` gaps
+insert "non-existing" frames). A new picture is detected by 7.4.1.2.4 or by a slice that restarts at macroblock 0.
+Output order uses the DPB size and `num_reorder_frames` from the VUI (level-derived DPB size without one, so streams
+without a VUI show up to a DPB's worth of frames late). Pictures above 36 864 macroblocks (4096x2304) are refused
+(`Decoder::set_max_mbs`).
+
+*Performance (this machine, release, single thread, one frame at a time; `cargo run --release -p rvp-codec-h264 --example bench -- file.mp4`).* Native and wasm
+(`cargo xtask wasm-smoke`; `node tools/wasm-smoke.mjs <module> <file> --bench N`, Node 22 / V8, plain wasm32 release
+build; a +simd128 build is within 5%) decode output identical to each other:
+
+| Stream | Bitrate | Native | Wasm (Node) |
+| --- | --- | --- | --- |
+| 720p High, CABAC, B-frames, typical content (`h_high_720p_typ`) | 3.4 Mbit/s | 4.5 ms/frame, 220 fps | 8.0 ms/frame, 125 fps |
+| 1080p High, typical (`h_high_1080p_typ`) | 4.7 Mbit/s | 9.7 ms/frame, 103 fps | 17.6 ms/frame, 57 fps |
+| 720p High, stress (noise added, `h_high_720p`) | 28 Mbit/s | 21 ms/frame, 47 fps | 29 ms/frame, 35 fps |
+| 1080p High, stress (`h_high_1080p`) | 25 Mbit/s | 31 ms/frame, 32 fps | 44 ms/frame, 23 fps |
+| 720p Baseline P, CAVLC (`p_base_720p`) | 3.4 Mbit/s | 9.0 ms/frame, 111 fps | 14 ms/frame, 70 fps |
+| 720p Baseline intra-only, CAVLC (`i_base_720p`) | 11 Mbit/s | 14 ms/frame, 70 fps | 20 ms/frame, 49 fps |
+
+720p30 High therefore decodes faster than real time on native release, and in wasm too, even for the 28 Mbit/s
+stress stream. Optimisation so far is only restructuring (slice-based interpolation kernels, uniform-motion shortcuts in
+the deblocking filter, table masking in the CABAC engine); no SIMD or threads. The stress streams are dominated by CABAC
+(about 25% in `decision`), typical ones by prediction and deblocking. 1080p stress in a browser tab sharing a thread
+with the UI is the case M9 still has to win.
 
 **M7 VP9.** Benchmark `rusty_vp9` and `vp9dec` on the VP9 fixtures (correctness against ffmpeg `framemd5`,
 speed, wasm32 build, memory); wrap the winner as `rvp-codec-vp9`. If neither is acceptable, port our own
@@ -416,7 +470,7 @@ audio and file APIs.
 | R1 | `rav1d` 1.1.0 does not compile on `wasm32-unknown-unknown` (libc imports). | **Resolved in M4**: a private `libc` shim module (see `third_party/rav1d/PATCHES.md`) was the only change needed. The vendored copy decodes bit-exact in Node (`cargo xtask wasm-smoke`). Upstreaming the shim is still worthwhile. |
 | R2 | Real-time 1080p in single-threaded wasm for H.264/AV1/VP9. | Budgeted ticks, frame skipping, SIMD128 (M9), optional workers; lower-resolution graceful degrade; honest "performance mode" in UI. |
 | R3 | Rusty Bucket's `wasmi` is an interpreter: video will not be realtime there. | M10; native codec service or a JIT/AOT runtime; tracked in `../rust-os/docs/planning/architecture.md` (D12 compile-ahead engine, D16 threads). |
-| R4 | Bit-exact H.264 is long, detail-heavy work. | Stages with ffmpeg oracles; `rusty_h264-decoder` as a second oracle; tiny fixtures per feature. |
+| R4 | Bit-exact H.264 is long, detail-heavy work. | **Resolved in M6**: staged ffmpeg oracles, generated tables, synthetic streams for features x264 does not emit. |
 | R5 | `opus-decoder` is a 0.1.x crate. | Test vectors in M3; fallback `ropus`. |
 | R6 | Symphonia is MPL-2.0 and `std`. | Fine unmodified (file-level copyleft); audio crate is isolated, so it could be swapped for `nanomp3`/own decoders without touching the core. |
 | R7 | Browser audio latency/clock accuracy differs by browser. | Measure `AudioContext.outputLatency/baseLatency`; fall back to monotonic master when unreliable; test on Chromium and Firefox. |

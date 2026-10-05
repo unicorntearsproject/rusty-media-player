@@ -1,6 +1,6 @@
 //! The in-loop deblocking filter (8.7), for progressive frames.
 use super::deblock_tables::{ALPHA, BETA, TC0};
-use super::mbinfo::{F_INTRA, F_T8X8, MbInfo};
+use super::mbinfo::{F_INTRA, F_T8X8, F_UNIFORM, MbInfo};
 use super::picture::Picture;
 
 /// Per-slice deblocking parameters.
@@ -226,26 +226,50 @@ pub(crate) fn deblock_picture(pic: &mut Picture, mbs: &[MbInfo], slices: &[Slice
             // Boundary strengths: bs_v[edge][row block], bs_h[edge][column block].
             let mut bs_v = [[0u8; 4]; 4];
             let mut bs_h = [[0u8; 4]; 4];
-            for e in 0..4 {
+            let q_intra = q.flags & F_INTRA != 0;
+            // Inter macroblocks with one motion and no coefficients need no internal edge checks.
+            let q_flat = q.flags & F_UNIFORM != 0 && q.nzmask == 0;
+            for e in 1..4 {
+                if t8 && e % 2 == 1 {
+                    continue;
+                }
+                if q_intra {
+                    bs_v[e] = [3; 4];
+                    bs_h[e] = [3; 4];
+                } else if !q_flat {
+                    for k in 0..4 {
+                        bs_v[e][k] =
+                            b.bs(addr, addr, mx * 4 + e - 1, my * 4 + k, mx * 4 + e, my * 4 + k, false);
+                        bs_h[e][k] =
+                            b.bs(addr, addr, mx * 4 + k, my * 4 + e - 1, mx * 4 + k, my * 4 + e, false);
+                    }
+                }
+            }
+            // Macroblock edges.
+            for (dir, nb) in [(0usize, left), (1usize, top)] {
+                let Some(pa) = nb else { continue };
+                let p = &mbs[pa];
+                let out = if dir == 0 { &mut bs_v[0] } else { &mut bs_h[0] };
+                if (p.flags | q.flags) & F_INTRA != 0 {
+                    *out = [4; 4];
+                    continue;
+                }
+                let both_flat = p.flags & q.flags & F_UNIFORM != 0;
+                let at = |k: usize| if dir == 0 { (mx * 4, my * 4 + k) } else { (mx * 4 + k, my * 4) };
+                let pos_p = |(qx, qy): (usize, usize)| if dir == 0 { (qx - 1, qy) } else { (qx, qy - 1) };
+                let mut shared = None;
                 for k in 0..4 {
-                    // vertical edge e, 4-row group k
-                    let (qx, qy) = (mx * 4 + e, my * 4 + k);
-                    if e == 0 {
-                        if let Some(pa) = left {
-                            bs_v[0][k] = b.bs(pa, addr, qx - 1, qy, qx, qy, true);
-                        }
-                    } else if !(t8 && e % 2 == 1) {
-                        bs_v[e][k] = b.bs(addr, addr, qx - 1, qy, qx, qy, false);
-                    }
-                    // horizontal edge e, 4-column group k
-                    let (qx, qy) = (mx * 4 + k, my * 4 + e);
-                    if e == 0 {
-                        if let Some(pa) = top {
-                            bs_h[0][k] = b.bs(pa, addr, qx, qy - 1, qx, qy, true);
-                        }
-                    } else if !(t8 && e % 2 == 1) {
-                        bs_h[e][k] = b.bs(addr, addr, qx, qy - 1, qx, qy, false);
-                    }
+                    let (qx, qy) = at(k);
+                    let (px, py) = pos_p((qx, qy));
+                    let nzbit =
+                        |m: &MbInfo, x4: usize, y4: usize| m.nzmask & (1 << ((y4 & 3) * 4 + (x4 & 3))) != 0;
+                    out[k] = if nzbit(p, px, py) || nzbit(q, qx, qy) {
+                        2
+                    } else if both_flat {
+                        *shared.get_or_insert_with(|| b.motion_bs(px, py, qx, qy))
+                    } else {
+                        b.motion_bs(px, py, qx, qy)
+                    };
                 }
             }
             // Luma.

@@ -114,6 +114,9 @@ gen_h264() {
   enc h_high_cip 352x288 30 "${high[@]}" -g 30 -bf 2 -refs 3 -x264-params constrained-intra=1
   NOISE=12 enc h_high_720p 1280x720 90 "${high[@]}" -g 60 -bf 3 -refs 3 -x264-params weightp=2:weightb=1
   enc h_high_1080p 1920x1080 20 "${high[@]}" -g 20 -bf 3 -refs 3
+  # Typical-bitrate content for the speed numbers (a few Mbit/s instead of the 25+ of the noisy streams above).
+  NOISE=2 enc h_high_720p_typ 1280x720 90 "${high[@]}" -g 60 -bf 3 -refs 3 -crf 22 -x264-params weightp=2:weightb=1
+  NOISE=2 enc h_high_1080p_typ 1920x1080 60 "${high[@]}" -g 60 -bf 3 -refs 3 -crf 22
   # --- interlaced (rejected cleanly) and non-4:2:0 / high bit depth (rejected cleanly)
   enc x_interlaced 352x288 10 "${main[@]}" -g 10 -bf 0 -x264-params interlaced=1
   enc x_high10 352x288 6 -profile:v high10 -pix_fmt yuv420p10le -preset veryfast -g 6

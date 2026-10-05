@@ -515,13 +515,16 @@ impl Gen {
 }
 
 /// Generate a random valid stream from `seed`; `temporal` selects the temporal-direct variant.
-fn random_stream(seed: u64, temporal: bool) -> (Vec<u8>, usize) {
+fn random_stream(seed: u64, temporal: bool, interlace_capable: bool) -> (Vec<u8>, usize) {
     let mut r = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
     for _ in 0..4 {
         r.next();
     }
     let mbw = r.range(2, 4) as u32;
-    let mbh = r.range(2, 3) as u32;
+    let mut mbh = r.range(2, 3) as u32;
+    if interlace_capable {
+        mbh = 4; // two map units: frame_mbs_only_flag 0 doubles the height
+    }
     let use_b = (temporal || r.chance(60)) && !no("b");
     let poc_type = if no("poc") {
         0
@@ -535,6 +538,11 @@ fn random_stream(seed: u64, temporal: bool) -> (Vec<u8>, usize) {
     let log2_poc = r.range(6, 8) as u32;
     let reorder = if use_b { 2 } else { 0 };
     let mut sps = make_sps(mbw, mbh, poc_type, log2_fn, log2_poc, max_refs, reorder);
+    if interlace_capable {
+        // Frame pictures only (field_pic_flag 0, no MBAFF): decodes like progressive video.
+        sps.frame_mbs_only = false;
+        sps.pic_height_in_map_units = mbh / 2;
+    }
     sps.offset_for_non_ref_pic = -1;
     sps.offset_for_ref_frame = vec![2];
     sps.vui.as_mut().unwrap().max_dec_frame_buffering = Some((max_refs + reorder + 1).min(16));
@@ -627,7 +635,7 @@ fn random_reference_streams_match_ffmpeg() {
     let start: u64 = std::env::var("RVP_SYNTH_START").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
     let mut failures = Vec::new();
     for seed in start..start + n {
-        let (bytes, fb) = random_stream(seed, false);
+        let (bytes, fb) = random_stream(seed, false, false);
         let r = std::panic::catch_unwind(|| check_stream(&bytes, &format!("seed{seed}"), fb));
         if let Err(e) = r {
             let msg = e
@@ -650,7 +658,7 @@ fn temporal_direct_streams_match_ffmpeg() {
     let start: u64 = std::env::var("RVP_SYNTH_START").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
     let mut failures = Vec::new();
     for seed in start..start + n {
-        let (bytes, fb) = random_stream(seed, true);
+        let (bytes, fb) = random_stream(seed, true, false);
         let r = std::panic::catch_unwind(|| check_stream(&bytes, &format!("temporal{seed}"), fb));
         if let Err(e) = r {
             let msg = e
@@ -730,4 +738,159 @@ fn bs_experiments() {
             }
         }
     }
+}
+
+#[test]
+fn frame_pictures_of_an_interlace_capable_stream_decode() {
+    if common::skip() {
+        return;
+    }
+    for seed in 1..40u64 {
+        let (bytes, fb) = random_stream(seed, false, true);
+        check_stream(&bytes, &format!("interlace-capable{seed}"), fb);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Residual data: CAVLC blocks of every shape, 4x4 and 8x8 transforms and scaling matrices at SPS and PPS level.
+
+fn rand_scaling(r: &mut Rng, count: usize) -> rvp_codec_h264::params::ScalingSyntax {
+    use rvp_codec_h264::params::scaling::ListSpec;
+    let lists = (0..count)
+        .map(|i| match r.below(10) {
+            0..=3 => ListSpec::NotPresent,
+            4..=5 => ListSpec::UseDefault,
+            _ => {
+                let n = if i < 6 { 16 } else { 64 };
+                let base = r.range(4, 24) as u8;
+                ListSpec::Explicit(
+                    (0..n).map(|k| (base as i64 + r.range(0, 24) * (k as i64) / n as i64) as u8).collect(),
+                )
+            }
+        })
+        .collect();
+    rvp_codec_h264::params::ScalingSyntax { lists }
+}
+
+/// A High-profile stream of macroblocks with random residuals (intra DC prediction, zero-motion P).
+fn residual_stream(seed: u64) -> (Vec<u8>, usize) {
+    let mut r = Rng(seed.wrapping_mul(0xD6E8_FEB8_6659_FD93) | 1);
+    for _ in 0..4 {
+        r.next();
+    }
+    let mbw = r.range(2, 4) as u32;
+    let mbh = r.range(2, 3) as u32;
+    let mut sps = make_sps(mbw, mbh, 0, 6, 8, 2, 0);
+    sps.profile_idc = 100;
+    if r.chance(50) {
+        sps.scaling = Some(rand_scaling(&mut r, 8));
+    }
+    let mut pps = Pps::new(0, 0);
+    pps.has_extension = true;
+    pps.transform_8x8_mode = r.chance(60);
+    if r.chance(50) {
+        pps.scaling = Some(rand_scaling(&mut r, 6 + 2 * pps.transform_8x8_mode as usize));
+    }
+    pps.deblocking_filter_control_present = true;
+    pps.constrained_intra_pred = r.chance(30);
+    pps.pic_init_qp = r.range(8, 40) as i32;
+    pps.chroma_qp_index_offset = r.range(-6, 6) as i32;
+    pps.second_chroma_qp_index_offset = r.range(-6, 6) as i32;
+    pps.num_ref_idx_l0_default = 1;
+    let t8 = pps.transform_8x8_mode;
+    let mut s = Stream::new(sps, pps, r.next());
+    s.max_level = if r.chance(20) { 2500 } else { 40 };
+    let total = (mbw * mbh) as usize;
+    let n_pics = r.range(3, 7);
+    let mut frame_num = 0u32;
+    for pic in 0..n_pics {
+        let kind = if pic == 0 || r.chance(15) { SliceType::I } else { SliceType::P };
+        let idr = pic == 0;
+        let mut h = SliceHeader::new(kind, idr);
+        h.frame_num = frame_num;
+        h.pic_order_cnt_lsb = (2 * pic) as u32;
+        h.slice_qp_delta = r.range(-4, 6) as i32;
+        h.disable_deblocking_filter_idc = r.below(3) as u32;
+        h.slice_alpha_c0_offset_div2 = r.range(-3, 3) as i32;
+        h.slice_beta_offset_div2 = r.range(-3, 3) as i32;
+        if h.disable_deblocking_filter_idc == 1 {
+            h.slice_alpha_c0_offset_div2 = 0;
+            h.slice_beta_offset_div2 = 0;
+        }
+        h.dec_ref_pic_marking = Some(DecRefPicMarking::default());
+        let two = kind == SliceType::P && pic >= 2;
+        if two {
+            h.num_ref_idx_override = true;
+            h.num_ref_idx_l0_active = 2;
+        } else if kind == SliceType::P {
+            h.num_ref_idx_l0_active = 1;
+        }
+        let n_slices = r.range(1, 2) as usize;
+        let split = if n_slices == 2 { r.range(1, total as i64 - 1) as usize } else { total };
+        let mut ranges = vec![(0, split)];
+        if n_slices == 2 {
+            ranges.push((split, total));
+        }
+        for (first, end) in ranges {
+            let mbs: Vec<Mb> = (first..end)
+                .map(|_| {
+                    let roll = r.below(100);
+                    let cbp = r.below(48) as u8;
+                    let intra_kind = |r: &mut Rng| match r.below(100) {
+                        0..=39 => Mb::Res(Res::I16 { ac: r.chance(50), chroma: r.below(3) as u8 }),
+                        40..=64 => Mb::Res(Res::I4 { cbp }),
+                        65..=89 if t8 => Mb::Res(Res::I8 { cbp }),
+                        65..=89 => Mb::Res(Res::I4 { cbp }),
+                        _ => Mb::Pcm,
+                    };
+                    if kind == SliceType::I {
+                        return intra_kind(&mut r);
+                    }
+                    match roll {
+                        0..=44 => Mb::Res(Res::P { cbp, t8: r.chance(60) }),
+                        45..=58 => Mb::Skip,
+                        59..=68 => Mb::P { ref_idx: r.below(if two { 2 } else { 1 }) as u32 },
+                        _ => intra_kind(&mut r),
+                    }
+                })
+                .collect();
+            if std::env::var_os("RVP_SYNTH_TRACE").is_some() {
+                eprintln!(
+                    "pic {pic} {:?} first {first} qp_delta {} dbk idc {} a {} b {} mbs {:?}",
+                    kind,
+                    h.slice_qp_delta,
+                    h.disable_deblocking_filter_idc,
+                    h.slice_alpha_c0_offset_div2,
+                    h.slice_beta_offset_div2,
+                    mbs
+                );
+            }
+            s.write_slice(2, idr, &SliceSpec { hdr: h.clone(), first_mb: first, mbs });
+        }
+        frame_num = (frame_num + 1) % 64;
+    }
+    (s.bytes, (mbw * 16 * mbh * 16 * 3 / 2) as usize)
+}
+
+#[test]
+fn residual_streams_with_scaling_matrices_match_ffmpeg() {
+    if common::skip() {
+        return;
+    }
+    let n: u64 = std::env::var("RVP_SYNTH_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(150);
+    let start: u64 = std::env::var("RVP_SYNTH_START").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    let mut failures = Vec::new();
+    for seed in start..start + n {
+        let (bytes, fb) = residual_stream(seed);
+        let r = std::panic::catch_unwind(|| check_stream(&bytes, &format!("residual{seed}"), fb));
+        if let Err(e) = r {
+            let msg = e
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            failures.push(format!("seed {seed}: {msg}"));
+        }
+    }
+    assert!(failures.is_empty(), "{} of {n} streams differ:\n{}", failures.len(), failures.join("\n"));
 }

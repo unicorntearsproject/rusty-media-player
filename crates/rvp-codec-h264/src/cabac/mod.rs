@@ -179,15 +179,15 @@ impl<'a> CabacDecoder<'a> {
         if self.nbits < 8 {
             self.refill();
         }
-        let st = ctxs.state[ctx_idx];
-        let (p, mps) = ((st >> 1) as usize, (st & 1) as u32);
+        let st = ctxs.state[ctx_idx & 1023];
+        let (p, mps) = (((st >> 1) & 63) as usize, (st & 1) as u32);
         let lps = RANGE_TAB_LPS[p][((self.range >> 6) & 3) as usize] as u32;
         let rmps = self.range - lps;
         let scaled = (rmps as u64) << self.nbits;
         let bin;
         if self.value < scaled {
             bin = mps;
-            ctxs.state[ctx_idx] = (TRANS_IDX_MPS[p] << 1) | mps as u8;
+            ctxs.state[ctx_idx & 1023] = (TRANS_IDX_MPS[p] << 1) | mps as u8;
             self.range = rmps;
             if rmps < 256 {
                 self.range <<= 1;
@@ -197,7 +197,7 @@ impl<'a> CabacDecoder<'a> {
             self.value -= scaled;
             bin = 1 - mps;
             let new_mps = if p == 0 { 1 - mps } else { mps };
-            ctxs.state[ctx_idx] = (TRANS_IDX_LPS[p] << 1) | new_mps as u8;
+            ctxs.state[ctx_idx & 1023] = (TRANS_IDX_LPS[p] << 1) | new_mps as u8;
             let shift = lps.leading_zeros() - 23; // bring range (9 bits) up to at least 256
             self.range = lps << shift;
             self.nbits -= shift;

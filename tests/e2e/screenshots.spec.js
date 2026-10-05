@@ -27,8 +27,11 @@ async function openPaused(page, file, at = 0.25) {
   await page.keyboard.press("Space");
   await waitFor(page, () => window.rvp.snapshot().state === "paused");
   await waitFor(page, () => window.rvp.snapshot().controls_opacity > 0.95);
+  // The snapshot's rects are in surface pixels; mouse coordinates are CSS pixels (they differ on HiDPI screens).
+  const dpr = await page.evaluate(() => window.devicePixelRatio || 1);
   const s = await snap(page);
-  await page.mouse.click(s.seek.x + s.seek.w * at, s.seek.y + 2);
+  await page.mouse.click((s.seek.x + s.seek.w * at) / dpr, (s.seek.y + 2) / dpr);
+  await waitFor(page, (t) => Math.abs(window.rvp.snapshot().position_us / 1e6 - t) < 1.5, at * (s.duration_us / 1e6));
   await page.waitForTimeout(700);
 }
 
@@ -106,15 +109,13 @@ test("screenshots", async ({ page, browser }) => {
   await page.waitForTimeout(150);
   await shot(page, "10-keyboard-focus.png");
 
-  // Audio-only file, a file whose picture we cannot decode yet (H.264), and a broken file.
+  // Audio-only file, an H.264 file (our own decoder), and a broken file.
   await ready(page);
   await openPaused(page, path.join(FIXTURES, "mp3.mkv"), 0.3);
   await shot(page, "11-audio-only.png");
   await ready(page);
-  await page.setInputFiles("#file", path.join(FIXTURES, "h264_aac.mp4"));
-  await waitFor(page, () => window.rvp.snapshot().state === "playing");
-  await page.waitForTimeout(600);
-  await shot(page, "12-no-picture-h264.png");
+  await openPaused(page, path.join(FIXTURES, "h264_aac.mp4"), 0.4);
+  await shot(page, "12-h264-playing.png");
   await ready(page);
   await page.setInputFiles("#file", { name: "broken.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(4096) });
   await waitFor(page, () => window.rvp.snapshot().state === "failed");

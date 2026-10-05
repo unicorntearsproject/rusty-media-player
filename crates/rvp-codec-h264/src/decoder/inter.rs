@@ -16,16 +16,7 @@ fn clip(v: i32) -> u8 {
     v.clamp(0, 255) as u8
 }
 
-/// A window of reference samples with at least 2 samples of margin before and 3 after the block in each
-/// direction, either a view into the picture or a clamped copy.
-struct Window<'a> {
-    data: &'a [u8],
-    stride: usize,
-    /// Index of the sample at the block's integer position.
-    origin: usize,
-}
-
-/// Copy the `(w + 5) x (h + 5)` window around `(x, y)` with coordinates clamped to the plane.
+/// Copy the `(w + 5) x (h + 5)` window around `(x, y)` with coordinates clamped to the plane into `tmp` (stride 21).
 fn fetch_clamped(
     plane: &[u8],
     stride: usize,
@@ -44,6 +35,43 @@ fn fetch_clamped(
             let sx = (x - 2 + i as i32).clamp(0, pw - 1) as usize;
             tmp[j * 21 + i] = row[sx];
         }
+    }
+}
+
+#[inline(always)]
+fn avg(a: u8, b: u8) -> u8 {
+    ((a as u32 + b as u32 + 1) >> 1) as u8
+}
+
+/// Horizontal half-sample (rounded, clipped) of one source row `r` (which starts 2 samples left of the block).
+#[inline(always)]
+fn hhalf(r: &[u8], out: &mut [u8; MAX_BLK], w: usize) {
+    let r = &r[..w + 5];
+    for i in 0..w {
+        out[i] = clip(
+            (tap6(
+                r[i] as i32,
+                r[i + 1] as i32,
+                r[i + 2] as i32,
+                r[i + 3] as i32,
+                r[i + 4] as i32,
+                r[i + 5] as i32,
+            ) + 16)
+                >> 5,
+        );
+    }
+}
+
+/// Vertical half-sample (rounded, clipped) for columns `i + c0` of the six rows `rows` (each pointing at column 0 of
+/// the block, with `c0 + w` samples available).
+#[inline(always)]
+fn vhalf(rows: [&[u8]; 6], c0: usize, out: &mut [u8; MAX_BLK], w: usize) {
+    let [r0, r1, r2, r3, r4, r5] = rows.map(|r| &r[c0..c0 + w]);
+    for i in 0..w {
+        out[i] = clip(
+            (tap6(r0[i] as i32, r1[i] as i32, r2[i] as i32, r3[i] as i32, r4[i] as i32, r5[i] as i32) + 16)
+                >> 5,
+        );
     }
 }
 
@@ -66,89 +94,139 @@ pub fn mc_luma(
 ) {
     let mut tmp = [0u8; 21 * 21];
     let inside = x >= 2 && y >= 2 && x + w as i32 + 3 <= pw && y + h as i32 + 3 <= ph;
-    let win = if inside {
-        Window { data: plane, stride, origin: y as usize * stride + x as usize }
+    // `src[origin + dy * sstride + dx]` is the reference sample at block offset (dx, dy), valid for dx in -2..w+3 and
+    // dy in -2..h+3.
+    let (src, sstride, origin): (&[u8], usize, usize) = if inside {
+        (plane, stride, y as usize * stride + x as usize)
     } else {
         fetch_clamped(plane, stride, pw, ph, x, y, w, h, &mut tmp);
-        Window { data: &tmp, stride: 21, origin: 2 * 21 + 2 }
+        (&tmp, 21, 2 * 21 + 2)
     };
-    let s = |dx: i32, dy: i32| -> i32 {
-        win.data[(win.origin as isize + dy as isize * win.stride as isize + dx as isize) as usize] as i32
+    // Row `dy` starting at dx = -2 (so index `i + 2` is column `i`), at least `w + 5` samples long.
+    let row = |dy: i32| -> &[u8] {
+        let start = (origin as isize + dy as isize * sstride as isize - 2) as usize;
+        &src[start..start + w + 5]
     };
-    // Horizontal half-sample (unrounded) at integer row dy, between columns dx and dx+1.
-    let b1 = |dx: i32, dy: i32| {
-        tap6(s(dx - 2, dy), s(dx - 1, dy), s(dx, dy), s(dx + 1, dy), s(dx + 2, dy), s(dx + 3, dy))
-    };
-    // Vertical half-sample (unrounded) at column dx, between rows dy and dy+1.
-    let h1 = |dx: i32, dy: i32| {
-        tap6(s(dx, dy - 2), s(dx, dy - 1), s(dx, dy), s(dx, dy + 1), s(dx, dy + 2), s(dx, dy + 3))
-    };
-    let (wi, hi) = (w as i32, h as i32);
+    // Row `dy` starting at column 0.
+    let col0 = |dy: i32| -> &[u8] { &row(dy)[2..] };
     match (fx, fy) {
         (0, 0) => {
-            for j in 0..hi {
-                for i in 0..wi {
-                    dst[j as usize * PSTRIDE + i as usize] = s(i, j) as u8;
-                }
+            for j in 0..h {
+                dst[j * PSTRIDE..j * PSTRIDE + w].copy_from_slice(&col0(j as i32)[..w]);
             }
         }
         (_, 0) => {
-            for j in 0..hi {
-                for i in 0..wi {
-                    let b = clip((b1(i, j) + 16) >> 5) as i32;
-                    let v = match fx {
-                        1 => (s(i, j) + b + 1) >> 1,
-                        2 => b,
-                        _ => (s(i + 1, j) + b + 1) >> 1,
-                    };
-                    dst[j as usize * PSTRIDE + i as usize] = v as u8;
+            let mut b = [0u8; MAX_BLK];
+            for j in 0..h {
+                let r = row(j as i32);
+                hhalf(r, &mut b, w);
+                let d = &mut dst[j * PSTRIDE..j * PSTRIDE + w];
+                match fx {
+                    1 => {
+                        for i in 0..w {
+                            d[i] = avg(r[i + 2], b[i]);
+                        }
+                    }
+                    2 => d.copy_from_slice(&b[..w]),
+                    _ => {
+                        for i in 0..w {
+                            d[i] = avg(r[i + 3], b[i]);
+                        }
+                    }
                 }
             }
         }
         (0, _) => {
-            for j in 0..hi {
-                for i in 0..wi {
-                    let hh = clip((h1(i, j) + 16) >> 5) as i32;
-                    let v = match fy {
-                        1 => (s(i, j) + hh + 1) >> 1,
-                        2 => hh,
-                        _ => (s(i, j + 1) + hh + 1) >> 1,
-                    };
-                    dst[j as usize * PSTRIDE + i as usize] = v as u8;
+            let mut hv = [0u8; MAX_BLK];
+            for j in 0..h as i32 {
+                vhalf(
+                    [col0(j - 2), col0(j - 1), col0(j), col0(j + 1), col0(j + 2), col0(j + 3)],
+                    0,
+                    &mut hv,
+                    w,
+                );
+                let d = &mut dst[j as usize * PSTRIDE..j as usize * PSTRIDE + w];
+                match fy {
+                    1 => {
+                        let g = col0(j);
+                        for i in 0..w {
+                            d[i] = avg(g[i], hv[i]);
+                        }
+                    }
+                    2 => d.copy_from_slice(&hv[..w]),
+                    _ => {
+                        let m = col0(j + 1);
+                        for i in 0..w {
+                            d[i] = avg(m[i], hv[i]);
+                        }
+                    }
                 }
             }
         }
         _ if fx == 2 || fy == 2 => {
-            // Needs the centre sample j from the unrounded horizontal half-samples of rows -2..h+3.
-            let mut mid = [0i32; 21 * 16];
-            for j in 0..hi + 5 {
-                for i in 0..wi {
-                    mid[j as usize * 16 + i as usize] = b1(i, j - 2);
+            // The centre sample j from the unrounded horizontal half-samples of rows -2..h+3.
+            let mut mid = [[0i32; MAX_BLK]; MAX_BLK + 5];
+            for jj in 0..h + 5 {
+                let r = &row(jj as i32 - 2)[..w + 5];
+                for i in 0..w {
+                    mid[jj][i] = tap6(
+                        r[i] as i32,
+                        r[i + 1] as i32,
+                        r[i + 2] as i32,
+                        r[i + 3] as i32,
+                        r[i + 4] as i32,
+                        r[i + 5] as i32,
+                    );
                 }
             }
-            for j in 0..hi {
-                for i in 0..wi {
-                    let m = |r: i32| mid[(j + 2 + r) as usize * 16 + i as usize];
-                    let j1 = tap6(m(-2), m(-1), m(0), m(1), m(2), m(3));
-                    let jv = clip((j1 + 512) >> 10) as i32;
-                    let v = match (fx, fy) {
-                        (2, 2) => jv,
-                        (2, 1) => (clip((m(0) + 16) >> 5) as i32 + jv + 1) >> 1,
-                        (2, 3) => (clip((m(1) + 16) >> 5) as i32 + jv + 1) >> 1,
-                        (1, 2) => (clip((h1(i, j) + 16) >> 5) as i32 + jv + 1) >> 1,
-                        _ => (clip((h1(i + 1, j) + 16) >> 5) as i32 + jv + 1) >> 1,
-                    };
-                    dst[j as usize * PSTRIDE + i as usize] = v as u8;
+            let mut other = [0u8; MAX_BLK];
+            for j in 0..h {
+                let (m0, m1, m2, m3, m4, m5) =
+                    (&mid[j], &mid[j + 1], &mid[j + 2], &mid[j + 3], &mid[j + 4], &mid[j + 5]);
+                let d = &mut dst[j * PSTRIDE..j * PSTRIDE + w];
+                // The neighbouring half-sample to average with, if any.
+                match (fx, fy) {
+                    (2, 1) => {
+                        for i in 0..w {
+                            other[i] = clip((m2[i] + 16) >> 5);
+                        }
+                    }
+                    (2, 3) => {
+                        for i in 0..w {
+                            other[i] = clip((m3[i] + 16) >> 5);
+                        }
+                    }
+                    (1, 2) | (3, 2) => {
+                        let jj = j as i32;
+                        vhalf(
+                            [col0(jj - 2), col0(jj - 1), col0(jj), col0(jj + 1), col0(jj + 2), col0(jj + 3)],
+                            (fx == 3) as usize,
+                            &mut other,
+                            w,
+                        )
+                    }
+                    _ => {}
+                }
+                for i in 0..w {
+                    let jv = clip((tap6(m0[i], m1[i], m2[i], m3[i], m4[i], m5[i]) + 512) >> 10);
+                    d[i] = if (fx, fy) == (2, 2) { jv } else { avg(other[i], jv) };
                 }
             }
         }
         _ => {
             // Diagonal quarter positions e, g, p, r: average of a horizontal and a vertical half-sample.
-            for j in 0..hi {
-                for i in 0..wi {
-                    let bh = clip((b1(i, j + (fy == 3) as i32) + 16) >> 5) as i32;
-                    let hv = clip((h1(i + (fx == 3) as i32, j) + 16) >> 5) as i32;
-                    dst[j as usize * PSTRIDE + i as usize] = ((bh + hv + 1) >> 1) as u8;
+            let (mut bh, mut hv) = ([0u8; MAX_BLK], [0u8; MAX_BLK]);
+            for j in 0..h as i32 {
+                hhalf(row(j + (fy == 3) as i32), &mut bh, w);
+                vhalf(
+                    [col0(j - 2), col0(j - 1), col0(j), col0(j + 1), col0(j + 2), col0(j + 3)],
+                    (fx == 3) as usize,
+                    &mut hv,
+                    w,
+                );
+                let d = &mut dst[j as usize * PSTRIDE..j as usize * PSTRIDE + w];
+                for i in 0..w {
+                    d[i] = avg(bh[i], hv[i]);
                 }
             }
         }
@@ -173,29 +251,41 @@ pub fn mc_chroma(
 ) {
     let inside = x >= 0 && y >= 0 && x + (w as i32) < pw && y + (h as i32) < ph;
     let (a, b, c, d) = ((8 - fx) * (8 - fy), fx * (8 - fy), (8 - fx) * fy, fx * fy);
-    if inside {
-        for j in 0..h {
-            let o = (y as usize + j) * stride + x as usize;
-            let (r0, r1) = (&plane[o..o + w + 1], &plane[o + stride..o + stride + w + 1]);
-            for i in 0..w {
-                dst[j * PSTRIDE + i] =
-                    ((a * r0[i] as i32 + b * r0[i + 1] as i32 + c * r1[i] as i32 + d * r1[i + 1] as i32 + 32)
-                        >> 6) as u8;
+    let mut tmp = [0u8; 17 * 17];
+    let (src, sstride, origin): (&[u8], usize, usize) = if inside {
+        (plane, stride, y as usize * stride + x as usize)
+    } else {
+        for j in 0..h + 1 {
+            let sy = (y + j as i32).clamp(0, ph - 1) as usize;
+            for i in 0..w + 1 {
+                let sx = (x + i as i32).clamp(0, pw - 1) as usize;
+                tmp[j * 17 + i] = plane[sy * stride + sx];
             }
         }
-    } else {
-        let at = |xx: i32, yy: i32| {
-            plane[yy.clamp(0, ph - 1) as usize * stride + xx.clamp(0, pw - 1) as usize] as i32
-        };
-        for j in 0..h as i32 {
-            for i in 0..w as i32 {
-                let v = (a * at(x + i, y + j)
-                    + b * at(x + i + 1, y + j)
-                    + c * at(x + i, y + j + 1)
-                    + d * at(x + i + 1, y + j + 1)
-                    + 32)
-                    >> 6;
-                dst[j as usize * PSTRIDE + i as usize] = v as u8;
+        (&tmp, 17, 0)
+    };
+    for j in 0..h {
+        let o = origin + j * sstride;
+        let out = &mut dst[j * PSTRIDE..j * PSTRIDE + w];
+        if fx == 0 && fy == 0 {
+            out.copy_from_slice(&src[o..o + w]);
+        } else if fy == 0 {
+            // (8*((8-fx)*A + fx*B) + 32) >> 6 == ((8-fx)*A + fx*B + 4) >> 3
+            let r0 = &src[o..o + w + 1];
+            for i in 0..w {
+                out[i] = (((8 - fx) * r0[i] as i32 + fx * r0[i + 1] as i32 + 4) >> 3) as u8;
+            }
+        } else if fx == 0 {
+            let (r0, r1) = (&src[o..o + w], &src[o + sstride..o + sstride + w]);
+            for i in 0..w {
+                out[i] = (((8 - fy) * r0[i] as i32 + fy * r1[i] as i32 + 4) >> 3) as u8;
+            }
+        } else {
+            let (r0, r1) = (&src[o..o + w + 1], &src[o + sstride..o + sstride + w + 1]);
+            for i in 0..w {
+                out[i] =
+                    ((a * r0[i] as i32 + b * r0[i + 1] as i32 + c * r1[i] as i32 + d * r1[i + 1] as i32 + 32)
+                        >> 6) as u8;
             }
         }
     }
@@ -227,22 +317,22 @@ pub fn combine(
     match (p0, p1, weights) {
         (Some(a), Some(b), None) => {
             for j in 0..h {
+                let (ra, rb) = (&a[j * PSTRIDE..j * PSTRIDE + w], &b[j * PSTRIDE..j * PSTRIDE + w]);
+                let d = &mut dst[j * dst_stride..j * dst_stride + w];
                 for i in 0..w {
-                    dst[j * dst_stride + i] =
-                        ((a[j * PSTRIDE + i] as u32 + b[j * PSTRIDE + i] as u32 + 1) >> 1) as u8;
+                    d[i] = ((ra[i] as u32 + rb[i] as u32 + 1) >> 1) as u8;
                 }
             }
         }
         (Some(a), Some(b), Some(wt)) => {
             let rnd = 1i32 << wt.log_wd;
             let off = (wt.o[0] + wt.o[1] + 1) >> 1;
+            let sh = wt.log_wd + 1;
             for j in 0..h {
+                let (ra, rb) = (&a[j * PSTRIDE..j * PSTRIDE + w], &b[j * PSTRIDE..j * PSTRIDE + w]);
+                let d = &mut dst[j * dst_stride..j * dst_stride + w];
                 for i in 0..w {
-                    let v =
-                        ((a[j * PSTRIDE + i] as i32 * wt.w[0] + b[j * PSTRIDE + i] as i32 * wt.w[1] + rnd)
-                            >> (wt.log_wd + 1))
-                            + off;
-                    dst[j * dst_stride + i] = clip(v);
+                    d[i] = clip(((ra[i] as i32 * wt.w[0] + rb[i] as i32 * wt.w[1] + rnd) >> sh) + off);
                 }
             }
         }
@@ -257,15 +347,12 @@ pub fn combine(
                 }
                 Some(wt) => {
                     let (wgt, o) = (wt.w[which], wt.o[which]);
+                    let (rnd, sh) = if wt.log_wd >= 1 { (1 << (wt.log_wd - 1), wt.log_wd) } else { (0, 0) };
                     for j in 0..h {
+                        let ra = &a[j * PSTRIDE..j * PSTRIDE + w];
+                        let d = &mut dst[j * dst_stride..j * dst_stride + w];
                         for i in 0..w {
-                            let p = a[j * PSTRIDE + i] as i32;
-                            let v = if wt.log_wd >= 1 {
-                                ((p * wgt + (1 << (wt.log_wd - 1))) >> wt.log_wd) + o
-                            } else {
-                                p * wgt + o
-                            };
-                            dst[j * dst_stride + i] = clip(v);
+                            d[i] = clip(((ra[i] as i32 * wgt + rnd) >> sh) + o);
                         }
                     }
                 }

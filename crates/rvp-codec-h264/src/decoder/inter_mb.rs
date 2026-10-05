@@ -302,6 +302,7 @@ impl SliceDecoder<'_> {
     /// Motion-compensate the whole macroblock into the current picture.
     pub(crate) fn mc_mb(&mut self) -> Result<()> {
         if self.uniform(0, 0, 4, 4) {
+            self.mbs[self.mb_addr].flags |= F_UNIFORM;
             self.mc_block(0, 0, 4, 4);
             return Ok(());
         }
