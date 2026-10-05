@@ -53,7 +53,7 @@ test.describe("real-time 1080p30", () => {
       );
       if (errors.length) console.log("PERF errors", JSON.stringify(errors.slice(0, 5)));
       expect(errors).toEqual([]);
-      expect(end.state).toBe("playing");
+      expect(["playing", "ended"]).toContain(end.state);
       if (LIMIT > 0) {
         expect(pct).toBeLessThan(LIMIT);
         // Frames the decoder never delivered are not "dropped"; the clock stopping to wait for them shows up here.

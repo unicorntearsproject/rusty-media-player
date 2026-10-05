@@ -16,6 +16,11 @@
 //! Resolution changes at a key frame work: every [`VideoFrame`] carries its own size.
 #![forbid(unsafe_code)]
 
+/// Run the WebAssembly SIMD128 self-tests of the vendored decoder (0 mismatches expected; always 0 without SIMD128).
+pub fn simd_selftest() -> u32 {
+    rusty_vp9::simd_selftest()
+}
+
 use rusty_vp9::{Error as VpError, Vp9Decoder};
 use rvp_core::{
     ColorMatrix, ColorRange, Error, Packet, PixelFormat, Result, StreamInfo, StreamKind, VideoCodec,

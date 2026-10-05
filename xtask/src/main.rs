@@ -99,6 +99,16 @@ fn wasm_smoke() -> Result<(), String> {
         "vp9/t_altref.webm",
         "vp9/s_odd_327x245.webm",
         "vp9/r_keyframe.webm",
+        "vp9/t_tiles4.webm",
+        "vp9/s_odd_130x66.webm",
+        "vp9/t_lossless.webm",
+        "vp9/x_profile2_10bit.webm",
+        "vp9/t_aq_cyclic.webm",
+        "h264/h_high.mp4",
+        "h264/h_high_odd.mp4",
+        "h264/c_main_odd.mp4",
+        "h264/p_base_odd.mp4",
+        "h264/h_high_slices.mp4",
     ] {
         let file = root.join("target/fixtures").join(name);
         if !file.exists() {

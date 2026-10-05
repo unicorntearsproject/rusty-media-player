@@ -1,0 +1,17 @@
+# Vendored from rusty_vp9 0.1.1 (Apache-2.0) and patched for rusty-video-player: WebAssembly SIMD128 kernels. See PATCHES.md.
+# Not part of the rusty-video-player workspace (root Cargo.toml `exclude`).
+[workspace]
+
+[package]
+name = "rusty_vp9"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.85"
+description = "Pure-Rust VP9 video decoder + encoder (patched: wasm32 SIMD128)"
+license = "Apache-2.0"
+repository = "https://github.com/Remade-With-Rust/remade_ffmpeg_rs"
+publish = false
+
+[lib]
+name = "rusty_vp9"
+path = "src/lib.rs"

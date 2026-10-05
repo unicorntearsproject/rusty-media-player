@@ -94,13 +94,22 @@ pub extern "C" fn smoke_hash_hi() -> u32 {
     unsafe { ((*std::ptr::addr_of!(RESULT)).1 >> 32) as u32 }
 }
 
-/// Run every crate's WebAssembly SIMD128 self-test (vector kernels against their scalar twins). Returns the number of
-/// mismatches; 0 also when this build has no SIMD128 code.
+/// Run one crate's WebAssembly SIMD128 self-test (vector kernels against their scalar twins): 0 colour conversion and
+/// scaler, 1 H.264, 2 VP9. Returns the number of mismatches; 0 also when this build has no SIMD128 code.
+#[unsafe(no_mangle)]
+pub extern "C" fn smoke_selftest_part(part: u32) -> u32 {
+    match part {
+        0 => rvp_core::color::simd_selftest() + rvp_ui::gfx::simd_selftest(),
+        1 => rvp_codec_h264::simd_selftest(),
+        2 => rvp_codec_vp9::simd_selftest(),
+        _ => 0,
+    }
+}
+
+/// Run every self-test; the sum of the mismatches.
 #[unsafe(no_mangle)]
 pub extern "C" fn smoke_selftest() -> u32 {
-    rvp_core::color::simd_selftest() * 1_000_000
-        + rvp_ui::gfx::simd_selftest() * 1_000
-        + rvp_codec_h264::simd_selftest()
+    smoke_selftest_part(0) + smoke_selftest_part(1) + smoke_selftest_part(2)
 }
 
 /// 1 when this module was built with SIMD128, else 0.

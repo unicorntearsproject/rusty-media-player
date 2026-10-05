@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-exclude = ["third_party/rav1d"]
+exclude = ["third_party/rav1d", "third_party/rusty_vp9"]
 members = [
     "crates/theme",
     "crates/rvp-core",

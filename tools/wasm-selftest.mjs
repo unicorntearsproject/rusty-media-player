@@ -5,7 +5,8 @@ const [wasmPath] = process.argv.slice(2);
 const { instance } = await WebAssembly.instantiate(readFileSync(wasmPath), {});
 const x = instance.exports;
 const bad = x.smoke_selftest();
-console.log(`simd=${x.smoke_has_simd()} selftest mismatches=${bad}`);
+const parts = ["colour+scaler", "h264", "vp9"].map((n, i) => `${n}=${x.smoke_selftest_part(i)}`).join(" ");
+console.log(`simd=${x.smoke_has_simd()} selftest mismatches=${bad} (${parts})`);
 if (bad) process.exit(1);
 if (process.argv.includes("--bench")) {
   for (const [w, h, dw, dh] of [[1920, 1080, 1280, 720], [1920, 1080, 1920, 1080], [1280, 720, 1280, 720]]) {
