@@ -241,6 +241,12 @@ impl App {
         self.fullscreen = on;
     }
 
+    /// Draw everything again on the next tick (a window that was uncovered, a new surface).
+    pub fn invalidate(&mut self) {
+        self.base_dirty = true;
+        self.force_draw = true;
+    }
+
     /// The playlist.
     pub fn playlist(&self) -> &Playlist {
         &self.playlist
