@@ -368,6 +368,11 @@ impl SliceHeader {
             }
         }
         h.slice_qp_delta = r.read_se()?;
+        // SliceQPY must lie in 0..=51 for 8-bit video; the macroblock layer indexes tables with it.
+        match pps.pic_init_qp.checked_add(h.slice_qp_delta) {
+            Some(q) if (0..=51).contains(&q) => {}
+            _ => return Err(Error::Invalid("slice QP out of range")),
+        }
         if matches!(slice_type, SliceType::Sp | SliceType::Si) {
             if slice_type == SliceType::Sp {
                 h.sp_for_switch = r.read_flag()?;

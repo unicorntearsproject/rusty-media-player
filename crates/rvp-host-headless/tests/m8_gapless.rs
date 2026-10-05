@@ -19,7 +19,12 @@ fn fixture(name: &str) -> String {
     ONCE.call_once(|| {
         let d = dir();
         let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/gen-fixtures.sh");
-        let st = Command::new("bash").arg(script).arg(&d).env("RVP_FIXTURE_SET", "m8").status().expect("run tools/gen-fixtures.sh");
+        let st = Command::new("bash")
+            .arg(script)
+            .arg(&d)
+            .env("RVP_FIXTURE_SET", "m8")
+            .status()
+            .expect("run tools/gen-fixtures.sh");
         assert!(st.success(), "fixture generation failed (is ffmpeg installed? RVP_SKIP_FIXTURES=1 skips)");
     });
     dir().join("m8").join(name).to_string_lossy().into_owned()
@@ -29,11 +34,12 @@ fn fixture(name: &str) -> String {
 fn full_sine() -> Vec<f32> {
     let wav = std::fs::read(fixture("sine_full.wav")).unwrap();
     let data = &wav[wav.len() - 6 * 48_000 * 2..];
-    data.chunks_exact(2).flat_map(|b| {
-        let v = i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0;
-        [v, v]
-    })
-    .collect()
+    data.chunks_exact(2)
+        .flat_map(|b| {
+            let v = i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0;
+            [v, v]
+        })
+        .collect()
 }
 
 fn play_chain(first: &str, rest: &[&str]) -> rvp_host_headless::PlayReport {
@@ -61,10 +67,18 @@ fn lossless_pieces_join_bit_exactly() {
     let want = full_sine();
     assert_eq!(r.audio.len(), want.len(), "no frame added or lost across the joins");
     assert!(r.audio == want, "output differs from the uncut sine");
-    let started: Vec<u32> = r.events.iter().filter_map(|(_, e)| match e { SessionEvent::ItemStarted { tag } => Some(*tag), _ => None }).collect();
+    let started: Vec<u32> = r
+        .events
+        .iter()
+        .filter_map(|(_, e)| match e {
+            SessionEvent::ItemStarted { tag } => Some(*tag),
+            _ => None,
+        })
+        .collect();
     assert_eq!(started, [1, 2]);
     // The second piece is heard 2 s in (plus the device latency), the third 4 s in.
-    let times: Vec<i64> = r.events.iter().filter(|(_, e)| matches!(e, SessionEvent::ItemStarted { .. })).map(|e| e.0).collect();
+    let times: Vec<i64> =
+        r.events.iter().filter(|(_, e)| matches!(e, SessionEvent::ItemStarted { .. })).map(|e| e.0).collect();
     assert!((times[0] - 2_000_000).abs() < 150_000, "{times:?}");
     assert!((times[1] - 4_000_000).abs() < 150_000, "{times:?}");
 }
@@ -81,15 +95,29 @@ fn lossy_pieces_join_without_a_gap() {
         let r = play_chain(first, &rest);
         let want = full_sine();
         // Lengths agree to well under a millisecond: the encoder delay and padding were trimmed.
-        assert!(r.audio.len().abs_diff(want.len()) <= 2 * 48, "{name}: {} vs {} frames", r.audio.len() / 2, want.len() / 2);
+        assert!(
+            r.audio.len().abs_diff(want.len()) <= 2 * 48,
+            "{name}: {} vs {} frames",
+            r.audio.len() / 2,
+            want.len() / 2
+        );
         // And the waveform is the sine, with no click at the joins.
         let n = r.audio.len().min(want.len());
         let err = rms_db(r.audio[..n].iter().zip(&want[..n]).map(|(a, b)| a - b));
         eprintln!("{name}: {} frames (want {}), error {err:.1} dBFS", r.audio.len() / 2, want.len() / 2);
-        assert!(err < if name == "opus" { -60.0 } else { -45.0 }, "{name}: error {err:.1} dBFS against the uncut sine");
+        assert!(
+            err < if name == "opus" { -60.0 } else { -45.0 },
+            "{name}: error {err:.1} dBFS against the uncut sine"
+        );
         for join in [96_000usize, 192_000] {
             let around = &r.audio[(join - 200) * 2..(join + 200) * 2];
-            let step = around.chunks_exact(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+            let step = around
+                .chunks_exact(2)
+                .map(|f| f[0])
+                .collect::<Vec<_>>()
+                .windows(2)
+                .map(|w| (w[1] - w[0]).abs())
+                .fold(0.0f32, f32::max);
             assert!(step < 0.1, "{name}: a click of {step} at the join {join}");
         }
     }

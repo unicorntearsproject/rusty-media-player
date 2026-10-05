@@ -61,6 +61,8 @@ impl Av1Decoder {
             settings.n_threads = 1;
             settings.max_frame_delay = 1;
         }
+        // Pictures above 8192 x 4352 are refused by the decoder (memory bound for hostile streams).
+        settings.frame_size_limit = 8192 * 4352;
         let mut ctx: Option<Dav1dContext> = None;
         // SAFETY: both pointers are valid for the duration of the call; `ctx` is written on success.
         let r = unsafe { dav1d_open(Some(NonNull::from(&mut ctx)), Some(NonNull::from(&mut settings))) };
@@ -76,13 +78,13 @@ impl Av1Decoder {
             let mut pic = Dav1dPicture::default();
             // SAFETY: `ctx` came from `dav1d_open` and is not closed; `pic` is valid to write.
             let r = unsafe { dav1d_get_picture(self.ctx, Some(NonNull::from(&mut pic))) };
+            // rav1d fills `pic` with a (reference-counted) empty picture even when it returns `EAGAIN`, so it is released in
+            // every case, or one small allocation leaks per call.
+            let frame = (r.0 == 0).then(|| convert(&pic));
+            // SAFETY: `pic` was filled by `dav1d_get_picture` (also when it has no data), so it holds references to release.
+            unsafe { dav1d_picture_unref(Some(NonNull::from(&mut pic))) };
             match r.0 {
-                0 => {
-                    let frame = convert(&pic);
-                    // SAFETY: `pic` was filled by `dav1d_get_picture`, so it holds a reference to release.
-                    unsafe { dav1d_picture_unref(Some(NonNull::from(&mut pic))) };
-                    self.out.push_back(frame?);
-                }
+                0 => self.out.push_back(frame.ok_or(Error::Invalid("rav1d: no picture".into()))??),
                 EAGAIN => return Ok(()),
                 e => return Err(Error::Invalid(format!("rav1d: get_picture failed ({e})"))),
             }
@@ -157,6 +159,10 @@ fn h_is_hd(pic: &Dav1dPicture) -> bool {
 
 impl VideoDecoder for Av1Decoder {
     fn send_packet(&mut self, packet: &Packet) -> Result<()> {
+        // rav1d rejects (and, as an input-validation failure, aborts on) zero-length data.
+        if packet.data.is_empty() {
+            return Ok(());
+        }
         let mut data = Dav1dData::default();
         // SAFETY: `data` is valid to write; the returned buffer has room for `packet.data.len()` bytes.
         let buf = unsafe { dav1d_data_create(Some(NonNull::from(&mut data)), packet.data.len()) };

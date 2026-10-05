@@ -1,0 +1,110 @@
+cargo-features = ["profile-rustflags"]
+
+[package]
+name = "rvp-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Not part of the rusty-video-player workspace (root Cargo.toml `exclude`); run with `cargo fuzz run <target>` from here.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rvp-core = { path = "../crates/rvp-core" }
+rvp-host = { path = "../crates/rvp-host" }
+rvp-demux = { path = "../crates/rvp-demux" }
+rvp-codec-h264 = { path = "../crates/rvp-codec-h264" }
+rvp-codec-vp9 = { path = "../crates/rvp-codec-vp9" }
+rvp-codec-av1 = { path = "../crates/rvp-codec-av1" }
+rvp-codec-audio = { path = "../crates/rvp-codec-audio" }
+rvp-subs = { path = "../crates/rvp-subs" }
+rvp-player = { path = "../crates/rvp-player" }
+rvp-par = { path = "../crates/rvp-par" }
+
+[profile.release]
+debug = 1
+# Keep overflow checks and assertions on, as in the tests: arithmetic bugs on hostile input are the findings we want.
+overflow-checks = true
+debug-assertions = true
+
+# Third-party codecs behave as in a release build: arithmetic wraps silently there (and cannot panic), while bounds checks,
+# `unwrap`s and explicit panics still can, and those are what a fuzzer should find. Our own crates keep every check.
+# (Profile `rustflags`, not `overflow-checks = false`: cargo-fuzz always passes -Cdebug-assertions, which would win.)
+[profile.release.package.rav1d]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.rusty_vp9]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.symphonia-core]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.symphonia-bundle-flac]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.symphonia-bundle-mp3]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.symphonia-codec-aac]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.symphonia-codec-vorbis]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.symphonia-common]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.symphonia-metadata]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+[profile.release.package.ropus]
+rustflags = ["-Coverflow-checks=off", "-Cdebug-assertions=off"]
+
+[[bin]]
+name = "demux"
+path = "fuzz_targets/demux.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "h264"
+path = "fuzz_targets/h264.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "h264_pipelined"
+path = "fuzz_targets/h264_pipelined.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "vp9"
+path = "fuzz_targets/vp9.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "subs"
+path = "fuzz_targets/subs.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "playlist"
+path = "fuzz_targets/playlist.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "av1"
+path = "fuzz_targets/av1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "audio"
+path = "fuzz_targets/audio.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "playlist_files"
+path = "fuzz_targets/playlist_files.rs"
+test = false
+doc = false

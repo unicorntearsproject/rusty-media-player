@@ -8,6 +8,7 @@ extern crate std;
 
 pub mod audio;
 pub mod exec;
+pub mod listfile;
 pub mod playlist;
 pub mod session;
 

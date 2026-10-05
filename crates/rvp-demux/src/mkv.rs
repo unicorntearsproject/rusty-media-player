@@ -272,40 +272,60 @@ pub struct MkvDemuxer<S: Source> {
     pending: VecDeque<Packet>,
     meta: Metadata,
     chapters: Vec<Chapter>,
+    /// Where the scan for clusters stopped, so a file that grows can be read on.
+    scan_pos: u64,
 }
 
 /// Read `SimpleTag`s (recursively) into `meta`: TITLE, ARTIST, ALBUM.
-fn read_simple_tags(body: &[u8], meta: &mut Metadata) {
+fn read_simple_tags(body: &[u8], meta: &mut Metadata, depth: usize) {
+    if depth > MAX_TAG_DEPTH {
+        return;
+    }
     for (id, b) in children(body).unwrap_or_default() {
         match id {
-            ID_TAG => read_simple_tags(b, meta),
-            ID_SIMPLE_TAG => {
-                let (mut name, mut value) = (None, None);
-                for (cid, cb) in children(b).unwrap_or_default() {
-                    match cid {
-                        ID_TAG_NAME => name = Some(String::from_utf8_lossy(cb).to_ascii_uppercase()),
-                        ID_TAG_STRING => value = Some(String::from_utf8_lossy(cb).into_owned()),
-                        ID_SIMPLE_TAG => read_simple_tags(b, meta),
-                        _ => {}
-                    }
-                }
-                if let (Some(n), Some(v)) = (name, value) {
-                    let v = v.trim_end_matches('\0').to_string();
-                    if v.is_empty() {
-                        continue;
-                    }
-                    match n.as_str() {
-                        "TITLE" => meta.title.get_or_insert(v),
-                        "ARTIST" => meta.artist.get_or_insert(v),
-                        "ALBUM" => meta.album.get_or_insert(v),
-                        _ => continue,
-                    };
-                }
-            }
+            ID_TAG => read_simple_tags(b, meta, depth + 1),
+            ID_SIMPLE_TAG => simple_tag(b, meta, depth + 1),
             _ => {}
         }
     }
 }
+
+/// One `SimpleTag` body: its name and value, then its nested `SimpleTag`s.
+fn simple_tag(b: &[u8], meta: &mut Metadata, depth: usize) {
+    if depth > MAX_TAG_DEPTH {
+        return;
+    }
+    let (mut name, mut value) = (None, None);
+    for (cid, cb) in children(b).unwrap_or_default() {
+        match cid {
+            ID_TAG_NAME => name = Some(String::from_utf8_lossy(cb).to_ascii_uppercase()),
+            ID_TAG_STRING => value = Some(String::from_utf8_lossy(cb).into_owned()),
+            ID_SIMPLE_TAG => simple_tag(cb, meta, depth + 1),
+            _ => {}
+        }
+    }
+    if let (Some(n), Some(v)) = (name, value) {
+        let v = v.trim_end_matches('\0').to_string();
+        if v.is_empty() {
+            return;
+        }
+        match n.as_str() {
+            "TITLE" => meta.title.get_or_insert(v),
+            "ARTIST" => meta.artist.get_or_insert(v),
+            "ALBUM" => meta.album.get_or_insert(v),
+            _ => return,
+        };
+    }
+}
+
+/// Deepest tag nesting followed.
+const MAX_TAG_DEPTH: usize = 8;
+
+/// Deepest chapter nesting followed, and most chapters kept.
+const MAX_CHAPTER_DEPTH: usize = 8;
+const MAX_CHAPTERS: usize = 10_000;
+/// Most clusters indexed (a cluster header is at least a few bytes; this is far beyond any real file).
+const MAX_CLUSTERS: usize = 1 << 20;
 
 /// Chapter atoms of every edition, flattened and sorted by start time.
 fn read_chapters(body: &[u8], out: &mut Vec<Chapter>) {
@@ -313,8 +333,15 @@ fn read_chapters(body: &[u8], out: &mut Vec<Chapter>) {
         if id != ID_EDITION_ENTRY {
             continue;
         }
-        fn atoms(b: &[u8], out: &mut Vec<Chapter>) {
+        fn atoms(b: &[u8], out: &mut Vec<Chapter>, depth: usize) {
+            // Nested atoms are legal but a hostile file can nest them deeper than a small stack allows.
+            if depth > MAX_CHAPTER_DEPTH {
+                return;
+            }
             for (id, a) in children(b).unwrap_or_default() {
+                if out.len() >= MAX_CHAPTERS {
+                    return;
+                }
                 if id != ID_CHAPTER_ATOM {
                     continue;
                 }
@@ -331,14 +358,14 @@ fn read_chapters(body: &[u8], out: &mut Vec<Chapter>) {
                                 }
                             }
                         }
-                        ID_CHAPTER_ATOM => atoms(a, out),
+                        ID_CHAPTER_ATOM => atoms(a, out, depth + 1),
                         _ => {}
                     }
                 }
                 out.push(Chapter { start_us: start, title });
             }
         }
-        atoms(ed, out);
+        atoms(ed, out, 0);
         break; // the first edition is the default one
     }
     out.sort_by_key(|c| c.start_us);
@@ -370,8 +397,8 @@ impl<S: Source> MkvDemuxer<S> {
         }
         let data_start = seg_pos + sh.hlen;
         let seg_end = match (sh.size, rd.size()) {
-            (Some(s), Some(len)) => (data_start + s).min(len),
-            (Some(s), None) => data_start + s,
+            (Some(s), Some(len)) => data_start.saturating_add(s).min(len),
+            (Some(s), None) => data_start.saturating_add(s),
             (None, Some(len)) => len,
             (None, None) => u64::MAX,
         };
@@ -412,7 +439,7 @@ impl<S: Source> MkvDemuxer<S> {
                 ID_TAGS | ID_CHAPTERS | ID_ATTACHMENTS if h.size.is_some_and(|s| s <= MAX_META_BYTES) => {
                     let b = rd.read_vec(body, h.size.unwrap_or(0)).await?;
                     match h.id {
-                        ID_TAGS => read_simple_tags(&b, &mut meta),
+                        ID_TAGS => read_simple_tags(&b, &mut meta, 0),
                         ID_CHAPTERS => read_chapters(&b, &mut chapters),
                         _ => {
                             for (id, f) in children(&b).unwrap_or_default() {
@@ -443,6 +470,9 @@ impl<S: Source> MkvDemuxer<S> {
                     }
                 }
                 ID_CLUSTER => {
+                    if clusters.len() >= MAX_CLUSTERS {
+                        return invalid("too many clusters");
+                    }
                     let c = Self::read_cluster_hdr(&mut rd, pos, h, seg_end).await?;
                     clusters.push(c);
                     if h.size.is_none() {
@@ -488,7 +518,43 @@ impl<S: Source> MkvDemuxer<S> {
             pending: VecDeque::new(),
             meta,
             chapters,
+            scan_pos: pos,
         })
+    }
+
+    /// A file that is still being written: look for clusters appended since the last scan. True if there are new ones.
+    async fn grow(&mut self) -> Result<bool> {
+        let before = self.rd.size();
+        let now = self.rd.refresh_size().await;
+        let Some(end) = now else { return Ok(false) };
+        if before.is_some_and(|b| end <= b) && self.scan_pos >= end {
+            return Ok(false);
+        }
+        let mut hb = [0u8; 16];
+        let mut added = false;
+        while self.scan_pos < end {
+            let n = self.rd.read_upto(self.scan_pos, &mut hb).await?;
+            let Ok(h) = parse_hdr(&hb[..n]) else { break };
+            let body = self.scan_pos + h.hlen;
+            if h.id == ID_CLUSTER {
+                if self.clusters.len() >= MAX_CLUSTERS {
+                    return invalid("too many clusters");
+                }
+                let c = Self::read_cluster_hdr(&mut self.rd, self.scan_pos, h, end).await?;
+                self.clusters.push(c);
+                added = true;
+                if h.size.is_none() {
+                    // An unknown-size cluster runs to the end of what is there: look inside it next time.
+                    self.scan_pos = body;
+                    break;
+                }
+            }
+            match h.size {
+                Some(s) => self.scan_pos = body.saturating_add(s).max(self.scan_pos + 1),
+                None => break,
+            }
+        }
+        Ok(added)
     }
 
     #[doc(hidden)]
@@ -502,8 +568,9 @@ impl<S: Source> MkvDemuxer<S> {
     }
 
     async fn read_cluster_hdr(rd: &mut Reader<S>, pos: u64, h: Hdr, seg_end: u64) -> Result<ClusterIdx> {
-        let data_start = pos + h.hlen;
-        let end = h.size.map_or(seg_end, |s| (data_start + s).min(seg_end));
+        let data_start = pos.saturating_add(h.hlen);
+        // Not clipped to the length we know now: the cluster may be cut off at the end of a file that is still growing.
+        let end = h.size.map_or(seg_end, |s| data_start.saturating_add(s));
         // The Timestamp comes first, possibly after a CRC-32 or Void element: look through the first 64 bytes.
         let mut b = [0u8; 64];
         let n = rd.read_upto(data_start, &mut b).await?;
@@ -748,7 +815,8 @@ impl<S: Source> MkvDemuxer<S> {
                 }
                 _ => {}
             }
-            pos = body + size;
+            // Always forward (a size that wraps would loop for ever).
+            pos = body.saturating_add(size).max(pos + 1);
         }
         Ok(hits)
     }
@@ -780,6 +848,10 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
             if self.cur.is_none() || self.pos >= self.cluster_end {
                 let next = self.cur.map_or(0, |c| c + 1);
                 if next >= self.clusters.len() {
+                    // Out of clusters: a file that is still being written may have more by now.
+                    if self.grow().await? {
+                        continue;
+                    }
                     return Ok(None);
                 }
                 self.enter_cluster(next);
@@ -793,6 +865,9 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
             let body = self.pos + h.hlen;
             if h.id == ID_CLUSTER {
                 // Reached the next cluster inside an unknown-size one.
+                if self.clusters.len() >= MAX_CLUSTERS {
+                    return invalid("too many clusters");
+                }
                 let seg_end = self.rd.size().unwrap_or(u64::MAX);
                 let c = Self::read_cluster_hdr(&mut self.rd, self.pos, h, seg_end).await?;
                 self.clusters.push(c);
@@ -820,7 +895,7 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
                 }
                 _ => {}
             }
-            self.pos = body + size;
+            self.pos = body.saturating_add(size).max(self.pos + 1);
         }
     }
 
@@ -881,5 +956,60 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
         self.enter_cluster(ci);
         self.pos = hit.offset;
         Ok(hit.pts_us)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    /// An EBML element with a one-byte size (bodies up to 126 bytes).
+    fn el(id: &[u8], body: &[u8]) -> Vec<u8> {
+        let mut v = id.to_vec();
+        v.push(0x80 | body.len() as u8);
+        v.extend_from_slice(body);
+        v
+    }
+
+    #[test]
+    fn nested_simple_tags_are_read_and_do_not_recurse_for_ever() {
+        // Tag { SimpleTag { TagName "ARTIST", TagString "Nested Artist", SimpleTag { TagName "TITLE", TagString "T" } } }
+        let inner = el(&[0x67, 0xC8], &[el(&[0x45, 0xA3], b"TITLE"), el(&[0x44, 0x87], b"T")].concat());
+        let outer = el(
+            &[0x67, 0xC8],
+            &[el(&[0x45, 0xA3], b"ARTIST"), el(&[0x44, 0x87], b"Nested Artist"), inner].concat(),
+        );
+        let tag = el(&[0x73, 0x73], &outer);
+        let mut meta = Metadata::default();
+        read_simple_tags(&tag, &mut meta, 0);
+        assert_eq!(meta.artist.as_deref(), Some("Nested Artist"));
+        assert_eq!(meta.title.as_deref(), Some("T"));
+        // A hostile file nests tags as deep as its size allows: the depth limit stops it.
+        let mut body = el(&[0x67, 0xC8], &[el(&[0x45, 0xA3], b"TITLE"), el(&[0x44, 0x87], b"x")].concat());
+        for _ in 0..30 {
+            if body.len() > 120 {
+                break;
+            }
+            body = el(&[0x67, 0xC8], &body);
+        }
+        let mut meta = Metadata::default();
+        read_simple_tags(&el(&[0x73, 0x73], &body), &mut meta, 0);
+        let _ = vec![0u8; 0];
+    }
+
+    #[test]
+    fn chapter_nesting_is_bounded() {
+        let mut atom = el(&[0xB6], &el(&[0x91], &[0x05]));
+        for _ in 0..50 {
+            if atom.len() > 120 {
+                break;
+            }
+            atom = el(&[0xB6], &atom);
+        }
+        let edition = el(&[0x45, 0xB9], &atom);
+        let mut chapters = Vec::new();
+        read_chapters(&edition, &mut chapters);
+        assert!(chapters.len() <= MAX_CHAPTERS);
     }
 }

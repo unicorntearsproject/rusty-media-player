@@ -1,0 +1,7 @@
+﻿#EXTM3U
+#EXTINF:215,Artist - Song
+music/a.mp3
+#EXTINF:-1,Live
+http://x/y
+file:///home/u/My%20Music/b.flac
+..\up\c.ogg

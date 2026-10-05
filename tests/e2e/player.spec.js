@@ -478,3 +478,25 @@ test.describe("player", () => {
     expect(d.badFraction, `${(d.badFraction * 100).toFixed(2)}% of pixels differ`).toBeLessThan(0.01);
   });
 });
+
+test.describe("crash recovery", () => {
+  for (const what of ["main", "decoder"]) {
+    test(`a crash of the ${what === "main" ? "player" : "video decoder"} restarts the player and playback goes on`, async ({ page }) => {
+      const logs = [];
+      page.on("console", (m) => m.type() === "error" && logs.push(m.text()));
+      page.on("pageerror", (e) => logs.push(String(e)));
+      await load(page, H264_AAC);
+      await page.waitForTimeout(1500);
+      expect(await page.evaluate(() => window.rvp.recoveries())).toBe(0);
+      await page.evaluate((w) => window.rvp.debugCrash(w), what);
+      // The page throws the damaged instance away, starts a new one and opens the file again.
+      await waitFor(page, () => window.rvp.recoveries() === 1, null, 30_000);
+      await waitState(page, "playing");
+      await waitFor(page, () => (window.rvp.snapshot().video || { presented: 0 }).presented > 3, null, 30_000);
+      const before = await picture(page);
+      await page.waitForTimeout(800);
+      expect(diff(before, await picture(page)), "the picture moves again").toBeGreaterThan(0.005);
+      expect(logs.some((l) => /crash|panick|unreachable/i.test(l)), "the crash was reported").toBe(true);
+    });
+  }
+});

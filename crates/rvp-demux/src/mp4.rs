@@ -16,6 +16,10 @@ use rvp_core::{
 };
 use rvp_host::Source;
 
+/// Most samples a single track may have (four million is about a day of video or audio): bounds what a hostile file
+/// can make us allocate.
+const MAX_SAMPLES: usize = 1 << 22;
+
 type Fourcc = [u8; 4];
 
 #[derive(Clone, Copy)]
@@ -70,6 +74,9 @@ pub struct Mp4Demuxer<S: Source> {
     duration_us: Option<Timestamp>,
     meta: Metadata,
     chapters: Vec<Chapter>,
+    /// Fragment defaults (`trex`) and where the scan of top-level boxes stopped, so a file that grows can be read on.
+    trex: Vec<(u32, Trex)>,
+    scan_pos: u64,
 }
 
 /// Tags from `udta/meta/ilst` (iTunes style) and chapters from the Nero `udta/chpl` box.
@@ -328,6 +335,9 @@ fn parse_trak(trak: &[u8], movie_ts: u32) -> Result<Option<TrackBuild>> {
         if fixed == 0 && n > c.remaining() / 4 {
             return Err(Error::Truncated);
         }
+        if n > MAX_SAMPLES {
+            return invalid("too many samples in a track");
+        }
         let stco = find(&stbl, b"stco");
         let co64 = find(&stbl, b"co64");
         let (offsets64, is64) = match (co64, stco) {
@@ -357,11 +367,14 @@ fn parse_trak(trak: &[u8], movie_ts: u32) -> Result<Option<TrackBuild>> {
             sc.skip(4)?;
             stsc_runs.push((first as usize, per as usize));
         }
-        // Sizes.
-        let mut sizes = Vec::with_capacity(n);
-        for _ in 0..n {
-            sizes.push(if fixed != 0 { fixed } else { c.u32()? });
+        // Sizes (a fixed size needs no table, whatever the sample count claims).
+        let mut sizes = Vec::with_capacity(if fixed != 0 { 0 } else { n });
+        if fixed == 0 {
+            for _ in 0..n {
+                sizes.push(c.u32()?);
+            }
         }
+        let size_of = |i: usize| if fixed != 0 { fixed } else { sizes[i] };
         // Offsets: walk chunks.
         let mut idx = 0usize;
         'outer: for (ci, &chunk_off) in chunks.iter().enumerate() {
@@ -375,8 +388,8 @@ fn parse_trak(trak: &[u8], movie_ts: u32) -> Result<Option<TrackBuild>> {
                 if idx >= n {
                     break 'outer;
                 }
-                samples.push(Sample { offset: off, size: sizes[idx], dts: 0, cts: 0, dur: 0, key: true });
-                off += sizes[idx] as u64;
+                samples.push(Sample { offset: off, size: size_of(idx), dts: 0, cts: 0, dur: 0, key: true });
+                off += size_of(idx) as u64;
                 idx += 1;
             }
         }
@@ -538,6 +551,9 @@ fn parse_moof(moof: &[u8], moof_start: u64, tracks: &mut [Track], trex: &[(u32, 
             if per != 0 && count > c.remaining() / per {
                 return Err(Error::Truncated);
             }
+            if count > MAX_SAMPLES || track.samples.len() + count > MAX_SAMPLES {
+                return invalid("too many samples in a track");
+            }
             track.samples.reserve(count.min(1 << 20));
             for i in 0..count {
                 let dur = if f & 0x100 != 0 { c.u32()? } else { d_dur };
@@ -558,8 +574,8 @@ fn parse_moof(moof: &[u8], moof_start: u64, tracks: &mut [Track], trex: &[(u32, 
                     dur,
                     key: sflags & 0x1_0000 == 0,
                 });
-                data_pos += size as u64;
-                next_dts += dur as i64;
+                data_pos = data_pos.saturating_add(size as u64);
+                next_dts = next_dts.saturating_add(dur as i64);
             }
         }
     }
@@ -643,7 +659,12 @@ impl<S: Source> Mp4Demuxer<S> {
                     if !have_moov {
                         return invalid("moof before moov");
                     }
-                    let body = rd.read_vec(pos + hlen, size32 - hlen).await?;
+                    // A fragment cut off at the end of the file is the end of what there is, not an error.
+                    let body = match rd.read_vec(pos + hlen, size32 - hlen).await {
+                        Ok(b) => b,
+                        Err(Error::Truncated) => break,
+                        Err(e) => return Err(e),
+                    };
                     parse_moof(&body, pos, &mut tracks, &trex)?;
                 }
                 _ => {}
@@ -681,7 +702,50 @@ impl<S: Source> Mp4Demuxer<S> {
                 info.duration_us = (ticks > 0).then(|| t.time_base.ticks_to_us(ticks));
             }
         }
-        Ok(Self { rd, streams, tracks, duration_us, meta, chapters })
+        Ok(Self { rd, streams, tracks, duration_us, meta, chapters, trex, scan_pos: pos })
+    }
+
+    /// A file that is still being written: look for fragments appended since the last scan. True if there are new
+    /// samples.
+    async fn grow(&mut self) -> Result<bool> {
+        let before = self.rd.size();
+        let now = self.rd.refresh_size().await;
+        if now.is_none() || now <= before && before.is_some_and(|b| self.scan_pos >= b) {
+            return Ok(false);
+        }
+        let had: usize = self.tracks.iter().map(|t| t.samples.len()).sum();
+        loop {
+            let mut hdr = [0u8; 16];
+            let n = self.rd.read_upto(self.scan_pos, &mut hdr).await?;
+            if n < 8 {
+                break;
+            }
+            let mut size32 = u32::from_be_bytes(hdr[..4].try_into().unwrap()) as u64;
+            let ty: Fourcc = hdr[4..8].try_into().unwrap();
+            let mut hlen = 8u64;
+            if size32 == 1 && n >= 16 {
+                size32 = u64::from_be_bytes(hdr[8..16].try_into().unwrap());
+                hlen = 16;
+            }
+            if size32 < hlen {
+                break;
+            }
+            if &ty == b"moof" {
+                match self.rd.read_vec(self.scan_pos + hlen, size32 - hlen).await {
+                    Ok(body) => {
+                        let at = self.scan_pos;
+                        parse_moof(&body, at, &mut self.tracks, &self.trex)?;
+                    }
+                    Err(Error::Truncated) => break, // not all there yet; look again later
+                    Err(e) => return Err(e),
+                }
+            }
+            self.scan_pos = self.scan_pos.saturating_add(size32);
+        }
+        for t in &mut self.tracks {
+            t.rebuild_keys();
+        }
+        Ok(self.tracks.iter().map(|t| t.samples.len()).sum::<usize>() > had)
     }
 
     /// Index of the track seeks are keyed on: the first video track, else the first track.
@@ -708,32 +772,38 @@ impl<S: Source> Demuxer for Mp4Demuxer<S> {
     }
 
     async fn next_packet(&mut self) -> Result<Option<Packet>> {
-        // Interleave in file order: the track whose next sample sits earliest in the file goes first.
-        let Some((ti, _)) = self
-            .tracks
-            .iter()
-            .enumerate()
-            .filter_map(|(i, t)| t.samples.get(t.cursor).map(|s| (i, s.offset)))
-            .min_by_key(|&(_, off)| off)
-        else {
-            return Ok(None);
-        };
-        let t = &self.tracks[ti];
-        let i = t.cursor;
-        let s = t.samples[i];
-        let data = self.rd.read_vec(s.offset, s.size as u64).await?;
-        let t = &mut self.tracks[ti];
-        let pkt = Packet {
-            stream_id: t.id,
-            pts: t.time_base.ticks_to_us(s.dts + s.cts as i64 + t.shift),
-            dts: t.time_base.ticks_to_us(s.dts + t.shift),
-            duration: t.time_base.ticks_to_us(s.dur as i64),
-            keyframe: s.key,
-            discard_end_us: 0,
-            data,
-        };
-        t.cursor += 1;
-        Ok(Some(pkt))
+        loop {
+            // Interleave in file order: the track whose next sample sits earliest in the file goes first.
+            let Some((ti, _)) = self
+                .tracks
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| t.samples.get(t.cursor).map(|s| (i, s.offset)))
+                .min_by_key(|&(_, off)| off)
+            else {
+                // Out of samples: a file that is still being written may have more by now.
+                if self.grow().await? {
+                    continue;
+                }
+                return Ok(None);
+            };
+            let t = &self.tracks[ti];
+            let i = t.cursor;
+            let s = t.samples[i];
+            let data = self.rd.read_vec(s.offset, s.size as u64).await?;
+            let t = &mut self.tracks[ti];
+            let pkt = Packet {
+                stream_id: t.id,
+                pts: t.time_base.ticks_to_us(s.dts + s.cts as i64 + t.shift),
+                dts: t.time_base.ticks_to_us(s.dts + t.shift),
+                duration: t.time_base.ticks_to_us(s.dur as i64),
+                keyframe: s.key,
+                discard_end_us: 0,
+                data,
+            };
+            t.cursor += 1;
+            return Ok(Some(pkt));
+        }
     }
 
     async fn seek(&mut self, target_us: Timestamp) -> Result<Timestamp> {

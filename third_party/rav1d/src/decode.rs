@@ -4983,8 +4983,6 @@ pub fn rav1d_submit_frame(c: &Rav1dContext, state: &mut Rav1dState) -> Rav1dResu
     let mut f = fc.data.try_write().unwrap();
     f.seq_hdr = state.seq_hdr.clone();
     f.frame_hdr = mem::take(&mut state.frame_hdr);
-    let seq_hdr = f.seq_hdr.clone().unwrap();
-
     fn on_error(
         fc: &Rav1dFrameContext,
         f: &mut Rav1dFrameData,
@@ -4994,7 +4992,7 @@ pub fn rav1d_submit_frame(c: &Rav1dContext, state: &mut Rav1dState) -> Rav1dResu
     ) {
         fc.task_thread.error.store(1, Ordering::Relaxed);
         let _ = mem::take(&mut *fc.in_cdf.try_write().unwrap());
-        if f.frame_hdr.as_ref().unwrap().refresh_context != 0 {
+        if f.frame_hdr.as_ref().is_some_and(|h| h.refresh_context != 0) {
             let _ = mem::take(&mut f.out_cdf);
         }
         for i in 0..7 {
@@ -5014,6 +5012,12 @@ pub fn rav1d_submit_frame(c: &Rav1dContext, state: &mut Rav1dState) -> Rav1dResu
         f.tiles.clear();
         fc.task_thread.finished.store(true, Ordering::SeqCst);
     }
+
+    // A frame without its sequence or frame header (damaged stream): drop it rather than panic.
+    let (Some(seq_hdr), true) = (f.seq_hdr.clone(), f.frame_hdr.is_some()) else {
+        on_error(fc, &mut f, out, &mut state.cached_error_props, &state.in_0.m);
+        return Err(EINVAL);
+    };
 
     let bpc = 8 + 2 * seq_hdr.hbd;
     match Rav1dBitDepthDSPContext::get(bpc) {

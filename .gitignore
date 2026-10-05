@@ -2,3 +2,5 @@ target/
 /dist/
 *.log
 .playwright-mcp/
+fuzz/work/
+fuzz/artifacts/

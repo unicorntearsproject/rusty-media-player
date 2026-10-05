@@ -29,6 +29,12 @@ const DEFAULT_CUE_US: i64 = 3_000_000;
 
 /// Packets buffered between the demuxer and a decoder.
 const MAX_PACKETS: usize = 128;
+/// Compressed bytes the demuxer may have queued for one stream before it waits (a hostile file can make packets huge).
+const MAX_QUEUED_BYTES: usize = 96 << 20;
+/// How long a file that ends in the middle of a packet is waited for (it may be still growing), and how often the
+/// demuxer looks again.
+const GROW_GRACE_US: i64 = 1_500_000;
+const GROW_RETRY_US: i64 = 250_000;
 /// Decoded video frames kept ready for presentation.
 const MAX_VIDEO_FRAMES: usize = 6;
 /// Decoded audio kept ahead of the output stage, microseconds.
@@ -175,6 +181,11 @@ struct Shared {
     generation: u32,
     /// Bumped whenever a task moves data; lets `tick` stop polling when nothing changes.
     progress: u64,
+    /// Host time of the current tick (the tasks have no clock of their own).
+    now: Timestamp,
+    /// When the demuxer first hit the end of a file that is cut off (still being written?), and when to look again.
+    cut_since: Option<Timestamp>,
+    cut_retry_at: Timestamp,
 }
 
 type Sh = Rc<RefCell<Shared>>;
@@ -254,7 +265,12 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
         }
         let blocked = {
             let s = sh.borrow();
-            s.demux_done || s.audio_in.len() >= MAX_PACKETS || s.video_in.len() >= MAX_PACKETS
+            s.demux_done
+                || s.audio_in.len() >= MAX_PACKETS
+                || s.video_in.len() >= MAX_PACKETS
+                || s.audio_in.iter().map(|p| p.data.len()).sum::<usize>() >= MAX_QUEUED_BYTES
+                || s.video_in.iter().map(|p| p.data.len()).sum::<usize>() >= MAX_QUEUED_BYTES
+                || s.now < s.cut_retry_at
         };
         if blocked {
             yield_now().await;
@@ -267,6 +283,7 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
             if !(s.seek.is_some() || s.seeking) {
                 match res {
                     Ok(Some(p)) => {
+                        s.cut_since = None;
                         if s.sel_audio.as_ref().is_some_and(|a| a.id == p.stream_id) {
                             s.audio_in.push_back(p);
                         } else if s.sel_video.as_ref().is_some_and(|v| v.id == p.stream_id) {
@@ -285,6 +302,19 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
                         s.progress += 1;
                     }
                     Ok(None) => s.demux_done = true,
+                    Err(Error::Truncated) => {
+                        // Cut off in the middle of a packet: wait a little, as the file may still be growing (the
+                        // demuxers look at the length again on every call), then play what there is.
+                        let now = s.now;
+                        let since = *s.cut_since.get_or_insert(now);
+                        if s.now - since < GROW_GRACE_US {
+                            s.cut_retry_at = s.now + GROW_RETRY_US;
+                        } else {
+                            s.warnings.push(String::from("The file ends early: playing what is there."));
+                            s.error = Some(Error::Truncated);
+                            s.demux_done = true;
+                        }
+                    }
                     Err(e) => {
                         s.error = Some(e);
                         s.demux_done = true;
@@ -947,6 +977,10 @@ impl Session {
     pub fn tick<H: Host>(&mut self, host: &mut H) {
         let t0 = host.clock().now_us();
 
+        self.sh.borrow_mut().now = t0;
+        if let Some(n) = &self.next {
+            n.sh.borrow_mut().now = t0;
+        }
         // 1. Demux and decode tasks, until quiescent or out of budget.
         for _ in 0..64 {
             let before = self.sh.borrow().progress;
@@ -1096,7 +1130,16 @@ impl Session {
                 if self.feed_next {
                     heard_next = out.heard_item(&*host.audio()) == Some(self.item_no + 1);
                 }
-                if !heard_next {
+                // Once every sample has been heard the audio has nothing more to say about the time: the picture (which
+                // may be longer than the sound) goes on by the clock's own count instead of waiting for it.
+                let audio_over = {
+                    let s = self.sh.borrow();
+                    s.audio_done
+                        && s.audio_dec.is_empty()
+                        && out.pending_frames() == 0
+                        && host.audio().queued_frames() == 0
+                };
+                if !heard_next && !audio_over {
                     if let Some(h) = out.heard_pts(&*host.audio()) {
                         self.clock.update_from_audio(h, now);
                     }

@@ -111,6 +111,8 @@ pub struct Decoder {
     max_mbs: usize,
     /// Counts resets (seeks): parsing jobs of an earlier count are abandoned.
     epoch: Arc<core::sync::atomic::AtomicU64>,
+    /// The first error of a picture parsed inline since a decode call began.
+    parse_error: Option<Error>,
     /// Parses pictures on other threads, if the host provided a runner; otherwise each picture is parsed inline.
     runner: Option<Box<dyn parse::ParseRunner>>,
     /// Reconstruction when it runs inline (no executor).
@@ -162,6 +164,7 @@ impl Decoder {
             stats: Arc::new(StatsCell::default()),
             max_mbs: DEFAULT_MAX_MBS,
             epoch: Arc::new(core::sync::atomic::AtomicU64::new(0)),
+            parse_error: None,
             runner: None,
             recon: Reconstructor::new(),
             exec: None,
@@ -238,6 +241,9 @@ impl Decoder {
         if let Err(e) = self.finish_picture() {
             first_err.get_or_insert(e);
         }
+        if let Some(e) = self.parse_error.take() {
+            first_err.get_or_insert(e);
+        }
         first_err.map_or(Ok(()), Err)
     }
 
@@ -248,6 +254,9 @@ impl Decoder {
             if let Err(e) = self.decode_nal(n, pts) {
                 first_err.get_or_insert(e);
             }
+        }
+        if let Some(e) = self.parse_error.take() {
+            first_err.get_or_insert(e);
         }
         first_err.map_or(Ok(()), Err)
     }
@@ -267,7 +276,10 @@ impl Decoder {
         if let Some(e) = &mut self.exec {
             e.wait_idle();
         }
-        r
+        match self.parse_error.take() {
+            Some(e) => Err(e),
+            None => r,
+        }
     }
 
     /// Forget all pictures and state (after a seek), keeping the parameter sets.
@@ -662,7 +674,8 @@ impl Decoder {
                 self.emit(ev);
                 pic.needed_for_output = false;
                 self.release(pic);
-                return parse_err.map_or(Ok(()), Err);
+                self.note_parse_error(parse_err);
+                return Ok(());
             }
         }
         while self.dpb.len() >= dpb_size {
@@ -677,7 +690,16 @@ impl Decoder {
                 break;
             }
         }
-        parse_err.map_or(Ok(()), Err)
+        self.note_parse_error(parse_err);
+        Ok(())
+    }
+
+    /// Remember the first error of a picture parsed inline, for the caller of `decode_sample` / `decode_annexb` /
+    /// `flush` (parsing on other threads cannot report one).
+    fn note_parse_error(&mut self, e: Option<Error>) {
+        if self.parse_error.is_none() {
+            self.parse_error = e;
+        }
     }
 
     /// Output the waiting picture with the smallest POC. Returns false if none is waiting.

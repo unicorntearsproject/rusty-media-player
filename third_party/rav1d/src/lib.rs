@@ -608,7 +608,9 @@ pub unsafe extern "C" fn dav1d_get_picture(
         let c = unsafe { c.as_ref() };
         let mut out_rust = Default::default(); // TODO(kkysen) Temporary until we return it directly.
         let result = rav1d_get_picture(c, &mut out_rust);
-        let out_c = out_rust.into();
+        // No picture (`EAGAIN`): hand back an all-zero one, as dav1d does. Converting the empty Rust picture would
+        // allocate a reference-counted `itut_t35` that nothing releases.
+        let out_c = if result.is_ok() { out_rust.into() } else { Default::default() };
         // SAFETY: `out` is safe to write to.
         unsafe { out.as_ptr().write(out_c) };
         result
@@ -841,9 +843,11 @@ pub unsafe extern "C" fn dav1d_picture_unref(p: Option<NonNull<Dav1dPicture>>) {
     };
     // SAFETY: `p` is safe to read from.
     let p_c = unsafe { p.as_ptr().read() };
-    let mut p_rust = p_c.to::<Rav1dPicture>();
-    let _ = mem::take(&mut p_rust);
-    let p_c = p_rust.into();
+    let p_rust = p_c.to::<Rav1dPicture>();
+    drop(p_rust);
+    // All-zero afterwards, as dav1d leaves it (converting an empty Rust picture back would allocate an `itut_t35`
+    // reference that nothing releases).
+    let p_c = Dav1dPicture::default();
     // SAFETY: `p` is safe to write to.
     unsafe { p.as_ptr().write(p_c) };
 }

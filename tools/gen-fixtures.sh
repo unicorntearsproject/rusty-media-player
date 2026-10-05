@@ -2,8 +2,8 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=core|h264|vp9|m8|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
-#                                       VP9 to <outdir>/vp9, M8 (subtitles, tracks, gapless) to <outdir>/m8, and the one-minute 1080p30
+#   RVP_FIXTURE_SET=core|h264|vp9|m8|audio|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
+#                                       VP9 to <outdir>/vp9, M8 (subtitles, tracks, gapless) to <outdir>/m8, raw audio files to <outdir>/audio, and the one-minute 1080p30
 #                                       speed streams (M9) to <outdir>/perf (minutes of encoding: `cargo xtask perf-fixtures`)
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
 set -euo pipefail
@@ -337,10 +337,53 @@ gen_perf() {
   echo "perf fixtures in $d"
 }
 
+# ---------------------------------------------------------------------------------------------------------
+# M9: raw audio files (MP3, FLAC, Ogg, Opus, WAV, ADTS AAC) with tags and cover art, plus the ffprobe dump of each.
+gen_audio() {
+  local d="$out/audio"
+  mkdir -p "$d"
+  local version=3
+  [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
+  # 3.3 s at 48 kHz (the player's output rate, so no resampling gets in the way of comparing samples): not a whole number of
+  # frames in any codec, so the end padding matters. A tone that changes pitch makes
+  # a wrong seek or a wrong gapless trim audible in the samples.
+  local a=(-f lavfi -i "aevalsrc=0.5*sin(2*PI*(300+100*t)*t)|0.5*sin(2*PI*(500+60*t)*t):s=48000:d=3.3")
+  # A 64x64 cover: a gradient, as JPEG.
+  ff -f lavfi -i "gradients=size=64x64:duration=1:rate=1" -frames:v 1 "$d/cover.jpg"
+  local tags=(-metadata title="Chirp Étude" -metadata artist="The Tones" -metadata album="Pure" -metadata album_artist="Various" \
+              -metadata track=3/12 -metadata disc=1/2 -metadata date=2004-05-06 -metadata genre=Electronic)
+  local art=(-i "$d/cover.jpg" -map 0:a -map 1:v -disposition:v attached_pic -c:v copy)
+  # MP3: CBR with Xing/LAME header and ID3v2.4 (UTF-8) tags and art; VBR; ID3v2.3; ID3v1 only; no tags and no Xing header.
+  ff "${a[@]}" "${art[@]}" -c:a libmp3lame -b:a 128k "${tags[@]}" -id3v2_version 4 "$d/cbr.mp3"
+  ff "${a[@]}" "${art[@]}" -c:a libmp3lame -q:a 4 "${tags[@]}" -id3v2_version 3 "$d/vbr_v23.mp3"
+  ff "${a[@]}" -c:a libmp3lame -b:a 96k -ac 1 -ar 22050 "${tags[@]}" -id3v2_version 0 -write_id3v1 1 "$d/mono_v1.mp3"
+  ff "${a[@]}" -c:a libmp3lame -b:a 192k -write_xing 0 -map_metadata -1 "$d/plain.mp3"
+  # ID3v1 only: the plain file with a 128-byte tag appended (ffmpeg does not write them): title, artist, album, year, track 7, genre 17.
+  { cat "$d/plain.mp3"; printf 'TAG'; printf '%-30s%-30s%-30s%-4s%-28s\0\007\021' "V1 Title" "V1 Artist" "V1 Album" 1999 ""; } > "$d/v1.mp3"
+  # FLAC (tags and picture), Ogg Vorbis (tags and picture), Opus (tags), FLAC in Ogg.
+  ff "${a[@]}" "${art[@]}" -c:a flac "${tags[@]}" "$d/tone.flac"
+  ff "${a[@]}" -c:a flac -sample_fmt s32 -bits_per_raw_sample 24 -ac 1 "$d/tone24_mono.flac"
+  ff "${a[@]}" -c:a libvorbis -q:a 4 "${tags[@]}" "$d/tone.ogg"
+  ff "${a[@]}" -c:a libopus -b:a 96k "${tags[@]}" "$d/tone.opus"
+  ff "${a[@]}" -c:a flac "${tags[@]}" -f ogg "$d/tone_flac.oga"
+  # WAV: 16-bit (with LIST/INFO tags), 24-bit, float, 8-bit mono.
+  ff "${a[@]}" -c:a pcm_s16le "${tags[@]}" "$d/tone16.wav"
+  ff "${a[@]}" -c:a pcm_s24le "$d/tone24.wav"
+  ff "${a[@]}" -c:a pcm_f32le "$d/tonef32.wav"
+  ff "${a[@]}" -c:a pcm_u8 -ac 1 "$d/tone8_mono.wav"
+  # ADTS AAC.
+  ff "${a[@]}" -c:a aac -b:a 96k -f adts "$d/tone.aac"
+  for f in "$d"/*.mp3 "$d"/*.flac "$d"/*.ogg "$d"/*.opus "$d"/*.oga "$d"/*.wav "$d"/*.aac; do
+    ffprobe -v error -show_format -show_streams -show_packets -of json "$f" > "$f.probe.json"
+  done
+  echo "$version" > "$d/.done"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
 if [[ "$fixture_set" == all || "$fixture_set" == h264 ]]; then gen_h264; fi
 if [[ "$fixture_set" == all || "$fixture_set" == vp9 ]]; then gen_vp9; fi
 if [[ "$fixture_set" == all || "$fixture_set" == m8 ]]; then gen_m8; fi
+if [[ "$fixture_set" == all || "$fixture_set" == audio ]]; then gen_audio; fi
 if [[ "$fixture_set" == perf ]]; then gen_perf; fi
 echo "fixtures in $out"

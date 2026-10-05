@@ -25,7 +25,10 @@ fn fixture(name: &str) -> String {
                 .env("RVP_FIXTURE_SET", set)
                 .status()
                 .expect("run gen-fixtures.sh");
-            assert!(st.success(), "fixture generation failed (is ffmpeg installed? RVP_SKIP_FIXTURES=1 skips)");
+            assert!(
+                st.success(),
+                "fixture generation failed (is ffmpeg installed? RVP_SKIP_FIXTURES=1 skips)"
+            );
         }
     });
     dir.join(name).to_string_lossy().into_owned()
@@ -78,7 +81,11 @@ impl Rig {
     }
 
     fn key(&mut self, c: char) {
-        self.host.input.0.push_back(InputEvent::KeyDown { key: Key::Char(c), mods: Modifiers::default(), repeat: false });
+        self.host.input.0.push_back(InputEvent::KeyDown {
+            key: Key::Char(c),
+            mods: Modifiers::default(),
+            repeat: false,
+        });
         self.app.pump(&mut self.host);
     }
 

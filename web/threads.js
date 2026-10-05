@@ -14,6 +14,7 @@ export class Threads {
     this.glueUrl = glueUrl;
     this.isMain = isMain;
     this.idle = [];
+    this.all = [];
     this.started = 0;
     this.failed = null;
   }
@@ -30,14 +31,23 @@ export class Threads {
       w.onmessage = (e) => {
         if (e.data === "done") this.idle.push(w);
         else if (e.data && e.data.spawn !== undefined) this.spawn(e.data.spawn);
+        else if (e.data && e.data.crashed) this.failed = e.data.crashed;
       };
       w.onerror = (e) => {
         this.failed = e.message || String(e);
         console.error("rvp worker failed:", this.failed);
       };
       w.postMessage({ init: true, module: this.module, memory: this.memory, glueUrl: this.glueUrl });
+      this.all.push(w);
       this.started++;
     }
     w.postMessage({ ptr });
+  }
+
+  /** Stop every worker (the instance they share is being thrown away). */
+  terminate() {
+    for (const w of this.all) w.terminate();
+    this.all = [];
+    this.idle = [];
   }
 }

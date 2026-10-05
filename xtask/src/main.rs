@@ -53,6 +53,17 @@ pub(crate) fn fixtures(extra: &[String]) -> Result<(), String> {
     status.success().then_some(()).ok_or_else(|| "fixture generation failed".to_string())
 }
 
+/// Make one fixture set (see `tools/gen-fixtures.sh`) if its marker file is missing.
+pub(crate) fn fixture_set(set: &str) -> Result<(), String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    if root.join("target/fixtures").join(set).join(".done").exists() {
+        return Ok(());
+    }
+    let script = root.join("tools/gen-fixtures.sh");
+    let status = Command::new("bash").arg(script).env("RVP_FIXTURE_SET", set).status().map_err(|e| e.to_string())?;
+    status.success().then_some(()).ok_or_else(|| format!("generating the `{set}` fixtures failed"))
+}
+
 /// Build the smoke module for wasm32 (plain, and with SIMD128), run it in Node on AV1, H.264 and VP9 fixtures, and
 /// require the same frame count and hash as the native build from both; the SIMD build also runs the self-tests that
 /// compare every vector kernel with its scalar twin.

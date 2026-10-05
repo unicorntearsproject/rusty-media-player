@@ -37,6 +37,8 @@ pub enum AudioCodec {
     Opus,
     /// Vorbis.
     Vorbis,
+    /// Uncompressed PCM (WAV).
+    Pcm,
 }
 
 /// Video-specific stream parameters.
@@ -90,7 +92,7 @@ pub struct Art {
     pub data: Vec<u8>,
 }
 
-/// Descriptive tags read from the container.
+/// Descriptive tags read from the container or file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Metadata {
     /// Title.
@@ -99,6 +101,20 @@ pub struct Metadata {
     pub artist: Option<String>,
     /// Album.
     pub album: Option<String>,
+    /// Album artist.
+    pub album_artist: Option<String>,
+    /// Track number within its disc.
+    pub track: Option<u32>,
+    /// Number of tracks on the disc, if the tag says.
+    pub track_total: Option<u32>,
+    /// Disc number.
+    pub disc: Option<u32>,
+    /// Number of discs, if the tag says.
+    pub disc_total: Option<u32>,
+    /// Year (the first four digits of a date).
+    pub year: Option<i32>,
+    /// Genre, as text.
+    pub genre: Option<String>,
     /// Cover art.
     pub art: Option<Art>,
 }

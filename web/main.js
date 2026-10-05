@@ -16,43 +16,136 @@ const statusEl = document.getElementById("status");
 // server sends COOP/COEP) and exists only if `cargo xtask web --threads` made it.
 const wantThreads = new URLSearchParams(location.search).get("threads") !== "0" && !/(?:^|;\s*)rvp_threads=0/.test(document.cookie);
 let glue = null;
+let threads = null;
 let threadInfo = { mode: "single", threads: 1, reason: "" };
-if (wantThreads && self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined") {
-  try {
-    const url = new URL("./pkg-mt/rvp.js", import.meta.url);
-    const wasmUrl = new URL("./pkg-mt/rvp_bg.wasm", import.meta.url);
-    const head = await fetch(wasmUrl, { method: "HEAD" });
-    if (head.ok) {
-      glue = await import(url.href);
-      const module = await WebAssembly.compileStreaming(fetch(wasmUrl));
-      const memory = new WebAssembly.Memory({ initial: 64, maximum: 32768, shared: true });
-      await glue.default({ module_or_path: module, memory, thread_stack_size: 4 << 20 });
-      const threads = new Threads(module, memory, url.href);
-      const n = glue.rvp_init_threads((ptr) => threads.spawn(ptr), navigator.hardwareConcurrency || 4);
-      threadInfo = { mode: "threads", threads: n, reason: "" };
-    } else {
-      threadInfo.reason = "no threaded build";
+let generation = 0;
+
+/** Instantiate the wasm module (again, after a crash: each call gives a fresh instance and, with threads, fresh shared memory). */
+async function loadWasm() {
+  const gen = generation++;
+  const bust = gen ? `?g=${gen}` : ""; // a new URL is a new glue module, so a new instance
+  glue = null;
+  threads = null;
+  threadInfo = { mode: "single", threads: 1, reason: "" };
+  if (wantThreads && self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined") {
+    try {
+      const url = new URL("./pkg-mt/rvp.js", import.meta.url);
+      const wasmUrl = new URL("./pkg-mt/rvp_bg.wasm", import.meta.url);
+      const head = await fetch(wasmUrl, { method: "HEAD" });
+      if (head.ok) {
+        glue = await import(url.href + bust);
+        const module = await WebAssembly.compileStreaming(fetch(wasmUrl));
+        const memory = new WebAssembly.Memory({ initial: 64, maximum: 32768, shared: true });
+        await glue.default({ module_or_path: module, memory, thread_stack_size: 4 << 20 });
+        const t = new Threads(module, memory, url.href + bust);
+        threads = t;
+        const n = glue.rvp_init_threads((ptr) => t.spawn(ptr), navigator.hardwareConcurrency || 4);
+        threadInfo = { mode: "threads", threads: n, reason: "" };
+      } else {
+        threadInfo.reason = "no threaded build";
+      }
+    } catch (err) {
+      console.warn("threaded build unavailable, using the single-threaded one:", err);
+      glue = null;
+      threads = null;
+      threadInfo = { mode: "single", threads: 1, reason: String(err) };
     }
-  } catch (err) {
-    console.warn("threaded build unavailable, using the single-threaded one:", err);
-    glue = null;
-    threadInfo = { mode: "single", threads: 1, reason: String(err) };
+  } else if (wantThreads) {
+    threadInfo.reason = "page is not cross-origin isolated";
   }
-} else if (wantThreads) {
-  threadInfo.reason = "page is not cross-origin isolated";
+  if (!glue) {
+    glue = await import("./pkg/rvp.js" + bust);
+    await glue.default();
+  }
 }
-if (!glue) {
-  glue = await import("./pkg/rvp.js");
-  await glue.default();
-}
-const { WebPlayer } = glue;
+
+await loadWasm();
 const audio = new RvpAudio();
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-const player = new WebPlayer(canvas, audio, reduceMotion.matches);
-reduceMotion.addEventListener("change", () => player.set_reduce_motion(reduceMotion.matches));
 // Now-playing in the browser's media controls (lock screen, media keys) through the Media Session API.
 const media = new RvpMediaSession();
-player.set_media_session(media);
+
+// ---- crash recovery -------------------------------------------------------------------------------------
+//
+// A panic in Rust aborts the whole WebAssembly instance (a trap), and a decoder thread that traps leaves the shared
+// state of the others in doubt. So the page does not try to resume inside the damaged instance: it throws it away,
+// starts a fresh one and opens the same files again; the player's own resume position (saved every few seconds) puts
+// playback back where it was.
+
+let openedFiles = [];
+let recoveries = 0;
+let recoverStamps = [];
+let recovering = null;
+let wasmCrashed = false;
+
+const isCrash = (e) => e instanceof WebAssembly.RuntimeError || /unreachable|memory access out of bounds/.test(String(e && e.message));
+
+/** Wrap the player so a trap inside any call starts the recovery instead of breaking the page. */
+function guarded(p) {
+  return new Proxy(p, {
+    get(target, name) {
+      const v = target[name];
+      if (typeof v !== "function") return v;
+      return (...args) => {
+        // The instance is being replaced: nothing may call into it.
+        if (wasmCrashed) return name === "take_effects" ? [] : undefined;
+        try {
+          return v.apply(target, args);
+        } catch (e) {
+          if (isCrash(e)) {
+            recover(e);
+            return undefined;
+          }
+          throw e;
+        }
+      };
+    },
+  });
+}
+
+let player = null;
+let lastSnapshot = { state: "idle" };
+function makePlayer() {
+  const p = new glue.WebPlayer(canvas, audio, reduceMotion.matches);
+  p.set_media_session(media);
+  player = guarded(p);
+  fit.done = false;
+  fit();
+  player.enable_visualizer(visualizerOn);
+}
+let visualizerOn = false;
+
+async function recover(err) {
+  if (recovering) return recovering;
+  const now = performance.now();
+  recoverStamps = recoverStamps.filter((t) => now - t < 60_000);
+  if (recoverStamps.length >= 3) {
+    statusEl.textContent = "The player stopped after repeated crashes. Reload the page.";
+    console.error("rvp: giving up after repeated crashes", err);
+    return undefined;
+  }
+  recoverStamps.push(now);
+  console.error("rvp: the player crashed, restarting it:", err);
+  wasmCrashed = true;
+  recovering = (async () => {
+    try {
+      if (threads) threads.terminate();
+      audio.flush();
+      await loadWasm();
+      wasmCrashed = false;
+      makePlayer();
+      recoveries++;
+      if (openedFiles.length) player.open_files(openedFiles, false);
+      player.toast("The player crashed and was restarted.");
+      statusEl.textContent = "The player crashed and was restarted.";
+    } catch (e) {
+      console.error("rvp: could not restart after the crash", e);
+    } finally {
+      recovering = null;
+    }
+  })();
+  return recovering;
+}
 
 // ---- size -----------------------------------------------------------------------------------------------
 
@@ -67,12 +160,13 @@ function fit() {
 }
 new ResizeObserver(fit).observe(canvas);
 window.addEventListener("resize", fit);
-fit();
+makePlayer();
+reduceMotion.addEventListener("change", () => player.set_reduce_motion(reduceMotion.matches));
 
 // ---- effects the player asks for -----------------------------------------------------------------------
 
 function effects() {
-  for (const e of player.take_effects()) {
+  for (const e of player.take_effects() || []) {
     if (e === "pick") {
       fileInput.value = "";
       fileInput.click();
@@ -102,6 +196,7 @@ function openFiles(files, append = false) {
   files = Array.from(files || []);
   if (!files.length) return;
   audio.unlock();
+  openedFiles = append ? openedFiles.concat(files) : files;
   player.open_files(files, append);
   const first = files.find((f) => !/\.(srt|vtt)$/i.test(f.name)) || files[0];
   document.title = `${first.name} – Rusty Video Player`;
@@ -202,30 +297,36 @@ window.addEventListener("drop", (e) => {
 const perf = { ticks: 0, totalMs: 0, maxMs: 0, last: 0 };
 function frame() {
   const t0 = performance.now();
-  player.tick();
+  // A worker thread that died (a decoder that panicked) cannot be recovered from inside; start over.
+  if (threads && threads.failed && !recovering) recover(threads.failed);
+  if (!recovering) player.tick();
   const dt = performance.now() - t0;
   perf.ticks++;
   perf.totalMs += dt;
   perf.last = dt;
   if (dt > perf.maxMs) perf.maxMs = dt;
-  const cursor = player.cursor();
+  const cursor = recovering ? "default" : player.cursor();
   if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 // requestAnimationFrame stops in background tabs; keep audio and the clock fed.
-setInterval(() => { if (document.hidden) player.tick(); }, 25);
+setInterval(() => { if (document.hidden && !recovering) player.tick(); }, 25);
 
 // ---- test and tooling hook ------------------------------------------------------------------------------
 
 window.rvp = {
   ready: true,
-  snapshot: () => JSON.parse(player.snapshot()),
+  snapshot: () => {
+    const j = player.snapshot();
+    if (j) lastSnapshot = JSON.parse(j);
+    return j ? lastSnapshot : { ...lastSnapshot, state: "recovering" };
+  },
   openFile,
   openFiles,
   saveState: () => player.save_state(),
   /** Switch the audio-analysis tap on or off, and read what it has seen (counts and the latest summary). */
-  visualizer: (on) => player.enable_visualizer(on),
+  visualizer: (on) => { visualizerOn = on; player.enable_visualizer(on); },
   vizState: () => JSON.parse(player.viz_state()),
   audio: () => audio.debug(),
   /** RGBA bytes of a canvas region (physical pixels). */
@@ -269,6 +370,10 @@ window.rvp = {
   perf: () => ({ ...perf, avgMs: perf.totalMs / Math.max(1, perf.ticks) }),
   /** Worker threads in use: 1 for the single-threaded build. */
   threads: () => threadInfo.threads,
+  /** How many times the page restarted the player after a crash. */
+  recoveries: () => recoveries,
+  /** Test hook: crash the player (`main`: panic now; `decoder`: the next video packet crashes its decoder). */
+  debugCrash: (what) => (what === "decoder" ? player.debug_crash_decoder() : player.debug_panic()),
   threadInfo: () => threadInfo,
 };
 canvas.focus({ preventScroll: true });

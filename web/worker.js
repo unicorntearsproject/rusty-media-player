@@ -8,7 +8,11 @@ let queue = Promise.resolve();
 
 self.onmessage = (e) => {
   // Messages are handled in order, and `init` is asynchronous, so chain them.
-  queue = queue.then(() => handle(e.data));
+  // A trap in the wasm code (a panic) rejects here: tell the page, which restarts the player.
+  queue = queue.then(() => handle(e.data)).catch((err) => {
+    console.error("rvp worker crashed:", err);
+    self.postMessage({ crashed: String((err && err.message) || err) });
+  });
 };
 
 async function handle(d) {

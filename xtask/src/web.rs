@@ -226,6 +226,7 @@ pub fn e2e(args: &[String]) -> Result<(), String> {
     if !root.join("target/fixtures/.done").exists() {
         crate::fixtures(&[])?;
     }
+    crate::fixture_set("audio")?;
     let npm = |args: &[&str]| -> Result<(), String> {
         println!("+ (tests/e2e) {}", args.join(" "));
         let st = Command::new(args[0])

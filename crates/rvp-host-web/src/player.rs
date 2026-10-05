@@ -30,7 +30,39 @@ impl CodecFactory for WebCodecs {
     }
 }
 
+/// Test hook (`window.rvp.debugCrash("decoder")`): the next packet any video decoder is given makes it panic, so the
+/// page's recovery from a crashed decoder (a panic aborts a WebAssembly module) can be tested.
+static CRASH_NEXT_PACKET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Wraps a decoder to honour [`CRASH_NEXT_PACKET`].
+struct CrashProbe(Box<dyn VideoDecoder>);
+
+impl VideoDecoder for CrashProbe {
+    fn send_packet(&mut self, packet: &rvp_core::Packet) -> CoreResult<()> {
+        if CRASH_NEXT_PACKET.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            panic!("debug: decoder crash requested");
+        }
+        self.0.send_packet(packet)
+    }
+    fn receive_frame(&mut self) -> CoreResult<Option<rvp_core::VideoFrame>> {
+        self.0.receive_frame()
+    }
+    fn flush(&mut self) {
+        self.0.flush()
+    }
+    fn drain(&mut self) -> CoreResult<()> {
+        self.0.drain()
+    }
+    fn pending(&self) -> usize {
+        self.0.pending()
+    }
+}
+
 fn build_video(info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
+    build_video_inner(info).map(|d| Box::new(CrashProbe(d)) as Box<dyn VideoDecoder>)
+}
+
+fn build_video_inner(info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
     match info.codec.as_str() {
         "av1" => rvp_codec_av1::av1_decoder(info),
         // With threads the reconstruction runs on a thread of its own, overlapping the parsing of the next picture.
@@ -157,6 +189,16 @@ impl WebPlayer {
             "{{\"frames\":{},\"summaries\":{},\"onsets\":{},\"last\":{}}}",
             t.frames, t.summaries, t.onsets, last
         )
+    }
+
+    /// Test hook: panic right now (a WebAssembly panic aborts the module, as a bug in a decoder would).
+    pub fn debug_panic(&self) {
+        panic!("debug: panic requested");
+    }
+
+    /// Test hook: make the next video packet crash its decoder (on the decoder's thread when there is one).
+    pub fn debug_crash_decoder(&self) {
+        CRASH_NEXT_PACKET.store(true, std::sync::atomic::Ordering::Release);
     }
 
     /// Write what must survive a reload (the resume position). Call before the page unloads.

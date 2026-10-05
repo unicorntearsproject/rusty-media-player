@@ -6,8 +6,8 @@ pub use rvp_host::mock::{FakeClock as VirtualClock, ScriptedInput};
 
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
 use rvp_host::{
-    AudioSink, FrameSink, Host, HostClock, HostError, InputEvents, NowPlaying, OpenRequest, Rect, RecordingNowPlaying,
-    RecordingTap, Source, Storage, Surface, VideoSink, VisualizerTap,
+    AudioSink, FrameSink, Host, HostClock, HostError, InputEvents, NowPlaying, OpenRequest,
+    RecordingNowPlaying, RecordingTap, Rect, Source, Storage, Surface, VideoSink, VisualizerTap,
 };
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};

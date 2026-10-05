@@ -21,6 +21,12 @@ impl<S: Source> Reader<S> {
         self.size
     }
 
+    /// Ask the source for its length again (a file that is still being written grows) and remember the answer.
+    pub(crate) async fn refresh_size(&mut self) -> Option<u64> {
+        self.size = self.src.size().await;
+        self.size
+    }
+
     /// Read until `buf` is full or the data ends; returns the number of bytes read.
     pub(crate) async fn read_upto(&mut self, off: u64, buf: &mut [u8]) -> Result<usize> {
         let mut done = 0;
@@ -41,8 +47,15 @@ impl<S: Source> Reader<S> {
 
     /// Read `n` bytes into a new vector (bounded by the source size and [`MAX_READ`]).
     pub(crate) async fn read_vec(&mut self, off: u64, n: u64) -> Result<Vec<u8>> {
-        if n > MAX_READ || self.size.is_some_and(|s| off.saturating_add(n) > s) {
+        if n > MAX_READ {
             return Err(Error::Truncated);
+        }
+        // Beyond the length we knew: the file may have grown since.
+        if self.size.is_some_and(|s| off.saturating_add(n) > s) {
+            self.refresh_size().await;
+            if self.size.is_some_and(|s| off.saturating_add(n) > s) {
+                return Err(Error::Truncated);
+            }
         }
         let mut v = alloc::vec![0u8; n as usize];
         self.read_exact(off, &mut v).await?;
@@ -107,4 +120,38 @@ impl<'a> Cur<'a> {
 
 pub(crate) fn invalid<T>(what: &str) -> Result<T> {
     Err(Error::Invalid(alloc::string::String::from(what)))
+}
+
+/// Read-ahead over a [`Reader`] for demuxers that walk a file frame by frame: asks the source for big blocks and hands out
+/// slices of the block, so a thousand small frames cost a handful of reads.
+pub(crate) struct Win {
+    start: u64,
+    buf: Vec<u8>,
+}
+
+impl Win {
+    const BLOCK: usize = 128 << 10;
+
+    pub(crate) fn new() -> Self {
+        Self { start: 0, buf: Vec::new() }
+    }
+
+    /// The bytes at `off..off + n`, or as many of them as the source has (none at the end of the data). The source is asked
+    /// again whenever the window does not hold the whole range, so a file that has grown since is picked up.
+    pub(crate) async fn get<S: Source>(&mut self, rd: &mut Reader<S>, off: u64, n: usize) -> Result<&[u8]> {
+        let have_start = off >= self.start;
+        let rel = (off.wrapping_sub(self.start)) as usize;
+        let covered = have_start && off - self.start <= self.buf.len() as u64 && rel + n <= self.buf.len();
+        if !covered {
+            let want = n.max(Self::BLOCK).min(MAX_READ as usize);
+            self.buf.clear();
+            self.buf.resize(want, 0);
+            let got = rd.read_upto(off, &mut self.buf).await?;
+            self.buf.truncate(got);
+            self.start = off;
+        }
+        let rel = (off - self.start) as usize;
+        let end = (rel + n).min(self.buf.len());
+        Ok(&self.buf[rel.min(end)..end])
+    }
 }

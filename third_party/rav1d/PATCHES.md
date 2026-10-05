@@ -25,3 +25,9 @@ Upstreaming the `libc` change is the preferred end state.
    parker (without it a worker thread would panic when it first waits on a lock).
    `rvp-codec-av1` opens the context with `n_threads` and frame delay set from the host's thread count (the single
    threaded setting is kept where there are no threads).
+7. `src/decode.rs` (`rav1d_submit_frame`): a frame arriving without a sequence or frame header (damaged stream) is dropped with
+   `EINVAL` instead of unwrapping `None` (a panic, which aborts the process on wasm32 and in release builds); `on_error` no
+   longer unwraps the frame header either. Found by the corrupt-file test in `rvp-host-headless/tests/hardening.rs`.
+8. `src/lib.rs`: `dav1d_picture_unref` leaves the picture all-zero (it used to convert an empty Rust picture back, which allocated an
+   `itut_t35` `Arc` that no caller released: one small leak per picture), and `dav1d_get_picture` returns an all-zero
+   picture when there is none (`EAGAIN`) for the same reason. Found by the AV1 fuzz target (LeakSanitizer, even on valid input).

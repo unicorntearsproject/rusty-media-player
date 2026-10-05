@@ -73,7 +73,21 @@ fn h264_frames_are_bit_exact_and_play_in_sync_with_audio() {
         assert_eq!(report.state, SessionState::Ended, "{name}: {:?}", report.error);
         assert!(report.warnings.is_empty(), "{name}: {:?}", report.warnings);
         let raw = Command::new("ffmpeg")
-            .args(["-v", "error", "-i", &path, "-map", "0:v:0", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"])
+            .args([
+                "-v",
+                "error",
+                "-i",
+                &path,
+                "-map",
+                "0:v:0",
+                "-fps_mode",
+                "passthrough",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "yuv420p",
+                "-",
+            ])
             .output()
             .unwrap()
             .stdout;
@@ -83,9 +97,17 @@ fn h264_frames_are_bit_exact_and_play_in_sync_with_audio() {
         assert_eq!(report.video_stats.dropped, 0, "{name}: nothing should be late at normal speed");
         assert_eq!(got, want, "{name}: every frame the sink got is bit-exact");
         assert!(report.video_trace.windows(2).all(|w| w[0].pts < w[1].pts), "{name}: frames shown in order");
-        assert!(report.video_stats.max_drift_us <= FRAME_US, "{name}: drift {} us", report.video_stats.max_drift_us);
+        assert!(
+            report.video_stats.max_drift_us <= FRAME_US,
+            "{name}: drift {} us",
+            report.video_stats.max_drift_us
+        );
         // Six seconds of 48 kHz audio.
-        assert!((report.audio.len() as i64 / 2 - 288_000).abs() < 4_000, "{name}: {} audio frames", report.audio.len() / 2);
+        assert!(
+            (report.audio.len() as i64 / 2 - 288_000).abs() < 4_000,
+            "{name}: {} audio frames",
+            report.audio.len() / 2
+        );
     }
 }
 

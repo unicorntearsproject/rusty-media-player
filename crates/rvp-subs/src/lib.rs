@@ -14,6 +14,11 @@ extern crate std;
 use alloc::{string::String, vec::Vec};
 use rvp_core::Timestamp;
 
+/// Most cues a list keeps, and the longest cue text (bytes).
+pub const MAX_CUES: usize = 200_000;
+/// See [`MAX_CUES`].
+pub const MAX_CUE_TEXT: usize = 4096;
+
 /// One subtitle cue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cue {
@@ -55,7 +60,7 @@ pub fn parse_timestamp(s: &str) -> Option<Timestamp> {
         Some(h) => h.trim().parse().ok()?,
         None => 0,
     };
-    if parts.next().is_some() || sec > 99 || min > 99 || hour < 0 || sec < 0 || min < 0 {
+    if parts.next().is_some() || sec > 99 || min > 99 || !(0..=10_000).contains(&hour) || sec < 0 || min < 0 {
         return None;
     }
     Some(((hour * 60 + min) * 60 + sec) * 1_000_000 + micros)
@@ -289,6 +294,14 @@ impl CueList {
 
     /// A list from parsed cues.
     pub fn from_cues(mut cues: Vec<Cue>) -> Self {
+        cues.truncate(MAX_CUES);
+        for c in cues.iter_mut().filter(|c| c.text.len() > MAX_CUE_TEXT) {
+            let mut end = MAX_CUE_TEXT;
+            while !c.text.is_char_boundary(end) {
+                end -= 1;
+            }
+            c.text.truncate(end);
+        }
         sort_cues(&mut cues);
         Self { cues }
     }
@@ -296,6 +309,18 @@ impl CueList {
     /// Insert a cue, keeping the order. A cue identical to one already present (same start and text) is ignored,
     /// so re-reading a stretch of a file after a seek adds nothing.
     pub fn insert(&mut self, cue: Cue) {
+        // Bounded: a hostile file must not be able to grow the list (and the cost of every lookup) without limit.
+        if self.cues.len() >= MAX_CUES {
+            return;
+        }
+        let mut cue = cue;
+        if cue.text.len() > MAX_CUE_TEXT {
+            let mut end = MAX_CUE_TEXT;
+            while !cue.text.is_char_boundary(end) {
+                end -= 1;
+            }
+            cue.text.truncate(end);
+        }
         let i = self.cues.partition_point(|c| c.start <= cue.start);
         if self.cues[..i].iter().rev().take_while(|c| c.start == cue.start).any(|c| c.text == cue.text) {
             return;
