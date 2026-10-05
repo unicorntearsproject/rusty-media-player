@@ -34,6 +34,9 @@ pub use error::{Error, Result};
 
 /// Run the WebAssembly SIMD128 self-tests of this crate (0 mismatches expected; always 0 without SIMD128).
 pub fn simd_selftest() -> u32 {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    return decoder::simd_selftest();
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
     0
 }
 use rvp_core::VideoCodec;

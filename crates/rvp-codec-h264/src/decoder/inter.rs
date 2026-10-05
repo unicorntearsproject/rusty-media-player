@@ -75,9 +75,8 @@ fn vhalf(rows: [&[u8]; 6], c0: usize, out: &mut [u8; MAX_BLK], w: usize) {
     }
 }
 
-/// Luma motion compensation for a `w` x `h` block (each 4, 8 or 16) whose top-left sample is at integer position
-/// `(x, y)` in the reference `plane` plus the quarter-sample fraction `(fx, fy)`. The result goes to `dst` with
-/// stride [`PSTRIDE`].
+/// Luma motion compensation (see [`mc_luma_scalar`], which defines the result): the WebAssembly SIMD128 build uses
+/// the vector kernels in `inter_simd`.
 #[allow(clippy::too_many_arguments)]
 pub fn mc_luma(
     plane: &[u8],
@@ -91,6 +90,53 @@ pub fn mc_luma(
     w: usize,
     h: usize,
     dst: &mut [u8],
+    ds: usize,
+) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    return super::inter_simd::mc_luma(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds);
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    mc_luma_scalar(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds)
+}
+
+/// Chroma motion compensation (see [`mc_chroma_scalar`]).
+#[allow(clippy::too_many_arguments)]
+pub fn mc_chroma(
+    plane: &[u8],
+    stride: usize,
+    pw: i32,
+    ph: i32,
+    x: i32,
+    y: i32,
+    fx: i32,
+    fy: i32,
+    w: usize,
+    h: usize,
+    dst: &mut [u8],
+    ds: usize,
+) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    return super::inter_simd::mc_chroma(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds);
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    mc_chroma_scalar(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds)
+}
+
+/// Luma motion compensation for a `w` x `h` block (each 4, 8 or 16) whose top-left sample is at integer position
+/// `(x, y)` in the reference `plane` plus the quarter-sample fraction `(fx, fy)`. The result goes to `dst` with
+/// stride `ds`.
+#[allow(clippy::too_many_arguments)]
+pub fn mc_luma_scalar(
+    plane: &[u8],
+    stride: usize,
+    pw: i32,
+    ph: i32,
+    x: i32,
+    y: i32,
+    fx: usize,
+    fy: usize,
+    w: usize,
+    h: usize,
+    dst: &mut [u8],
+    ds: usize,
 ) {
     let mut tmp = [0u8; 21 * 21];
     let inside = x >= 2 && y >= 2 && x + w as i32 + 3 <= pw && y + h as i32 + 3 <= ph;
@@ -112,7 +158,7 @@ pub fn mc_luma(
     match (fx, fy) {
         (0, 0) => {
             for j in 0..h {
-                dst[j * PSTRIDE..j * PSTRIDE + w].copy_from_slice(&col0(j as i32)[..w]);
+                dst[j * ds..j * ds + w].copy_from_slice(&col0(j as i32)[..w]);
             }
         }
         (_, 0) => {
@@ -120,7 +166,7 @@ pub fn mc_luma(
             for j in 0..h {
                 let r = row(j as i32);
                 hhalf(r, &mut b, w);
-                let d = &mut dst[j * PSTRIDE..j * PSTRIDE + w];
+                let d = &mut dst[j * ds..j * ds + w];
                 match fx {
                     1 => {
                         for i in 0..w {
@@ -145,7 +191,7 @@ pub fn mc_luma(
                     &mut hv,
                     w,
                 );
-                let d = &mut dst[j as usize * PSTRIDE..j as usize * PSTRIDE + w];
+                let d = &mut dst[j as usize * ds..j as usize * ds + w];
                 match fy {
                     1 => {
                         let g = col0(j);
@@ -183,7 +229,7 @@ pub fn mc_luma(
             for j in 0..h {
                 let (m0, m1, m2, m3, m4, m5) =
                     (&mid[j], &mid[j + 1], &mid[j + 2], &mid[j + 3], &mid[j + 4], &mid[j + 5]);
-                let d = &mut dst[j * PSTRIDE..j * PSTRIDE + w];
+                let d = &mut dst[j * ds..j * ds + w];
                 // The neighbouring half-sample to average with, if any.
                 match (fx, fy) {
                     (2, 1) => {
@@ -224,7 +270,7 @@ pub fn mc_luma(
                     &mut hv,
                     w,
                 );
-                let d = &mut dst[j as usize * PSTRIDE..j as usize * PSTRIDE + w];
+                let d = &mut dst[j as usize * ds..j as usize * ds + w];
                 for i in 0..w {
                     d[i] = avg(bh[i], hv[i]);
                 }
@@ -234,9 +280,9 @@ pub fn mc_luma(
 }
 
 /// Chroma motion compensation (4:2:0) for a `w` x `h` block at integer chroma position `(x, y)` and eighth-sample
-/// fraction `(fx, fy)`. The result goes to `dst` with stride [`PSTRIDE`].
+/// fraction `(fx, fy)`. The result goes to `dst` with stride `ds`.
 #[allow(clippy::too_many_arguments)]
-pub fn mc_chroma(
+pub fn mc_chroma_scalar(
     plane: &[u8],
     stride: usize,
     pw: i32,
@@ -248,6 +294,7 @@ pub fn mc_chroma(
     w: usize,
     h: usize,
     dst: &mut [u8],
+    ds: usize,
 ) {
     let inside = x >= 0 && y >= 0 && x + (w as i32) < pw && y + (h as i32) < ph;
     let (a, b, c, d) = ((8 - fx) * (8 - fy), fx * (8 - fy), (8 - fx) * fy, fx * fy);
@@ -266,7 +313,7 @@ pub fn mc_chroma(
     };
     for j in 0..h {
         let o = origin + j * sstride;
-        let out = &mut dst[j * PSTRIDE..j * PSTRIDE + w];
+        let out = &mut dst[j * ds..j * ds + w];
         if fx == 0 && fy == 0 {
             out.copy_from_slice(&src[o..o + w]);
         } else if fy == 0 {
@@ -302,10 +349,31 @@ pub struct Weights {
     pub o: [i32; 2],
 }
 
+/// Combine up to two predictions into `dst` (see [`combine_scalar`], which defines the result).
+#[allow(clippy::too_many_arguments)]
+pub fn combine(
+    dst: &mut [u8],
+    dst_stride: usize,
+    w: usize,
+    h: usize,
+    p0: Option<&[u8]>,
+    p1: Option<&[u8]>,
+    weights: Option<&Weights>,
+) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    if let (Some(a), Some(b)) = (p0, p1) {
+        return match weights {
+            None => super::inter_simd::average(dst, dst_stride, w, h, a, b),
+            Some(wt) => super::inter_simd::weighted_bi(dst, dst_stride, w, h, a, b, wt),
+        };
+    }
+    combine_scalar(dst, dst_stride, w, h, p0, p1, weights)
+}
+
 /// Combine up to two predictions into `dst` (a plane region with `dst_stride`), `w` x `h` samples.
 /// `p0`/`p1` are predictions with stride [`PSTRIDE`]; `weights` is `None` for default weighting.
 #[allow(clippy::too_many_arguments)]
-pub fn combine(
+pub fn combine_scalar(
     dst: &mut [u8],
     dst_stride: usize,
     w: usize,

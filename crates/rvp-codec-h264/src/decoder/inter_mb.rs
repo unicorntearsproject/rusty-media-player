@@ -379,68 +379,109 @@ impl SliceDecoder<'_> {
         let (w, h) = (w4 * 4, h4 * 4);
         let dpb = self.dpb;
         let (pw, ph) = ((self.mbw * 16) as i32, (self.mbh * 16) as i32);
+        // One list and no weights: the prediction is the block, so interpolate straight into the picture.
+        let single = match (r[0] >= 0, r[1] >= 0) {
+            (true, false) => Some(0),
+            (false, true) => Some(1),
+            _ => None,
+        };
         let mut pred = [[0u8; PSTRIDE * 16]; 2];
         // Luma.
+        let wt = self.weights(0, r);
+        let direct = single.filter(|_| wt.is_none());
+        let stride = self.cur.strides[0];
         for l in 0..2 {
             if r[l] < 0 {
                 continue;
             }
             let rp = &dpb[self.refs[l][r[l] as usize].dpb_idx];
             let mv = mvs[l];
-            inter::mc_luma(
-                &rp.planes[0],
-                rp.strides[0],
-                pw,
-                ph,
-                x + (mv[0] as i32 >> 2),
-                y + (mv[1] as i32 >> 2),
-                (mv[0] & 3) as usize,
-                (mv[1] & 3) as usize,
-                w,
-                h,
-                &mut pred[l],
-            );
+            let (mx, my) = (x + (mv[0] as i32 >> 2), y + (mv[1] as i32 >> 2));
+            let (fx, fy) = ((mv[0] & 3) as usize, (mv[1] & 3) as usize);
+            if direct.is_some() {
+                let dst = &mut self.cur.planes[0][y as usize * stride + x as usize..];
+                inter::mc_luma(&rp.planes[0], rp.strides[0], pw, ph, mx, my, fx, fy, w, h, dst, stride);
+            } else {
+                inter::mc_luma(
+                    &rp.planes[0],
+                    rp.strides[0],
+                    pw,
+                    ph,
+                    mx,
+                    my,
+                    fx,
+                    fy,
+                    w,
+                    h,
+                    &mut pred[l],
+                    PSTRIDE,
+                );
+            }
         }
-        let wt = self.weights(0, r);
-        let stride = self.cur.strides[0];
-        let dst = &mut self.cur.planes[0][y as usize * stride + x as usize..];
-        let (p0, p1) = (
-            if r[0] >= 0 { Some(&pred[0][..]) } else { None },
-            if r[1] >= 0 { Some(&pred[1][..]) } else { None },
-        );
-        inter::combine(dst, stride, w, h, p0, p1, wt.as_ref());
+        if direct.is_none() {
+            let dst = &mut self.cur.planes[0][y as usize * stride + x as usize..];
+            let (p0, p1) = (
+                if r[0] >= 0 { Some(&pred[0][..]) } else { None },
+                if r[1] >= 0 { Some(&pred[1][..]) } else { None },
+            );
+            inter::combine(dst, stride, w, h, p0, p1, wt.as_ref());
+        }
         // Chroma.
         let (cw, ch) = (w / 2, h / 2);
         let (cx, cy) = (x / 2, y / 2);
         for comp in 1..3 {
+            let wt = self.weights(comp, r);
+            let direct = single.filter(|_| wt.is_none());
+            let stride = self.cur.strides[comp];
             for l in 0..2 {
                 if r[l] < 0 {
                     continue;
                 }
                 let rp = &dpb[self.refs[l][r[l] as usize].dpb_idx];
                 let mv = mvs[l];
-                inter::mc_chroma(
-                    &rp.planes[comp],
-                    rp.strides[comp],
-                    pw / 2,
-                    ph / 2,
-                    cx + (mv[0] as i32 >> 3),
-                    cy + (mv[1] as i32 >> 3),
-                    (mv[0] & 7) as i32,
-                    (mv[1] & 7) as i32,
-                    cw,
-                    ch,
-                    &mut pred[l],
-                );
+                let (mx, my) = (cx + (mv[0] as i32 >> 3), cy + (mv[1] as i32 >> 3));
+                let (fx, fy) = ((mv[0] & 7) as i32, (mv[1] & 7) as i32);
+                if direct.is_some() {
+                    let dst = &mut self.cur.planes[comp][cy as usize * stride + cx as usize..];
+                    inter::mc_chroma(
+                        &rp.planes[comp],
+                        rp.strides[comp],
+                        pw / 2,
+                        ph / 2,
+                        mx,
+                        my,
+                        fx,
+                        fy,
+                        cw,
+                        ch,
+                        dst,
+                        stride,
+                    );
+                } else {
+                    inter::mc_chroma(
+                        &rp.planes[comp],
+                        rp.strides[comp],
+                        pw / 2,
+                        ph / 2,
+                        mx,
+                        my,
+                        fx,
+                        fy,
+                        cw,
+                        ch,
+                        &mut pred[l],
+                        PSTRIDE,
+                    );
+                }
             }
-            let wt = self.weights(comp, r);
-            let stride = self.cur.strides[comp];
-            let dst = &mut self.cur.planes[comp][cy as usize * stride + cx as usize..];
-            let (p0, p1) = (
-                if r[0] >= 0 { Some(&pred[0][..]) } else { None },
-                if r[1] >= 0 { Some(&pred[1][..]) } else { None },
-            );
-            inter::combine(dst, stride, cw, ch, p0, p1, wt.as_ref());
+            if direct.is_none() {
+                let dst = &mut self.cur.planes[comp][cy as usize * stride + cx as usize..];
+                let (p0, p1) = (
+                    if r[0] >= 0 { Some(&pred[0][..]) } else { None },
+                    if r[1] >= 0 { Some(&pred[1][..]) } else { None },
+                );
+                inter::combine(dst, stride, cw, ch, p0, p1, wt.as_ref());
+            }
         }
     }
 

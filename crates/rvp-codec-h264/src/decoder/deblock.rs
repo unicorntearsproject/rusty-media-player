@@ -19,11 +19,52 @@ fn clip3(lo: i32, hi: i32, v: i32) -> i32 {
     v.clamp(lo, hi)
 }
 
+/// Filter one luma edge (see [`filter_luma_scalar`], which defines the result). The vector version handles the usual 4 groups
+/// of 4 lines.
+#[allow(clippy::too_many_arguments)]
+fn filter_luma(
+    p: &mut [u8],
+    q0: usize,
+    step: usize,
+    line: usize,
+    bs: &[u8],
+    per: usize,
+    alpha: i32,
+    beta: i32,
+    index_a: usize,
+) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    if per == 4 && bs.len() == 4 {
+        return super::deblock_simd::luma(p, q0, step, line, bs, alpha, beta, index_a);
+    }
+    filter_luma_scalar(p, q0, step, line, bs, per, alpha, beta, index_a)
+}
+
+/// Filter one chroma edge (see [`filter_chroma_scalar`]).
+#[allow(clippy::too_many_arguments)]
+fn filter_chroma(
+    p: &mut [u8],
+    q0: usize,
+    step: usize,
+    line: usize,
+    bs: &[u8],
+    per: usize,
+    alpha: i32,
+    beta: i32,
+    index_a: usize,
+) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    if per == 2 && bs.len() == 4 {
+        return super::deblock_simd::chroma(p, q0, step, line, bs, alpha, beta, index_a);
+    }
+    filter_chroma_scalar(p, q0, step, line, bs, per, alpha, beta, index_a)
+}
+
 /// Filter `lines` lines across one edge. `q0` is the index of the first q0 sample, `step` the distance between
 /// consecutive samples across the edge (1 for a vertical edge, the stride for a horizontal one), `line` the
 /// distance between lines along the edge. `bs` is per group of `lines / bs.len()` lines.
 #[allow(clippy::too_many_arguments)]
-fn filter_luma(
+pub(super) fn filter_luma_scalar(
     p: &mut [u8],
     q0: usize,
     step: usize,
@@ -85,7 +126,7 @@ fn filter_luma(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn filter_chroma(
+pub(super) fn filter_chroma_scalar(
     p: &mut [u8],
     q0: usize,
     step: usize,

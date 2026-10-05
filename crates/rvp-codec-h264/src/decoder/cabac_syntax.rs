@@ -88,9 +88,9 @@ impl<'a> Cabac<'a> {
     }
 
     /// Exp-Golomb suffix of order `k` (bypass bins).
-    fn exp_golomb_bypass(&mut self, mut k: u32) -> Result<u32> {
+    fn exp_golomb_bypass(dec: &mut CabacDecoder<'_>, mut k: u32) -> Result<u32> {
         let mut v = 0u32;
-        while self.dec.bypass() != 0 {
+        while dec.bypass() != 0 {
             v = v.wrapping_add(1 << k);
             k += 1;
             if k > 24 {
@@ -99,7 +99,7 @@ impl<'a> Cabac<'a> {
         }
         while k > 0 {
             k -= 1;
-            v = v.wrapping_add(self.dec.bypass() << k);
+            v = v.wrapping_add(dec.bypass() << k);
         }
         Ok(v)
     }
@@ -309,7 +309,7 @@ impl Entropy for Cabac<'_> {
             v += 1;
         }
         if v >= 9 {
-            v = v.wrapping_add(self.exp_golomb_bypass(3)?);
+            v = v.wrapping_add(Self::exp_golomb_bypass(&mut self.dec, 3)?);
         }
         if v != 0 && self.dec.bypass() != 0 {
             return Ok(-(v as i32));
@@ -418,6 +418,9 @@ impl Entropy for Cabac<'_> {
                 return Ok(0);
             }
         }
+        // The engine state lives in locals for the hot loops below and goes back at the end.
+        let mut dec = self.dec;
+        let ctxs = &mut self.ctxs;
         // Significance map.
         let (sig_base, last_base, abs_base) = if cat == Cat::Luma8x8 {
             (ctx::SIG_COEFF_8X8, ctx::LAST_COEFF_8X8, ctx::COEFF_ABS_LEVEL_8X8)
@@ -438,10 +441,10 @@ impl Entropy for Cabac<'_> {
                 Cat::ChromaDc => (i.min(2), i.min(2)),
                 _ => (i, i),
             };
-            if self.bin(sig_base + sinc) != 0 {
+            if dec.decision_inl(ctxs, sig_base + sinc) != 0 {
                 sig_pos[n_sig] = i as u8;
                 n_sig += 1;
-                if self.bin(last_base + linc) != 0 {
+                if dec.decision_inl(ctxs, last_base + linc) != 0 {
                     found_last = true;
                     break;
                 }
@@ -459,13 +462,13 @@ impl Entropy for Cabac<'_> {
             let inc0 = if gt1 != 0 { 0 } else { (1 + eq1).min(4) };
             let inc_n = 5 + gt1.min(4 - (cat == Cat::ChromaDc) as usize);
             let mut v = 0u32;
-            if self.bin(abs_base + inc0) != 0 {
+            if dec.decision_inl(ctxs, abs_base + inc0) != 0 {
                 v = 1;
-                while v < 14 && self.bin(abs_base + inc_n) != 0 {
+                while v < 14 && dec.decision_inl(ctxs, abs_base + inc_n) != 0 {
                     v += 1;
                 }
                 if v == 14 {
-                    v = v.wrapping_add(self.exp_golomb_bypass(0)?);
+                    v = v.wrapping_add(Self::exp_golomb_bypass(&mut dec, 0)?);
                 }
             }
             let abs = v.wrapping_add(1);
@@ -474,9 +477,10 @@ impl Entropy for Cabac<'_> {
             } else {
                 gt1 += 1;
             }
-            let level = if self.dec.bypass() != 0 { -(abs as i32) } else { abs as i32 };
+            let level = if dec.bypass() != 0 { -(abs as i32) } else { abs as i32 };
             out[sig_pos[k] as usize] = level;
         }
+        self.dec = dec;
         if self.dec.overrun() {
             return Err(Error::Truncated);
         }

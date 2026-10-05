@@ -5,12 +5,14 @@
 
 mod cabac_syntax;
 pub mod deblock;
+mod deblock_simd;
 mod deblock_tables;
 mod direct;
 pub mod dpb;
 pub mod entropy;
 pub mod inter;
 mod inter_mb;
+mod inter_simd;
 pub mod intra;
 pub mod mbinfo;
 mod mvpred;
@@ -34,6 +36,12 @@ use slice::SliceDecoder;
 
 /// Largest picture accepted by default, in macroblocks (level 5.1: 4096x2304). Bounds memory for hostile streams.
 pub const DEFAULT_MAX_MBS: usize = 36_864;
+
+/// Run the WebAssembly SIMD128 self-tests of the kernels (0 mismatches expected).
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub fn simd_selftest() -> u32 {
+    inter_simd::selftest() + deblock_simd::selftest()
+}
 
 /// A decoded, cropped output picture.
 #[derive(Debug, Clone, PartialEq)]

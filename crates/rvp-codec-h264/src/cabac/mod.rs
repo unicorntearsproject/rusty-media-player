@@ -120,7 +120,55 @@ impl Contexts {
     }
 }
 
+/// Next context state byte (`pStateIdx << 1 | valMPS`) after decoding the most probable symbol.
+const NEXT_MPS: [u8; 128] = {
+    let mut t = [0u8; 128];
+    let mut s = 0;
+    while s < 128 {
+        t[s] = (TRANS_IDX_MPS[s >> 1] << 1) | (s & 1) as u8;
+        s += 1;
+    }
+    t
+};
+
+/// Next context state byte after the least probable symbol (the MPS flips at state 0).
+const NEXT_LPS: [u8; 128] = {
+    let mut t = [0u8; 128];
+    let mut s = 0;
+    while s < 128 {
+        let mps = (s & 1) as u8;
+        let new_mps = if s >> 1 == 0 { 1 - mps } else { mps };
+        t[s] = (TRANS_IDX_LPS[s >> 1] << 1) | new_mps;
+        s += 1;
+    }
+    t
+};
+
+/// Both transitions in one table: index `state` after an MPS, `state + 128` after an LPS.
+const NEXT: [u8; 256] = {
+    let mut t = [0u8; 256];
+    let mut s = 0;
+    while s < 128 {
+        t[s] = NEXT_MPS[s];
+        t[s + 128] = NEXT_LPS[s];
+        s += 1;
+    }
+    t
+};
+
+/// `rangeTabLPS` flattened for a state byte: index `(state >> 1) * 4 + qCodIRangeIdx`.
+const LPS_FLAT: [u8; 256] = {
+    let mut t = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        t[i] = RANGE_TAB_LPS[i >> 2][i & 3];
+        i += 1;
+    }
+    t
+};
+
 /// The arithmetic decoding engine.
+#[derive(Clone, Copy)]
 pub struct CabacDecoder<'a> {
     data: &'a [u8],
     /// Next byte to load.
@@ -146,18 +194,23 @@ impl<'a> CabacDecoder<'a> {
         d
     }
 
-    #[inline]
+    #[inline(always)]
     fn refill(&mut self) {
         // Load 16 bits at a time; the window never exceeds 9 + 39 bits.
-        let hi = self.data.get(self.pos).copied();
-        let lo = self.data.get(self.pos + 1).copied();
-        if hi.is_none() {
-            self.overrun_bits += 8;
+        if let Some(&[hi, lo]) = self.data.get(self.pos..).and_then(|d| d.first_chunk::<2>()) {
+            self.value = (self.value << 16) | ((hi as u64) << 8) | lo as u64;
+        } else {
+            // Past the end: the missing bytes read as zero and are counted.
+            let hi = self.data.get(self.pos).copied();
+            let lo = self.data.get(self.pos + 1).copied();
+            if hi.is_none() {
+                self.overrun_bits += 8;
+            }
+            if lo.is_none() {
+                self.overrun_bits += 8;
+            }
+            self.value = (self.value << 16) | ((hi.unwrap_or(0) as u64) << 8) | lo.unwrap_or(0) as u64;
         }
-        if lo.is_none() {
-            self.overrun_bits += 8;
-        }
-        self.value = (self.value << 16) | ((hi.unwrap_or(0) as u64) << 8) | lo.unwrap_or(0) as u64;
         self.pos += 2;
         self.nbits += 16;
     }
@@ -176,33 +229,29 @@ impl<'a> CabacDecoder<'a> {
     /// Decode a bin with the adaptive context `ctx_idx`.
     #[inline]
     pub fn decision(&mut self, ctxs: &mut Contexts, ctx_idx: usize) -> u32 {
+        self.decision_inl(ctxs, ctx_idx)
+    }
+
+    /// [`decision`](Self::decision) forced inline, for the residual loops that keep the engine in registers.
+    #[inline(always)]
+    pub fn decision_inl(&mut self, ctxs: &mut Contexts, ctx_idx: usize) -> u32 {
         if self.nbits < 8 {
             self.refill();
         }
-        let st = ctxs.state[ctx_idx & 1023];
-        let (p, mps) = (((st >> 1) & 63) as usize, (st & 1) as u32);
-        let lps = RANGE_TAB_LPS[p][((self.range >> 6) & 3) as usize] as u32;
+        let slot = &mut ctxs.state[ctx_idx & 1023];
+        let st = (*slot & 127) as usize;
+        let lps = LPS_FLAT[(st & !1) * 2 + ((self.range >> 6) & 3) as usize] as u32;
         let rmps = self.range - lps;
         let scaled = (rmps as u64) << self.nbits;
-        let bin;
-        if self.value < scaled {
-            bin = mps;
-            ctxs.state[ctx_idx & 1023] = (TRANS_IDX_MPS[p] << 1) | mps as u8;
-            self.range = rmps;
-            if rmps < 256 {
-                self.range <<= 1;
-                self.nbits -= 1;
-            }
-        } else {
-            self.value -= scaled;
-            bin = 1 - mps;
-            let new_mps = if p == 0 { 1 - mps } else { mps };
-            ctxs.state[ctx_idx & 1023] = (TRANS_IDX_LPS[p] << 1) | new_mps as u8;
-            let shift = lps.leading_zeros() - 23; // bring range (9 bits) up to at least 256
-            self.range = lps << shift;
-            self.nbits -= shift;
-        }
-        bin
+        // Branch free: the LPS/MPS outcome is data dependent and badly predicted, so select with masks instead.
+        let is_lps = (self.value >= scaled) as u64;
+        self.value -= scaled & is_lps.wrapping_neg();
+        *slot = NEXT[st + ((is_lps as usize) << 7)];
+        let range = if is_lps != 0 { lps } else { rmps };
+        let shift = range.leading_zeros() - 23; // bring range (9 bits) up to at least 256
+        self.range = range << shift;
+        self.nbits -= shift;
+        (st & 1) as u32 ^ is_lps as u32
     }
 
     /// Decode a bypass bin.
