@@ -32,6 +32,12 @@ const frames = (page, n = 2) =>
     n,
   );
 
+/** Press a key and let the page draw what it did (two frames), so the next key meets the layout it will act on. */
+const press = async (page, key, n = 2) => {
+  await page.keyboard.press(key);
+  await frames(page, n);
+};
+
 /**
  * Wait until the page has run `n` more of its own frames (`window.rvp.perf().ticks`): a clock that counts what the page does and
  * does not care how long it takes. (A paused player still runs frames: the controls fade, the toasts age.)
@@ -97,4 +103,4 @@ const rateAgainstDevice = async (page, us, tries = 4) => {
   return last;
 };
 
-module.exports = { snap, waitFor, waitState, frames, ticks, settled, playedFor, rateAgainstDevice };
+module.exports = { snap, waitFor, waitState, frames, press, ticks, settled, playedFor, rateAgainstDevice };

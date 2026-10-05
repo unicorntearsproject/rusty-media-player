@@ -13,7 +13,7 @@ const SHOWCASE = path.join(FIXTURES, "showcase/music");
 const VIDEO = path.join(FIXTURES, "av1_opus.webm");
 const GOLDEN_DIR = path.join(__dirname, "golden");
 
-const { snap, waitFor: waitForAt, frames, settled } = require("./helpers");
+const { snap, waitFor: waitForAt, frames, press, settled } = require("./helpers");
 const waitFor = (page, fn, arg, timeout) => waitForAt(page, fn, arg, timeout, 30);
 const center = (r) => [r.x + r.w / 2, r.y + r.h / 2];
 
@@ -38,7 +38,7 @@ async function addFolder(page, dir, tracks) {
 
 async function library(page, dir = LIBRARY, tracks = 201) {
   const errors = await boot(page);
-  await page.keyboard.press("b"); // to the Library face
+  await press(page, "b"); // to the Library face
   await waitFor(page, () => window.rvp.snapshot().lib.mode === "library");
   await addFolder(page, dir, tracks);
   return errors;
@@ -49,7 +49,7 @@ const ent = (s, label, kind) => s.lib.ents.find((e) => e.label === label && (!ki
 async function openAlbum(page, title) {
   let s = await snap(page);
   if (s.lib.view !== "albums" || s.lib.detail) {
-    await page.keyboard.press("1");
+    await press(page, "1");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "albums" && !window.rvp.snapshot().lib.detail);
     await frames(page, 3);
   }
@@ -93,14 +93,14 @@ test.describe("M10", () => {
     }
     expect(titles.length).toBe(19); // two albums are called Unknown Album (by different artists)
     // Artists.
-    await page.keyboard.press("2");
+    await press(page, "2");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "artists");
     await frames(page, 4);
     s = await snap(page);
     expect(s.lib.ents[0].label).toBe("A Tribe of Pines");
     expect(s.lib.ent_count).toBe(16);
     // Tracks: sorted by title, a click on a column head sorts by it, and again reverses it.
-    await page.keyboard.press("3");
+    await press(page, "3");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "tracks");
     await frames(page, 4);
     s = await snap(page);
@@ -108,7 +108,7 @@ test.describe("M10", () => {
     const first = s.lib.ents[0].label;
     await page.mouse.click(s.lib.sort.x + 20, s.lib.sort.y + 10); // the sort menu
     await waitFor(page, () => window.rvp.snapshot().lib.menu_open);
-    await page.keyboard.press("Escape");
+    await press(page, "Escape");
     expect(errors).toEqual([]);
     expect(first).toBeTruthy();
   });
@@ -117,9 +117,9 @@ test.describe("M10", () => {
     const errors = await library(page);
     await openAlbum(page, "Daybreak");
     expect((await snap(page)).lib.ent_count).toBe(10);
-    await page.keyboard.press("Enter"); // nothing selected yet: no effect
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
+    await press(page, "Enter"); // nothing selected yet: no effect
+    await press(page, "ArrowDown");
+    await press(page, "Enter");
     await waitFor(page, () => window.rvp.snapshot().state === "playing");
     // The queue is the album, in order.
     const album = (await snap(page)).playlist.map((p) => p.label);
@@ -152,10 +152,10 @@ test.describe("M10", () => {
   test("c) the visualizer's pixels move with the music and stand still when it is paused", async ({ page }) => {
     const errors = await library(page, SHOWCASE, 40);
     await openAlbum(page, "Neon Rain");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
+    await press(page, "ArrowDown");
+    await press(page, "Enter");
     await waitFor(page, () => window.rvp.snapshot().state === "playing");
-    await page.keyboard.press("7");
+    await press(page, "7");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "visualizer");
     await waitFor(page, () => window.rvp.snapshot().viz.frames > 10);
     const region = async () => page.evaluate(() => window.rvp.sample(0, 100, 1280, 380, 8).join(","));
@@ -174,7 +174,7 @@ test.describe("M10", () => {
     }
     expect(new Set(moving).size).toBeGreaterThanOrEqual(5);
     // Pause, let the toast and the controls settle (the picture stops changing), then it must not change at all.
-    await page.keyboard.press("Space");
+    await press(page, "Space");
     await waitFor(page, () => window.rvp.snapshot().state === "paused");
     await page.mouse.move(640, 300);
     await settled(page, () => window.rvp.sample(0, 100, 1280, 380, 8).join(","), { n: 12, gap: 5, timeout: 30_000 });
@@ -185,12 +185,12 @@ test.describe("M10", () => {
     }
     expect(new Set(still).size).toBe(1);
     // Playing again moves it. Effects step with the arrow keys and all of them draw.
-    await page.keyboard.press("Space");
+    await press(page, "Space");
     await waitFor(page, () => window.rvp.snapshot().state === "playing");
     const names = new Set();
     for (let i = 0; i < 5; i++) {
       const before = (await snap(page)).viz.effect;
-      await page.keyboard.press("ArrowRight");
+      await press(page, "ArrowRight");
       await waitFor(page, (e) => window.rvp.snapshot().viz.effect !== e, before);
       await frames(page, 10);
       const s = await snap(page);
@@ -206,7 +206,7 @@ test.describe("M10", () => {
     }
     expect(names.size).toBe(5);
     // Escape leaves the visualizer for the now-playing screen.
-    await page.keyboard.press("Escape");
+    await press(page, "Escape");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "nowplaying");
     expect(errors).toEqual([]);
   });
@@ -214,7 +214,7 @@ test.describe("M10", () => {
   test("d) search, keyboard navigation and context menus work with the keyboard and with the mouse", async ({ page }) => {
     const errors = await library(page);
     // Search: / focuses the box, typing filters (accents and case do not matter), Escape goes back.
-    await page.keyboard.press("/");
+    await press(page, "/");
     await waitFor(page, () => window.rvp.snapshot().lib.typing);
     await page.keyboard.type("zoe perez");
     await waitFor(page, () => window.rvp.snapshot().lib.query === "zoe perez");
@@ -222,19 +222,19 @@ test.describe("M10", () => {
     expect(s.lib.view).toBe("search");
     expect(s.lib.ents.some((e) => e.kind === "artist" && e.label === "Zoë Pérez")).toBe(true);
     expect(s.lib.ents.some((e) => e.kind === "album" && e.label === "Corazón de Neón")).toBe(true);
-    await page.keyboard.press("Escape");
+    await press(page, "Escape");
     await waitFor(page, () => window.rvp.snapshot().lib.query === "" && window.rvp.snapshot().lib.view === "albums");
     // Keys that are shortcuts outside the box are text inside it, and shortcuts again after.
-    await page.keyboard.press("m");
+    await press(page, "m");
     await waitFor(page, () => window.rvp.snapshot().muted === true);
-    await page.keyboard.press("m");
+    await press(page, "m");
     // Tracks view: arrows select, the menu key opens the row's menu, "Add to queue" runs.
-    await page.keyboard.press("3");
+    await press(page, "3");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "tracks");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
+    await press(page, "ArrowDown");
+    await press(page, "ArrowDown");
     await waitFor(page, () => window.rvp.snapshot().lib.selected === 1);
-    await page.keyboard.press("ContextMenu");
+    await press(page, "ContextMenu");
     await waitFor(page, () => window.rvp.snapshot().menu_open);
     s = await snap(page);
     const labels = s.menu.map((m) => m.label);
@@ -252,20 +252,20 @@ test.describe("M10", () => {
     await page.mouse.click(...center(s.menu.find((m) => m.label === "Go to album").rect));
     await waitFor(page, () => window.rvp.snapshot().lib.detail && window.rvp.snapshot().lib.detail.kind === "album");
     // Back with Backspace; the mouse's back button does the same one step further.
-    await page.keyboard.press("Backspace");
+    await press(page, "Backspace");
     await waitFor(page, () => window.rvp.snapshot().lib.detail === null && window.rvp.snapshot().lib.view === "tracks");
     // The rail by mouse, the digits by keyboard.
     s = await snap(page);
     await page.mouse.click(...center(s.lib.rail.queue));
     await waitFor(page, () => window.rvp.snapshot().lib.view === "queue");
-    await page.keyboard.press("6");
+    await press(page, "6");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "nowplaying");
     // Tab walks the zones; Enter on the bar's button pauses.
-    await page.keyboard.press("Tab"); // rail
-    await page.keyboard.press("Tab"); // bar
-    await page.keyboard.press("ArrowRight");
-    await page.keyboard.press("ArrowRight");
-    await page.keyboard.press("Enter");
+    await press(page, "Tab"); // rail
+    await press(page, "Tab"); // bar
+    await press(page, "ArrowRight");
+    await press(page, "ArrowRight");
+    await press(page, "Enter");
     await waitFor(page, () => window.rvp.snapshot().state === "paused");
     expect(errors).toEqual([]);
   });
@@ -284,12 +284,12 @@ test.describe("M10", () => {
     await page.mouse.click(...center(s.menu.find((m) => m.label.startsWith("New playlist")).rect));
     await waitFor(page, () => window.rvp.snapshot().lib.typing);
     await page.keyboard.type("Chill mix");
-    await page.keyboard.press("Enter");
+    await press(page, "Enter");
     await waitFor(page, () => window.rvp.snapshot().lib.playlists === 1);
     s = await snap(page);
     expect(s.lib.playlist_list[0]).toMatchObject({ name: "Chill mix", tracks: 1, missing: 0 });
     // Add the whole album through the hero's menu path: the album card's context menu.
-    await page.keyboard.press("Backspace");
+    await press(page, "Backspace");
     await frames(page, 4);
     s = await snap(page);
     await page.mouse.click(...center(ent(s, "Lofi Sketches", "album").rect), { button: "right" });
@@ -301,7 +301,7 @@ test.describe("M10", () => {
     await page.mouse.click(...center(s.menu.find((m) => m.label === "Chill mix").rect));
     await waitFor(page, () => window.rvp.snapshot().lib.playlist_list[0].tracks === 12);
     // Open it from the Playlists view and export both formats.
-    await page.keyboard.press("4");
+    await press(page, "4");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "playlists");
     await frames(page, 4);
     s = await snap(page);
@@ -360,7 +360,7 @@ test.describe("M10", () => {
     await page.evaluate(() => window.rvp.flushStore());
     await page.reload();
     await waitFor(page, () => window.rvp && window.rvp.ready);
-    await page.keyboard.press("b");
+    await press(page, "b");
     await waitFor(page, () => window.rvp.snapshot().lib.tracks === 201 && window.rvp.snapshot().lib.albums === 20);
     // The covers come back from the store a moment after the albums do: wait until the picture stops changing.
     await settled(page, () => window.rvp.sample(0, 0, 1280, 720, 16).join(","), { n: 5, gap: 3, timeout: 30_000 });
@@ -397,7 +397,7 @@ test.describe("M10", () => {
       }
       window.showDirectoryPicker = async () => music;
     }, names.map((n) => [n, Array.from(fs.readFileSync(path.join(LIBRARY, "Aurora Vale/Daybreak", n)))]));
-    await page.keyboard.press("b");
+    await press(page, "b");
     await waitFor(page, () => window.rvp.snapshot().lib.mode === "library" && window.rvp.snapshot().lib.add_folder);
     // The add-folder button of the rail (a click is the user gesture the picker needs).
     let s = await snap(page);
@@ -407,13 +407,13 @@ test.describe("M10", () => {
     expect(s.lib.albums).toBe(1);
     expect(s.lib.roots[0]).toMatchObject({ id: "dir:opfs-music", name: "opfs-music", connected: true });
     // The folder's files play: the scan gave them ids the player can open.
-    await page.keyboard.press("1");
+    await press(page, "1");
     await waitFor(page, () => window.rvp.snapshot().lib.ents.length === 1);
     s = await snap(page);
     await page.mouse.click(...center(s.lib.ents[0].rect));
     await waitFor(page, () => window.rvp.snapshot().lib.detail !== null);
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
+    await press(page, "ArrowDown");
+    await press(page, "Enter");
     await waitFor(page, () => window.rvp.snapshot().state === "playing");
     expect((await snap(page)).now.album).toBe("Daybreak");
     expect(errors).toEqual([]);
@@ -432,10 +432,10 @@ test.describe("M10", () => {
     await waitFor(page, () => window.rvp.snapshot().lib.mode === "player");
     await waitFor(page, () => (window.rvp.snapshot().video || { presented: 0 }).presented > 5);
     // B: library face (the video keeps playing), B again: back to the picture.
-    await page.keyboard.press("b");
+    await press(page, "b");
     await waitFor(page, () => window.rvp.snapshot().lib.mode === "library");
     expect((await snap(page)).state).toBe("playing");
-    await page.keyboard.press("b");
+    await press(page, "b");
     await waitFor(page, () => window.rvp.snapshot().lib.mode === "player");
     // The same with the pointer: the button in the player's bar and the switch in the rail.
     s = await snap(page);
@@ -476,7 +476,7 @@ test.describe("M10", () => {
     await openAlbum(page, "Polar Nights");
     await page.mouse.move(1200, 700);
     await check("library-album.png");
-    await page.keyboard.press("3");
+    await press(page, "3");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "tracks");
     await page.mouse.move(1200, 700);
     await check("library-tracks.png");
@@ -489,10 +489,10 @@ test.describe("M10 with reduced motion", () => {
   test("j) the visualizer rests until it is asked for, and then runs calm", async ({ page }) => {
     const errors = await library(page, SHOWCASE, 40);
     await openAlbum(page, "Neon Rain");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
+    await press(page, "ArrowDown");
+    await press(page, "Enter");
     await waitFor(page, () => window.rvp.snapshot().state === "playing");
-    await page.keyboard.press("7");
+    await press(page, "7");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "visualizer");
     await frames(page, 30);
     let s = await snap(page);
@@ -504,7 +504,7 @@ test.describe("M10 with reduced motion", () => {
     await frames(page, 40);
     expect(await region()).toBe(a);
     // Enter turns it on; it moves, but gently: no frame differs from the one before it by much.
-    await page.keyboard.press("Enter");
+    await press(page, "Enter");
     await waitFor(page, () => window.rvp.snapshot().lib.viz_on === true);
     await waitFor(page, () => window.rvp.snapshot().viz.frames > 5);
     // The change since the previous call, measured inside the page: mean difference per colour channel.

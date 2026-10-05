@@ -17,7 +17,7 @@ const VP9_OPUS = path.join(FIXTURES, "vp9", "av_opus.webm"); // 6 s, 320x240, li
 const VP9_VORBIS = path.join(FIXTURES, "vp9_vorbis.webm"); // 6 s, 320x240, VP9 + Vorbis
 const VP9_RESIZE = path.join(FIXTURES, "vp9", "r_keyframe.webm"); // 1.5 s, 320x240 then 480x270 then 200x120, video only
 
-const { snap, waitFor, waitState, frames, ticks, settled, playedFor, rateAgainstDevice } = require("./helpers");
+const { snap, waitFor, waitState, frames, press, ticks, settled, playedFor, rateAgainstDevice } = require("./helpers");
 
 async function load(page, file = LONG, { play = true } = {}) {
   const errors = [];
@@ -270,13 +270,13 @@ test.describe("player", () => {
     await page.keyboard.press("Escape");
     expect((await snap(page)).menu_open).toBe(false);
     // Keyboard-only: the menu key, arrows and Enter.
-    await page.keyboard.press("ContextMenu");
+    await press(page, "ContextMenu");
     expect((await snap(page)).menu_open).toBe(true);
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowRight");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter"); // Seek > Forward 5 s
+    await press(page, "ArrowDown");
+    await press(page, "ArrowDown");
+    await press(page, "ArrowRight");
+    await press(page, "ArrowDown");
+    await press(page, "Enter"); // Seek > Forward 5 s
     const s2 = await snap(page);
     expect(s2.menu_open).toBe(false);
     expect(s2.position_us).toBeGreaterThan(4_900_000);
