@@ -9,10 +9,12 @@ extern crate std;
 pub mod audio;
 pub mod exec;
 pub mod listfile;
+pub mod measure;
 pub mod playlist;
 pub mod session;
 
-pub use audio::{AudioOut, TraceEntry};
+pub use audio::{AudioOut, LevelConfig, TraceEntry};
+pub use measure::{measure_source, measure_source_with};
 pub use playlist::{Item as PlaylistItem, Playlist, Repeat};
 pub use session::{
     EXTERNAL_TRACK_BASE, Session, SessionEvent, SessionState, SubtitleTrack, VideoStats, VideoTraceEntry,

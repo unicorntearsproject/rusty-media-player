@@ -4,7 +4,7 @@
 //! Threading model (docs/PLAN.md section 5): everything runs on the caller's thread. `Session::tick` polls the
 //! demux and decode tasks (cooperatively, within a time budget) and then does the synchronous output work:
 //! feed the audio sink, update the clock. Tasks never touch the host; they communicate through [`Shared`].
-use crate::audio::{AudioOut, TraceEntry};
+use crate::audio::{AudioOut, FadeStatus, LevelConfig, TraceEntry};
 use crate::exec::Executor;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
@@ -14,8 +14,8 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use rvp_core::task::yield_now;
 use rvp_core::{
-    AudioBuffer, AudioParams, ClockSource, CodecFactory, Error, MasterClock, Packet, StreamInfo, StreamKind,
-    Timestamp, VideoFrame,
+    AudioBuffer, AudioParams, AudioSettings, ClockSource, CodecFactory, Error, LevelMode, LoudnessTags,
+    MasterClock, Metadata, Packet, StreamInfo, StreamKind, Timestamp, VideoFrame,
 };
 use rvp_demux::{Demuxer, open};
 use rvp_host::{AudioSink, Host, Source, VideoSink};
@@ -56,8 +56,13 @@ const WANT_AUDIO: AudioParams = AudioParams { sample_rate: 48_000, channels: 2 }
 const TICK_US: i64 = 10_000;
 /// Wall-clock budget for the task polling part of a tick.
 const BUDGET_US: i64 = 8_000;
-/// The caller should queue the next item when this little of the current one is left, microseconds.
+/// The caller should queue the next item when this little of the current one is left, microseconds (plus the length of the
+/// crossfade, when there is one, so the next item is open and decoding before the fade has to start).
 const NEXT_LEAD_US: i64 = 12_000_000;
+/// A crossfade is never made shorter than this (a shorter one is a click, not a fade): such a join is gapless instead.
+const MIN_FADE_US: i64 = 250_000;
+/// A crossfade takes at most this share of the shorter of the two items, so a short track is not all fade.
+const FADE_MAX_SHARE: i64 = 3;
 
 /// Playback state of a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +223,67 @@ struct NextItem {
     exec: Executor,
     sh: Sh,
     tag: u32,
+    /// What the caller knows about the item's loudness (the library's measurement).
+    hint: Option<LoudnessTags>,
+}
+
+/// A crossfade in progress: both items' shared state (the first one's tasks are kept running after the switch of the
+/// current item in the middle of the fade, for the half of the fade that is still to come).
+struct FadeState {
+    a: Sh,
+    b: Sh,
+    old_exec: Option<Executor>,
+}
+
+/// True when two items are consecutive tracks of one album that is marked as gapless (the iTunes "gapless album" flag): they
+/// were made to run into each other and a crossfade would cut across the music. Tracks without numbers count as consecutive.
+fn same_gapless_album(a: &Metadata, b: &Metadata) -> bool {
+    let album = |m: &Metadata| m.album.as_deref().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
+    if !(a.gapless_album && b.gapless_album) || album(a).is_none() || album(a) != album(b) {
+        return false;
+    }
+    match (a.track, b.track) {
+        (Some(ta), Some(tb)) => {
+            let (da, db) = (a.disc.unwrap_or(1), b.disc.unwrap_or(1));
+            (da == db && tb == ta + 1) || (db == da + 1 && tb == 1)
+        }
+        _ => true,
+    }
+}
+
+/// The loudness of an item for the level mode: from its own tags first, then from what the caller knows (the library's
+/// measurement). The album's loudness, in album mode, and the track's when there is no album figure.
+fn known_loudness(mode: LevelMode, tags: &LoudnessTags, hint: Option<&LoudnessTags>) -> Option<f32> {
+    let track = tags.track_lufs.or(hint.and_then(|h| h.track_lufs));
+    match mode {
+        LevelMode::Track => track,
+        LevelMode::Album => tags.album_lufs.or(hint.and_then(|h| h.album_lufs)).or(track),
+    }
+}
+
+/// End of the item's playable audio, microseconds: the audio stream's length, else the container's.
+fn audio_end(s: &Shared) -> Option<Timestamp> {
+    s.sel_audio.as_ref().and_then(|a| a.duration_us).or(s.duration_us)
+}
+
+/// Take the next decoded audio buffer of an item, cut at the end of the track's playable length (an MP4 edit list cuts the
+/// encoder's padding).
+fn pop_audio(sh: &Sh) -> Option<AudioBuffer> {
+    loop {
+        let mut s = sh.borrow_mut();
+        let b = s.audio_dec.pop_front()?;
+        s.audio_dec_us -= buffer_us(&b);
+        let limit = s.sel_audio.as_ref().and_then(|a| a.duration_us);
+        drop(s);
+        match limit {
+            Some(l) => {
+                if let Some(b) = limit_end(b, l) {
+                    return Some(b);
+                }
+            }
+            None => return Some(b),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -670,6 +736,16 @@ pub struct Session {
     next: Option<NextItem>,
     /// The audio feed has moved on to the next item; the current one is only being heard out.
     feed_next: bool,
+    /// Crossfade and automatic level, as the user set them.
+    settings: AudioSettings,
+    /// What the caller knows about the loudness of the item being played.
+    hint: Option<LoudnessTags>,
+    /// The crossfade being mixed, if any.
+    fade: Option<FadeState>,
+    /// The loudness last given to the audio pipeline for the current item (`None`: nothing given yet).
+    known_cur: Option<Option<f32>>,
+    /// The level settings last given to the audio pipeline.
+    level_pushed: Option<LevelConfig>,
 }
 
 impl Session {
@@ -706,6 +782,11 @@ impl Session {
             item_no: 0,
             next: None,
             feed_next: false,
+            settings: AudioSettings::default(),
+            hint: None,
+            fade: None,
+            known_cur: None,
+            level_pushed: None,
             viz: None,
             viz_reset: false,
             viz_capture: false,
@@ -743,9 +824,52 @@ impl Session {
     /// item plays, and when the current item's audio ends the next one's follows without a gap. Replaces any
     /// item queued before.
     pub fn queue_next<S: Source + 'static>(&mut self, source: S, tag: u32) {
+        self.queue_next_with(source, tag, None);
+    }
+
+    /// [`Session::queue_next`] with what the caller knows about the item's loudness (the library's measurement), which is
+    /// used when the file's own tags have none.
+    pub fn queue_next_with<S: Source + 'static>(&mut self, source: S, tag: u32, hint: Option<LoudnessTags>) {
         let (exec, sh) = spawn_item(source, &self.codecs);
-        self.next = Some(NextItem { exec, sh, tag });
+        self.next = Some(NextItem { exec, sh, tag, hint });
         self.feed_next = false;
+    }
+
+    /// Set crossfade and automatic level. They take effect at once for the audio still to come.
+    pub fn set_audio_settings(&mut self, settings: AudioSettings) {
+        self.settings = settings.clamped();
+    }
+
+    /// The crossfade and level settings in force.
+    pub fn audio_settings(&self) -> AudioSettings {
+        self.settings
+    }
+
+    /// What the caller knows about the loudness of the item being played (the library's measurement); the file's own tags
+    /// come first.
+    pub fn set_loudness_hint(&mut self, hint: Option<LoudnessTags>) {
+        self.hint = hint;
+        self.known_cur = None;
+    }
+
+    /// The loudness the automatic level goes by for the item being played, LUFS, when its tags or the library say; `None` while
+    /// it is being estimated from the sound.
+    pub fn known_loudness(&self) -> Option<f32> {
+        let s = self.sh.borrow();
+        if !s.opened {
+            return None;
+        }
+        known_loudness(self.settings.level_mode, &s.meta.loudness, self.hint.as_ref())
+    }
+
+    /// The gain the automatic level applies now, dB (0 when it is off).
+    pub fn level_gain_db(&self) -> f32 {
+        self.audio.as_ref().map_or(0.0, |a| a.current_gain_db())
+    }
+
+    /// True while one item is being crossfaded into the next.
+    pub fn crossfading(&self) -> bool {
+        self.fade.is_some()
     }
 
     /// True if a next item is queued.
@@ -770,7 +894,9 @@ impl Session {
         if !s.opened {
             return false;
         }
-        let near_end = s.duration_us.is_some_and(|d| d - self.clock.now_stream(now_us).max(0) < NEXT_LEAD_US);
+        let lead = NEXT_LEAD_US
+            + if self.settings.crossfade { self.settings.crossfade_secs as i64 * 1_000_000 } else { 0 };
+        let near_end = s.duration_us.is_some_and(|d| d - self.clock.now_stream(now_us).max(0) < lead);
         near_end || s.demux_done
     }
 
@@ -1089,6 +1215,7 @@ impl Session {
             self.next = None;
             self.feed_next = false;
         }
+        self.fade = None;
         if let Some(a) = &mut self.audio {
             a.reset(target);
         }
@@ -1120,6 +1247,9 @@ impl Session {
             self.exec.poll_all();
             if let Some(n) = &mut self.next {
                 n.exec.poll_all();
+            }
+            if let Some(e) = self.fade.as_mut().and_then(|f| f.old_exec.as_mut()) {
+                e.poll_all();
             }
             let moved = self.sh.borrow().progress != before
                 || self.next.as_ref().map(|n| n.sh.borrow().progress) != next_before;
@@ -1154,6 +1284,7 @@ impl Session {
                     let mut out = AudioOut::new(p);
                     out.set_tap(host.visualizer().is_some());
                     out.set_rate(self.rate);
+                    self.level_pushed = None;
                     if self.trace {
                         out.enable_trace();
                     }
@@ -1176,51 +1307,8 @@ impl Session {
             }
         }
 
-        // 3. Feed the audio sink. Once the current item has handed over all its audio and the next one is ready,
-        // the feed moves on to the next item with no gap and no flush: that is gapless playback.
-        if self.audio.is_some() {
-            let handover = !self.feed_next
-                && !seeking
-                && self.next.as_ref().is_some_and(|n| {
-                    let cur = self.sh.borrow();
-                    let nx = n.sh.borrow();
-                    cur.audio_done && cur.audio_dec.is_empty() && nx.opened && nx.sel_audio.is_some()
-                });
-            if handover {
-                self.feed_next = true;
-                let item = self.item_no + 1;
-                if let Some(out) = &mut self.audio {
-                    out.begin_item(item);
-                }
-            }
-            let feed: Sh = match (&self.next, self.feed_next) {
-                (Some(n), true) => n.sh.clone(),
-                _ => self.sh.clone(),
-            };
-            if let Some(out) = &mut self.audio {
-                if !seeking {
-                    let want = (WANT_AUDIO.sample_rate / 5) as usize;
-                    while out.pending_frames() < want {
-                        let mut s = feed.borrow_mut();
-                        let Some(b) = s.audio_dec.pop_front() else { break };
-                        s.audio_dec_us -= buffer_us(&b);
-                        let limit = s.sel_audio.as_ref().and_then(|a| a.duration_us);
-                        drop(s);
-                        // The track's playable length (MP4 edit lists) cuts the encoder's end padding.
-                        let b = match limit {
-                            Some(l) => match limit_end(b, l) {
-                                Some(b) => b,
-                                None => continue,
-                            },
-                            None => b,
-                        };
-                        out.push(b);
-                    }
-                    out.drain(host.audio());
-                }
-                host.audio().set_volume(if self.muted { 0.0 } else { self.volume });
-            }
-        }
+        // 3. Feed the audio sink (see `feed_audio`).
+        self.feed_audio(host, seeking);
 
         // 4. Start playback once enough is buffered.
         if self.want_play && !self.running && !self.ended && opened && !seeking {
@@ -1451,12 +1539,184 @@ impl Session {
         }
     }
 
+    /// Feed the audio sink. Once the current item has handed over all its audio and the next one is ready, the feed moves on
+    /// to the next item with no gap and no flush: that is gapless playback. With crossfade on, the last seconds of the item and
+    /// the first of the next are mixed instead (see `fade_threshold`).
+    fn feed_audio<H: Host>(&mut self, host: &mut H, seeking: bool) {
+        let Some(mut out) = self.audio.take() else { return };
+        self.sync_level(&mut out);
+        let handover = !self.feed_next
+            && !seeking
+            && self.next.as_ref().is_some_and(|n| {
+                let cur = self.sh.borrow();
+                let nx = n.sh.borrow();
+                cur.audio_done && cur.audio_dec.is_empty() && nx.opened && nx.sel_audio.is_some()
+            });
+        if handover {
+            self.feed_next = true;
+            let item = self.item_no + 1;
+            let known = self.next.as_ref().and_then(|n| {
+                let nx = n.sh.borrow();
+                known_loudness(self.settings.level_mode, &nx.meta.loudness, n.hint.as_ref())
+            });
+            out.begin_item(item);
+            out.set_item_loudness(known);
+            self.known_cur = Some(known);
+        }
+        let want = (WANT_AUDIO.sample_rate / 5) as usize;
+        if !seeking {
+            let mut fade_possible = true;
+            loop {
+                if self.fade.is_some() {
+                    self.feed_fade(&mut out, want);
+                }
+                if self.fade.is_none() {
+                    let feed: Sh = match (&self.next, self.feed_next) {
+                        (Some(n), true) => n.sh.clone(),
+                        _ => self.sh.clone(),
+                    };
+                    // Feed until the audio pushed reaches the point where the fade is to begin.
+                    let due = if fade_possible { self.fade_threshold() } else { None };
+                    let mut reached = false;
+                    while out.pending_frames() < want {
+                        if due.is_some_and(|t| out.end_pts().is_some_and(|e| e >= t)) {
+                            reached = true;
+                            break;
+                        }
+                        let Some(b) = pop_audio(&feed) else { break };
+                        out.push(b);
+                    }
+                    if reached {
+                        fade_possible = self.start_fade(&mut out);
+                        continue;
+                    }
+                }
+                break;
+            }
+            out.drain(host.audio());
+        }
+        host.audio().set_volume(if self.muted { 0.0 } else { self.volume });
+        self.audio = Some(out);
+    }
+
+    /// Both items of a crossfade at once: keep each one's share of the mixer stocked and send the mixture on.
+    fn feed_fade(&mut self, out: &mut AudioOut, want: usize) {
+        let Some(fade) = &self.fade else { return };
+        let (a_sh, b_sh) = (fade.a.clone(), fade.b.clone());
+        let over = |sh: &Sh| {
+            let s = sh.borrow();
+            s.audio_done && s.audio_dec.is_empty()
+        };
+        while out.pending_frames() < want {
+            let (fa, fb) = out.fade_frames();
+            let mut moved = false;
+            if fa < want {
+                if let Some(b) = pop_audio(&a_sh) {
+                    out.push_fade_a(b);
+                    moved = true;
+                }
+            }
+            if fb < want {
+                if let Some(b) = pop_audio(&b_sh) {
+                    out.push_fade_b(b);
+                    moved = true;
+                }
+            }
+            let before = out.pending_frames();
+            if out.fade_mix(over(&a_sh), over(&b_sh)) == FadeStatus::Finished {
+                self.fade = None;
+                return;
+            }
+            if !moved && out.pending_frames() == before {
+                return;
+            }
+        }
+    }
+
+    /// Give the audio pipeline the level settings and the loudness of the item being fed, when they changed.
+    fn sync_level(&mut self, out: &mut AudioOut) {
+        let cfg =
+            LevelConfig { enabled: self.settings.auto_level, target_lufs: self.settings.target_lufs as f32 };
+        if self.level_pushed != Some(cfg) {
+            self.level_pushed = Some(cfg);
+            out.set_level(cfg);
+        }
+        if self.feed_next || self.fade.is_some() {
+            return; // the next item's loudness was given when the hand-over or the fade began
+        }
+        let known = {
+            let s = self.sh.borrow();
+            s.opened.then(|| known_loudness(self.settings.level_mode, &s.meta.loudness, self.hint.as_ref()))
+        };
+        if let Some(known) = known {
+            if self.known_cur != Some(known) {
+                self.known_cur = Some(known);
+                out.set_item_loudness(known);
+            }
+        }
+    }
+
+    /// Where (stream time of the audio fed, microseconds) the crossfade into the queued item is to begin, if there is to be
+    /// one: the settings ask for it, both items are plain audio that can be mixed (no picture on either side), they are not
+    /// consecutive tracks of a gapless album, and the fade is long enough to hear. The fade is as long as the setting,
+    /// shortened to a third of the shorter item; when that leaves less than a quarter of a second the join stays gapless.
+    fn fade_threshold(&self) -> Option<Timestamp> {
+        if !self.settings.crossfade || self.feed_next || self.fade.is_some() {
+            return None;
+        }
+        let n = self.next.as_ref()?;
+        let cur = self.sh.borrow();
+        let nx = n.sh.borrow();
+        if !cur.opened || !nx.opened || nx.sel_audio.is_none() || cur.sel_audio.is_none() {
+            return None;
+        }
+        let has_video = |s: &Shared| s.streams.iter().any(|i| i.kind == StreamKind::Video);
+        if has_video(&cur) || has_video(&nx) || same_gapless_album(&cur.meta, &nx.meta) {
+            return None;
+        }
+        let (d_a, d_b) = (audio_end(&cur)?, audio_end(&nx)?);
+        let want = self.settings.crossfade_secs as i64 * 1_000_000;
+        let len = want.min(d_a.min(d_b) / FADE_MAX_SHARE);
+        (len >= MIN_FADE_US).then_some(d_a - len)
+    }
+
+    /// Begin the crossfade into the queued item now (the audio fed has reached [`Session::fade_threshold`]). The fade runs to the
+    /// end of this item's audio, at most as long as planned. Returns false if it cannot be made (too little of this item is
+    /// left): the join is gapless then.
+    fn start_fade(&mut self, out: &mut AudioOut) -> bool {
+        let Some(th) = self.fade_threshold() else { return false };
+        let Some(n) = &self.next else { return false };
+        let d_a = audio_end(&self.sh.borrow()).unwrap_or(0);
+        let end = out.end_pts().unwrap_or(th);
+        let len = (d_a - end).min(self.settings.crossfade_secs as i64 * 1_000_000);
+        if len < MIN_FADE_US {
+            return false;
+        }
+        let known_b = known_loudness(self.settings.level_mode, &n.sh.borrow().meta.loudness, n.hint.as_ref());
+        let frames = (len * out.sink_params().sample_rate as i64 / 1_000_000) as u64;
+        out.begin_fade(frames, self.item_no + 1, known_b);
+        self.fade = Some(FadeState { a: self.sh.clone(), b: n.sh.clone(), old_exec: None });
+        self.feed_next = true;
+        self.known_cur = Some(known_b);
+        true
+    }
+
     /// Make the queued next item the current one. `heard` is the position its audio has reached when the switch
     /// happens during playback (gapless); `None` means the previous item ended and the new one starts from zero.
     fn promote(&mut self, now: Timestamp, heard: Option<Timestamp>) {
         let Some(n) = self.next.take() else { return };
-        self.exec = n.exec;
+        let old_exec = core::mem::replace(&mut self.exec, n.exec);
+        if heard.is_some() {
+            // In the middle of a crossfade the first item's tasks are still needed for the rest of it.
+            if let Some(f) = &mut self.fade {
+                f.old_exec = Some(old_exec);
+            }
+        }
         self.sh = n.sh;
+        self.hint = n.hint;
+        if heard.is_none() {
+            self.known_cur = None;
+        }
         self.tag = n.tag;
         self.item_no += 1;
         self.feed_next = false;

@@ -475,7 +475,7 @@ gen_library() {
 gen_levels() {
   local d="$out/levels"
   mkdir -p "$d/lib/quiet-loud" "$d/lib/tagged"
-  local version=3
+  local version=4
   [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
   # ffmpeg's reading of the whole file as `lavfi.r128.I=<LUFS>` and `lavfi.r128.true_peak=<linear>` lines (the last values the
   # filter reports, three decimals).
@@ -531,6 +531,20 @@ gen_levels() {
     n=$((n+1))
   done
   ff "${t[@]}" -c:a libmp3lame -b:a 128k "${rg[@]}" -metadata artist=Tagger -id3v2_version 4 "$d/lib/tagged/01.mp3"
+  # Crossfade: tones of known pitch in FLAC (the decode is exact), a short one and a tiny one, three tracks of an album flagged
+  # as gapless (the first two consecutive), and a video with sound.
+  tone() { local f=$1 hz=$2 amp=$3 dur=$4; shift 4
+    ff -f lavfi -i "aevalsrc=$amp*sin(2*PI*$hz*t)|$amp*sin(2*PI*$hz*t):s=48000:d=$dur" -c:a flac "$@" "$d/$f"; }
+  tone xf_a.flac 440 0.4 8
+  tone xf_b.flac 880 0.4 8
+  tone xf_c.flac 1320 0.4 8
+  tone xf_short.flac 600 0.4 1.5
+  tone xf_tiny.flac 700 0.4 0.6
+  tone gl_1.flac 440 0.4 6 -metadata album=Live -metadata track=1 -metadata ITUNPGAP=1
+  tone gl_2.flac 880 0.4 6 -metadata album=Live -metadata track=2 -metadata ITUNPGAP=1
+  tone gl_5.flac 1320 0.4 6 -metadata album=Live -metadata track=5 -metadata ITUNPGAP=1
+  ff -f lavfi -i "testsrc2=size=160x120:rate=25:duration=5" -f lavfi -i "sine=frequency=1000:sample_rate=48000:duration=5" \
+     -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 64k -shortest "$d/xf_video.mp4"
   echo "$version" > "$d/.done"
 }
 

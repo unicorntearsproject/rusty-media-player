@@ -95,6 +95,10 @@ pub struct PlayOptions {
     pub visualizer: bool,
     /// Files to play after the first one, joined gaplessly (each is queued when the session asks for the next).
     pub chain: Vec<String>,
+    /// Crossfade and automatic level (the defaults: both off).
+    pub audio_settings: rvp_core::AudioSettings,
+    /// What the library would know about the first item's loudness.
+    pub loudness_hint: Option<rvp_core::LoudnessTags>,
 }
 
 /// Result of a run.
@@ -128,6 +132,12 @@ pub struct PlayReport {
     pub duration_us: Option<Timestamp>,
     /// First error, if any.
     pub error: Option<Error>,
+    /// `(virtual host time, gain of the automatic level in dB)` about every 100 ms of playing.
+    pub gains: Vec<(Timestamp, f32)>,
+    /// `(virtual host time, playback position)` about every 50 ms of playing.
+    pub positions: Vec<(Timestamp, Timestamp)>,
+    /// True if a crossfade was being mixed at any time.
+    pub crossfaded: bool,
 }
 
 /// Play `path` headlessly to the end in virtual time.
@@ -150,7 +160,12 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         session.add_subtitle_source(FileSource::open(path)?, &name);
     }
     session.set_loop(opts.ab_loop);
+    session.set_audio_settings(opts.audio_settings);
+    session.set_loudness_hint(opts.loudness_hint);
     session.play();
+    let mut gains: Vec<(Timestamp, f32)> = Vec::new();
+    let mut positions: Vec<(Timestamp, Timestamp)> = Vec::new();
+    let mut crossfaded = false;
     let mut applied = false;
     let mut events = Vec::new();
     let mut chain = opts.chain.iter();
@@ -172,6 +187,15 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         while let Some(e) = session.poll_event() {
             events.push((now, e));
         }
+        if session.state() == SessionState::Playing {
+            if gains.last().is_none_or(|g| now - g.0 >= 100_000) {
+                gains.push((now, session.level_gain_db()));
+            }
+            if positions.last().is_none_or(|p| now - p.0 >= 50_000) {
+                positions.push((now, session.position_us(now)));
+            }
+        }
+        crossfaded |= session.crossfading();
         if session.wants_next(now) {
             if let Some(path) = chain.next() {
                 queued_tag += 1;
@@ -214,6 +238,9 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         subtitle_tracks: session.subtitle_tracks(),
         duration_us: session.duration_us(),
         error: session.error(),
+        gains,
+        positions,
+        crossfaded,
     })
 }
 
