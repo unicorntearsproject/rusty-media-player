@@ -141,6 +141,11 @@ impl Decoder {
         }
     }
 
+    /// The pictures currently held: `(poc, is_reference, waiting_for_output)`. For tests and debugging.
+    pub fn dpb_snapshot(&self) -> Vec<(i32, bool, bool)> {
+        self.dpb.iter().map(|p| (p.poc, p.is_ref(), p.needed_for_output)).collect()
+    }
+
     /// Diagnostic counters.
     pub fn stats(&self) -> Stats {
         self.stats
@@ -554,12 +559,11 @@ impl Decoder {
                 }
             }
         }
-        // Output.
+        // Output. Pictures that are no longer references and were already output free their slots.
         if h.idr || mmco5 {
             while self.bump() {}
-            // IDR: previous pictures are all output; references were cleared by the marking.
-            self.prune();
         }
+        self.prune();
         let dpb_size = sps.dpb_frames();
         if !pic.is_ref() {
             // A non-reference picture that would be output first goes out immediately when there is no room.

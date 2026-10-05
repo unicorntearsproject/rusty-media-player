@@ -36,7 +36,7 @@ use rvp_core::VideoCodec;
 pub const CODEC: VideoCodec = VideoCodec::H264;
 
 /// Highest implemented stage (see `docs/PLAN.md` M6); 0 means nothing yet.
-pub const STAGE: u8 = 2;
+pub const STAGE: u8 = 3;
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;

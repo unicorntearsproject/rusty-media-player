@@ -171,7 +171,7 @@ pub fn mc_chroma(
     h: usize,
     dst: &mut [u8],
 ) {
-    let inside = x >= 0 && y >= 0 && x + w as i32 + 1 <= pw && y + h as i32 + 1 <= ph;
+    let inside = x >= 0 && y >= 0 && x + (w as i32) < pw && y + (h as i32) < ph;
     let (a, b, c, d) = ((8 - fx) * (8 - fy), fx * (8 - fy), (8 - fx) * fy, fx * fy);
     if inside {
         for j in 0..h {
