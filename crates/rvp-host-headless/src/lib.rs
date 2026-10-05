@@ -139,6 +139,10 @@ impl NullAudio {
 
 impl AudioSink for NullAudio {
     fn open(&mut self, want: AudioParams) -> Result<AudioParams, HostError> {
+        // A new stream: nothing from an earlier one is left in the buffer (the drain is computed lazily, so the count of what
+        // an earlier stream left there can be stale).
+        self.queued = 0;
+        self.written = 0;
         self.params = Some(want);
         self.capacity_frames = want.sample_rate as u64; // one second of buffer
         self.last_update = self.clock.now_us();

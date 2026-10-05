@@ -66,7 +66,8 @@ pub trait Source {
 
 /// Audio output. Samples are interleaved `f32`.
 pub trait AudioSink {
-    /// Open the device. The host may return different parameters than requested; the player adapts.
+    /// Open the device (again, for the next item after one without sound): this starts a new stream and nothing from an earlier
+    /// one is left queued. The host may return different parameters than requested; the player adapts.
     fn open(&mut self, want: AudioParams) -> Result<AudioParams, HostError>;
     /// Frames written but not yet played.
     fn queued_frames(&self) -> usize;

@@ -1157,6 +1157,8 @@ impl Session {
                     if self.trace {
                         out.enable_trace();
                     }
+                    // A stream of its own: nothing an earlier item (or an earlier open) left in the device counts.
+                    host.audio().flush();
                     host.audio().set_paused(true);
                     self.audio = Some(out);
                     self.clock.set_source(ClockSource::Audio, now);
