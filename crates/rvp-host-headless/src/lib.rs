@@ -338,6 +338,9 @@ impl Host for HeadlessHost {
     fn library(&mut self) -> Option<&mut dyn Library> {
         self.library.as_mut().map(|l| l as &mut dyn Library)
     }
+    fn stable_ids(&self) -> bool {
+        true
+    }
 }
 
 /// A headless host for the full application ([`rvp_app::App`]): like [`HeadlessHost`], but the video sink keeps
@@ -362,6 +365,8 @@ pub struct UiHost {
     pub library: Option<ScriptedLibrary>,
     /// When set, the host offers a now-playing sink and records what it receives.
     pub now_playing: Option<RecordingNowPlaying>,
+    /// What [`Host::stable_ids`] answers (true: ids are file paths; false acts like a browser's session-bound ids).
+    pub stable: bool,
 }
 
 impl Default for UiHost {
@@ -385,6 +390,7 @@ impl UiHost {
             library: None,
             now_playing: None,
             presents: 0,
+            stable: true,
         }
     }
 
@@ -432,6 +438,9 @@ impl Host for UiHost {
     }
     fn library(&mut self) -> Option<&mut dyn Library> {
         self.library.as_mut().map(|l| l as &mut dyn Library)
+    }
+    fn stable_ids(&self) -> bool {
+        self.stable
     }
 }
 

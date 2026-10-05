@@ -12,7 +12,10 @@ extern crate alloc;
 extern crate std;
 
 mod library;
+mod restore;
 mod snapshot;
+
+pub use restore::{POSITION_KEY, QUEUE_KEY, SavedItem, SavedQueue};
 
 pub use snapshot::Snapshot;
 
@@ -114,6 +117,8 @@ pub struct App {
     lib: LibState,
     /// The library revision the frame on screen was drawn for.
     drawn_lib_rev: u64,
+    /// Restoring the queue after a restart, and keeping it saved.
+    restore: restore::RestoreState,
 }
 
 /// What was last told to the host's now-playing sink.
@@ -187,6 +192,7 @@ impl App {
             perf: Perf::default(),
             lib: LibState::new(),
             drawn_lib_rev: u64::MAX,
+            restore: restore::RestoreState::default(),
         }
     }
 
@@ -357,6 +363,10 @@ impl App {
     {
         use rvp_host::Source;
         let now = host.clock().now_us();
+        if !self.restore.starting {
+            self.restore.pending = None; // the user opened something: the saved queue is not wanted any more
+            self.restore.forced_pos = None;
+        }
         self.title = source.name().to_string();
         self.resume_key = Some(format!("resume:{}", self.title));
         self.resume_checked = !resume;
@@ -404,6 +414,8 @@ impl App {
     /// Persist what must survive a page reload (a host calls this before unloading).
     pub fn save_state<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
         self.save_resume(host, true);
+        let now = host.clock().now_us();
+        self.save_queue(host, now, true);
     }
 
     /// Once the file is open, jump to the position saved last time.
@@ -419,6 +431,14 @@ impl App {
             return;
         };
         self.resume_checked = true;
+        if let Some(pos) = self.restore.forced_pos.take() {
+            // The queue was restored: go back to where the last run stopped, whatever the length.
+            if pos >= RESUME_MIN_POSITION_US && pos + RESUME_MIN_REMAINING_US <= dur {
+                s.seek(pos);
+                self.ui.show_toast(&format!("Restored at {}", rvp_ui::format_time(pos)), now);
+            }
+            return;
+        }
         if !s.container_has_video() && dur < RESUME_MIN_AUDIO_US {
             return;
         }
@@ -681,7 +701,9 @@ impl App {
         self.check_resume(host, tn);
         self.run_playlist(host, tn);
         self.lib_tick(host, tn);
+        self.restore_tick(host, tn);
         self.save_resume(host, false);
+        self.save_queue(host, tn, false);
         let t1 = host.clock().now_us();
         self.now = t1;
         self.refresh_model(t1);

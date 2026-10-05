@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="night" cx="50%" cy="-8%" r="120%" fx="50%" fy="-8%">
+      <stop offset="0" stop-color="#2a0f4a"/><stop offset="0.45" stop-color="#120c1f"/><stop offset="1" stop-color="#07060d"/>
+    </radialGradient>
+    <linearGradient id="tears" x1="150" y1="130" x2="430" y2="382" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff2bd6"/><stop offset="0.52" stop-color="#9d4eff"/><stop offset="1" stop-color="#19e3ff"/>
+    </linearGradient>
+    <linearGradient id="bars" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#19e3ff"/><stop offset="1" stop-color="#9d4eff"/>
+    </linearGradient>
+    <radialGradient id="haze" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#9d4eff" stop-opacity="0.50"/><stop offset="1" stop-color="#9d4eff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="16"/></filter>
+    <filter id="glow-s" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#night)"/>
+  <ellipse cx="270" cy="270" rx="230" ry="190" fill="url(#haze)"/>
+  <path d="M396.60 256.00L302.24 199.73A65.52 65.52 0 1 0 302.24 312.27Z" fill="url(#tears)" stroke="url(#tears)" stroke-width="31.200000000000003" stroke-linejoin="round" filter="url(#glow)" opacity="0.65"/>
+  <g transform="translate(8 0) translate(256 256) scale(0.78) translate(-256 -256)">
+    <rect x="66" y="228.0" width="22" height="56" rx="11" fill="url(#bars)" opacity="0.55"/>
+    <rect x="102" y="204.0" width="22" height="104" rx="11" fill="url(#bars)" opacity="0.75"/>
+    <rect x="138" y="180.0" width="22" height="152" rx="11" fill="url(#bars)" opacity="0.95"/>
+  </g>
+  <path d="M396.60 256.00L302.24 199.73A65.52 65.52 0 1 0 302.24 312.27Z" fill="url(#tears)" stroke="url(#tears)" stroke-width="31.200000000000003" stroke-linejoin="round"/>
+  <ellipse cx="254.6" cy="229.5" rx="34.3" ry="17.2" transform="rotate(-28 254.6 229.5)" fill="url(#gloss)"/>
+</svg>

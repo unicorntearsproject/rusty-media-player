@@ -288,16 +288,17 @@ impl Library {
         Ok(())
     }
 
-    /// Pictures the tracks use that have no thumbnail in memory yet (to be loaded from storage).
+    /// Thumbnails to load from storage: the ones a view asked for that were dropped from memory, and, while the budget
+    /// has room, the other pictures the tracks use (so a small library is complete in memory after a few ticks).
     pub fn wanted_art(&self) -> Vec<ArtId> {
-        self.used_art().into_iter().filter(|a| !self.thumbs.contains_key(a)).collect()
+        self.thumbs.wanted(|| self.used_art().into_iter().collect())
     }
 
     /// Put a thumbnail loaded from storage in memory (without marking it unsaved).
     pub fn load_thumb(&mut self, id: ArtId, bytes: &[u8]) -> bool {
         match decode_thumb(bytes) {
             Some(t) => {
-                self.thumbs.insert(id, t);
+                self.thumbs.insert_loaded(id, t);
                 self.rev += 1;
                 true
             }

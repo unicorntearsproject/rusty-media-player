@@ -306,7 +306,7 @@ impl Library {
         if id == 0 {
             return 1;
         }
-        if self.thumbs.contains_key(&id) {
+        if self.thumbs.known(id) {
             return id;
         }
         match art::thumbnail(data) {
@@ -385,11 +385,9 @@ impl Library {
             self.dirty = true;
         }
         let used = self.used_art();
-        let unused: Vec<ArtId> = self.thumbs.keys().copied().filter(|k| !used.contains(k)).collect();
+        let unused: Vec<ArtId> = self.thumbs.ids().into_iter().filter(|k| !used.contains(k)).collect();
         for k in unused {
-            self.thumbs.remove(&k);
-            self.new_thumbs.remove(&k);
-            self.dropped_thumbs.push(k);
+            self.thumbs.remove(k);
         }
         self.rebuild();
     }
@@ -408,7 +406,7 @@ impl Library {
 
     /// Ids of pictures that were dropped since the last call (their saved copies can go).
     pub fn take_dropped_art(&mut self) -> Vec<ArtId> {
-        core::mem::take(&mut self.dropped_thumbs)
+        self.thumbs.take_dropped()
     }
 }
 

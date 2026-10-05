@@ -248,6 +248,19 @@ impl Ui {
         }
     }
 
+    /// Let the host find a system font for characters the bundled fonts do not have (CJK, Arabic, ...). It is asked
+    /// when such a character is first drawn, and its answer is kept.
+    pub fn set_font_loader(&mut self, loader: crate::font::FontLoader) {
+        self.fonts.set_loader(loader);
+        self.dirty = true;
+    }
+
+    /// Add a font file that backs up the bundled fonts. Returns false if it does not parse.
+    pub fn add_fallback_font(&mut self, bytes: &[u8], index: u32) -> bool {
+        self.dirty = true;
+        self.fonts.add_fallback(bytes, index)
+    }
+
     /// Surface size in physical pixels and the device pixel ratio.
     pub fn set_size(&mut self, w: u32, h: u32, dpr: f32) {
         if (self.w, self.h) != (w, h) || (self.scale - dpr).abs() > 1e-3 {

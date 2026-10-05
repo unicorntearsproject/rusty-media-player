@@ -157,4 +157,10 @@ pub trait Host {
     fn library(&mut self) -> Option<&mut dyn Library> {
         None
     }
+    /// True when the ids this host gives to [`OpenRequest::Id`] still open the same file after a restart (file paths).
+    /// The player then keeps them in the saved queue; a host whose ids belong to one session (a browser's stashed
+    /// `File` objects) keeps the default and only library tracks are restored, through the library's own listing.
+    fn stable_ids(&self) -> bool {
+        false
+    }
 }

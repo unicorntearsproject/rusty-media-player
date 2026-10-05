@@ -26,6 +26,7 @@ pub mod model;
 pub mod ui;
 
 pub use actions::{Action, MenuItem, SHORTCUTS, SPEEDS, Shortcut};
+pub use font::{FontData, FontLoader};
 pub use gfx::{FrameBuffer, Paint, RectF};
 pub use lib_ui::{Detail, Enqueue, LibAction, LibCtx, LibHit, LibUi, Mode, Scope, UiCommand, View};
 pub use model::{ChapterItem, MediaState, PlaylistEntry, TrackItem, UiModel, format_time};

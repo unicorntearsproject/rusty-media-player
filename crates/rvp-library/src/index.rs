@@ -76,11 +76,7 @@ pub struct Library {
     pub(crate) tracks: Vec<Track>,
     pub(crate) next_id: TrackId,
     pub(crate) folder_art: BTreeMap<(u16, String), FolderArt>,
-    pub(crate) thumbs: BTreeMap<ArtId, Thumb>,
-    /// Thumbnails not yet persisted.
-    pub(crate) new_thumbs: BTreeSet<ArtId>,
-    /// Thumbnails that were dropped since the caller last asked.
-    pub(crate) dropped_thumbs: Vec<ArtId>,
+    pub(crate) thumbs: crate::thumbs::ThumbCache,
     pub(crate) albums: Vec<Album>,
     pub(crate) artists: Vec<Artist>,
     album_ix: BTreeMap<u32, usize>,
@@ -159,15 +155,42 @@ impl Library {
     }
 
     /// The thumbnail of picture `art`.
+    ///
+    /// Thumbnails are kept in a cache with a byte budget ([`Library::set_thumb_budget`]): one that is not in memory returns
+    /// `None` and shows up in [`Library::wanted_art`] to be loaded again from storage.
     pub fn thumb(&self, art: ArtId) -> Option<&Thumb> {
-        self.thumbs.get(&art)
+        self.thumbs.get(art)
     }
 
     /// Keep a thumbnail (it will be saved with the next [`Library::take_unsaved_art`]).
     pub fn insert_thumb(&mut self, art: ArtId, thumb: Thumb) {
-        if self.thumbs.insert(art, thumb).is_none() {
-            self.new_thumbs.insert(art);
-        }
+        self.thumbs.insert_new(art, thumb);
+    }
+
+    /// How much memory the thumbnails may use, in bytes (0 for the default, 32 MiB). Least recently used ones are dropped
+    /// from memory first; they stay in storage and come back when a view asks for them.
+    pub fn set_thumb_budget(&mut self, bytes: usize) {
+        self.thumbs.set_budget(bytes);
+    }
+
+    /// Bytes of thumbnails in memory now.
+    pub fn thumb_bytes(&self) -> usize {
+        self.thumbs.resident_bytes()
+    }
+
+    /// Thumbnails in memory now.
+    pub fn thumbs_resident(&self) -> usize {
+        self.thumbs.len_resident()
+    }
+
+    /// Thumbnails dropped from memory to stay in budget since the library was created.
+    pub fn thumb_evictions(&self) -> u64 {
+        self.thumbs.evictions
+    }
+
+    /// True when thumbnails are over budget only because some are not saved yet: save them (the host can then drop them).
+    pub fn thumbs_need_save(&self) -> bool {
+        self.thumbs.needs_save()
     }
 
     /// Total length of everything shown, microseconds.
@@ -367,8 +390,7 @@ impl Library {
 
     /// Thumbnails that were added since the last call, as `(id, thumbnail)`, to be saved.
     pub fn take_unsaved_art(&mut self) -> Vec<(ArtId, Thumb)> {
-        let ids = core::mem::take(&mut self.new_thumbs);
-        ids.into_iter().filter_map(|id| self.thumbs.get(&id).map(|t| (id, t.clone()))).collect()
+        self.thumbs.take_unsaved()
     }
 
     /// True if the index changed since [`Library::save_index`] last ran.

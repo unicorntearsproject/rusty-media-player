@@ -106,6 +106,11 @@ impl App {
         &self.lib.lib
     }
 
+    /// How much memory the cover thumbnails may use (0: the default, 32 MiB); see [`Library::set_thumb_budget`].
+    pub fn set_thumb_budget(&mut self, bytes: usize) {
+        self.lib.lib.set_thumb_budget(bytes);
+    }
+
     /// The visualizer (its picture and state).
     pub fn viz(&self) -> &rvp_viz::Viz {
         &self.lib.viz
@@ -166,14 +171,19 @@ impl App {
         if self.lib.lib.index_dirty() {
             let bytes = self.lib.lib.save_index();
             rvp_core::task::block_on(host.storage().store(INDEX_KEY, &bytes));
-            for (id, th) in self.lib.lib.take_unsaved_art() {
-                rvp_core::task::block_on(host.storage().store(&art_key(id), &encode_thumb(&th)));
-            }
-            for id in self.lib.lib.take_dropped_art() {
-                rvp_core::task::block_on(host.storage().store(&art_key(id), &[]));
-            }
+            self.lib_save_art(host);
         }
         self.lib_save_playlists(host);
+    }
+
+    /// Save the thumbnails that are new, and delete the ones nothing uses any more.
+    fn lib_save_art<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
+        for (id, th) in self.lib.lib.take_unsaved_art() {
+            rvp_core::task::block_on(host.storage().store(&art_key(id), &encode_thumb(&th)));
+        }
+        for id in self.lib.lib.take_dropped_art() {
+            rvp_core::task::block_on(host.storage().store(&art_key(id), &[]));
+        }
     }
 
     fn lib_save_playlists<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
@@ -210,6 +220,10 @@ impl App {
             }
         }
         self.lib.scan_status = self.lib.scanner.status();
+        if self.lib.lib.thumbs_need_save() {
+            // A big scan: save the new covers now so they can leave memory.
+            self.lib_save_art(host);
+        }
         self.lib_load_art(host);
         self.lib_imports(host, now);
         self.refresh_now_meta(now);

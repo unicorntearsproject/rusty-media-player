@@ -19,6 +19,7 @@ mod persist;
 mod plist;
 mod scan;
 mod scanner;
+mod thumbs;
 
 pub use art::{Image, THUMB_SIDE, Thumb};
 pub use index::{Library, ScanReport, Search, TrackSort};
@@ -27,3 +28,4 @@ pub use persist::{INDEX_KEY, PLAYLISTS_KEY, art_key, decode_thumb, encode_thumb}
 pub use plist::{ListFormat, PlEntry, SavedPlaylist};
 pub use scan::{AUDIO_EXTENSIONS, ScanPlan, TrackTags, is_audio_name, read_all, read_tags};
 pub use scanner::{ScanEvent, ScanStatus, Scanner};
+pub use thumbs::DEFAULT_THUMB_BUDGET;
