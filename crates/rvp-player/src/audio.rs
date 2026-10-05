@@ -1067,7 +1067,7 @@ mod tests {
     #[test]
     fn crossfade_survives_the_first_item_ending_early() {
         // The first item has only 0.4 s of the 1 s fade: the rest is the second item alone, brought up to full in a few ms.
-        let (fade, a_len) = (48_000, 144_000);
+        let fade = 48_000;
         let mut out = AudioOut::new(AudioParams { sample_rate: 48_000, channels: 2 });
         out.reset(0);
         let mut sink = Sink { cap: 10_000_000, ..Default::default() };
@@ -1090,7 +1090,6 @@ mod tests {
         // No step anywhere: neighbouring samples of these tones never differ by much.
         let worst = sink.rec.windows(2).step_by(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
         assert!(worst < 0.2, "{worst}");
-        let _ = a_len;
         // The tail is the second item at full gain again.
         let n = sink.rec.len();
         assert_eq!(&sink.rec[n - 2000..], &b[2 * 60_000 - 2000..2 * 60_000]);

@@ -131,8 +131,22 @@ item opens *paused* at that position. With stable ids the file ids are saved too
 the library folder is listed again. Cover thumbnails are kept in memory under a byte budget (`App::set_thumb_budget`, default 32 MiB, least recently used
 first) and read back from `library/art/<id>` when a view needs one.
 
+## Audio settings (crossfade, automatic level)
+
+Nothing new is asked of a host. The app keeps the settings in `Storage` under `settings/audio` (a few `key=value` lines under a version line,
+`rvp_core::AudioSettings::to_text`; unknown keys and unparsable values are ignored, numbers are clamped), so a host only has to persist that key like the others (the browser's
+`localStorage`, the desktop's data directory). Two things a host can observe:
+
+- With **crossfade** on, the audio of two queue items overlaps in the stream the sink receives (it is the equal-power sum, one stream, no new `open`), and the
+  `NowPlaying` metadata changes in the middle of the fade, at the moment the second item is the louder of the two.
+- With **auto-level** on, the audio the `AudioSink` and the `VisualizerTap` get has had the loudness gain and the limiter applied (still before volume and mute), and
+  the limiter holds back up to about 3 ms of the newest audio unless `queued_frames` is nearly zero.
+
+The library index (`library/index`) is at format version 2: each track also carries its integrated loudness (from tags or measured) and the tags' album figure; version 1 loads without them.
+
 ## Changes
 
 - 2026-10-05: first version (M8).
 - 2026-10-05: `Library` capability, effects for folders and playlist files, storage keys (M10).
 - 2026-10-05: `Host::stable_ids`, the saved queue and position keys, the thumbnail budget (M11).
+- 2026-10-05: audio settings (crossfade, automatic level) under `settings/audio`; library index version 2 (loudness).

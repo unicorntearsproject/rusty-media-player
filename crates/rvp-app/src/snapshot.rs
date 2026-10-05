@@ -195,7 +195,7 @@ impl App {
         );
         let a = self.audio_settings();
         j += &format!(
-            "\"audio\":{{\"crossfade\":{},\"crossfade_secs\":{},\"auto_level\":{},\"target_lufs\":{},\"level_mode\":\"{}\",\"gain_db\":{},\"crossfading\":{}}},",
+            "\"audio\":{{\"crossfade\":{},\"crossfade_secs\":{},\"auto_level\":{},\"target_lufs\":{},\"level_mode\":\"{}\",\"gain_db\":{},\"crossfading\":{},\"library_measured\":{},\"library_unmeasured\":{}}},",
             a.crossfade,
             a.crossfade_secs,
             a.auto_level,
@@ -203,6 +203,8 @@ impl App {
             if a.level_mode == rvp_core::LevelMode::Album { "album" } else { "track" },
             m.level_gain_db.map_or("null".to_string(), |g| format!("{g:.2}")),
             self.session().is_some_and(|s| s.crossfading()),
+            self.library().all_tracks().iter().filter(|t| t.loudness.lufs.is_some()).count(),
+            self.library().pending_loudness().len(),
         );
         j += &match ui.audio_settings_open() {
             true => {

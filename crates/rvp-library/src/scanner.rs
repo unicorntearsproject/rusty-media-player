@@ -35,6 +35,8 @@ const ANALYSIS_SAVE_EVERY: usize = 25;
 
 type TagResult = (u16, FileEntry, Result<TrackTags, Error>);
 type ArtResult = (u16, String, Option<Vec<u8>>);
+/// A measured track: its id and its integrated loudness (`None`: nothing to measure).
+type Measured = (TrackId, Option<f32>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -96,7 +98,7 @@ pub struct Scanner {
     dirty_view: bool,
     codecs: Option<Rc<dyn CodecFactory>>,
     analysis: Option<Analysis>,
-    analysis_results: Rc<RefCell<Vec<(TrackId, Option<f32>)>>>,
+    analysis_results: Rc<RefCell<Vec<Measured>>>,
     analysis_alive: usize,
 }
 

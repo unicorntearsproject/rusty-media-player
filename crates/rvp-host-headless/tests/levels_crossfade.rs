@@ -297,3 +297,89 @@ fn the_visualizer_tap_sees_the_mixture() {
         .count();
     assert!(both > 10, "{both} of {} summaries show both tones in the middle of the fade", mid.len());
 }
+
+/// Drive a session by hand through a ten-second crossfade of A into B, and seek once the second item has become the current one (the
+/// first item's tasks are still being kept for the rest of the fade then): nothing may panic, hang or leak the old fade into what
+/// follows.
+#[test]
+fn a_seek_after_the_switch_in_the_middle_of_the_fade_is_clean_too() {
+    if skip() {
+        return;
+    }
+    use rvp_core::CodecFactory;
+    use rvp_host::HostClock;
+    use rvp_host_headless::{DefaultCodecs, FileSource, HeadlessHost};
+    use rvp_player::Session;
+    let mut host = HeadlessHost::new();
+    host.audio.capture = Some(Vec::new());
+    let clock = host.virtual_clock();
+    let codecs: std::rc::Rc<dyn CodecFactory> = std::rc::Rc::new(DefaultCodecs::default());
+    let mut session = Session::new(FileSource::open(&fixture("xf_long_a.flac")).unwrap(), codecs);
+    session.set_audio_settings(settings(Some(10)));
+    session.play();
+    let (mut queued, mut switched, mut sought) = (false, false, false);
+    for _ in 0..200_000 {
+        session.tick(&mut host);
+        let now = clock.now_us();
+        if !queued && session.wants_next(now) {
+            session.queue_next(FileSource::open(&fixture("xf_long_b.flac")).unwrap(), 1);
+            queued = true;
+        }
+        while let Some(e) = session.poll_event() {
+            if matches!(e, SessionEvent::ItemStarted { .. }) {
+                switched = true;
+            }
+        }
+        // Right after the switch, with the fade still being mixed: go back to the start of the second item.
+        if switched && !sought && session.crossfading() {
+            session.seek(300_000);
+            sought = true;
+            assert!(!session.crossfading(), "a seek ends the fade");
+        }
+        if session.state() == SessionState::Ended {
+            break;
+        }
+        clock.advance(10_000);
+    }
+    assert!(switched && sought, "the second item became current while the fade was still being mixed");
+    assert_eq!(session.state(), SessionState::Ended, "{:?}", session.error());
+    let audio = host.audio.capture.take().unwrap();
+    assert!(audio.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+    // After the seek the second item plays from 0.3 s to its end on its own: the last 5 s are its plain tone (no first item in it).
+    let b = alone("xf_long_b.flac");
+    let tail = 5 * 48_000 * 2;
+    assert!(audio[audio.len() - tail..] == b[b.len() - tail..], "the end of the second item is untouched");
+}
+
+#[test]
+fn a_long_fade_keeps_the_first_item_going_after_the_switch_in_the_middle() {
+    if skip() {
+        return;
+    }
+    // Ten seconds of fade between two 40 s tones: the second item becomes the current one five seconds into it, long before the mixing
+    // is done (the sink holds a second). The first item's decoding has to go on for the other five seconds, and the sum is exact
+    // all the way.
+    let (a, b) = (alone("xf_long_a.flac"), alone("xf_long_b.flac"));
+    let (a_len, b_len) = (a.len() / 2, b.len() / 2);
+    let r = play("xf_long_a.flac", &["xf_long_b.flac"], settings(Some(10)));
+    assert!(r.crossfaded);
+    let out = &r.audio;
+    let s0 = out.len() / 2 - b_len;
+    let n = a_len - s0;
+    assert!((470_000..=480_000).contains(&n), "a 10 s fade: {n} frames");
+    for k in (0..n).step_by(7) {
+        let t = (k as f32 + 0.5) / n as f32;
+        let (ga, gb) = rvp_core::dynamics::equal_power(t);
+        let want = a[(s0 + k) * 2] * ga + b[k * 2] * gb;
+        assert!(
+            (out[(s0 + k) * 2] - want).abs() < 2e-3,
+            "frame {k} of the fade: {} vs {want}",
+            out[(s0 + k) * 2]
+        );
+    }
+    // And the switch of item came in the middle of it: about five seconds before the first item's end.
+    let started = item_started_at(&r);
+    let plain = item_started_at(&play("xf_long_a.flac", &["xf_long_b.flac"], settings(None)));
+    let sooner = plain[0].0 - started[0].0;
+    assert!((4_700_000..5_300_000).contains(&sooner), "{sooner}");
+}

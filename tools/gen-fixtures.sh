@@ -475,7 +475,7 @@ gen_library() {
 gen_levels() {
   local d="$out/levels"
   mkdir -p "$d/lib/quiet-loud" "$d/lib/tagged"
-  local version=4
+  local version=6
   [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
   # ffmpeg's reading of the whole file as `lavfi.r128.I=<LUFS>` and `lavfi.r128.true_peak=<linear>` lines (the last values the
   # filter reports, three decimals).
@@ -521,6 +521,8 @@ gen_levels() {
   rm -f "$d/plain_for_tags.m4a"
   ff "${t[@]}" -c:a flac "${rg[@]}" "$d/tagged.mka"
   ff "${t[@]}" -c:a pcm_s16le "$d/untagged.wav"
+  # The same tags on a track long enough to change settings while it plays (the browser tests).
+  ff -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=40" -c:a flac "${rg[@]}" "$d/tagged_long.flac"
   # A small library: an album whose tracks sit 8 LU apart (no tags: the scan measures them), and one tagged track.
   local alb=(-metadata album="Quiet and Loud" -metadata artist="Levels")
   local n=1
@@ -540,6 +542,8 @@ gen_levels() {
   tone xf_c.flac 1320 0.4 8
   tone xf_short.flac 600 0.4 1.5
   tone xf_tiny.flac 700 0.4 0.6
+  tone xf_long_a.flac 440 0.4 40
+  tone xf_long_b.flac 880 0.4 40
   tone gl_1.flac 440 0.4 6 -metadata album=Live -metadata track=1 -metadata ITUNPGAP=1
   tone gl_2.flac 880 0.4 6 -metadata album=Live -metadata track=2 -metadata ITUNPGAP=1
   tone gl_5.flac 1320 0.4 6 -metadata album=Live -metadata track=5 -metadata ITUNPGAP=1

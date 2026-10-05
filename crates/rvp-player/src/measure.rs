@@ -9,8 +9,10 @@ use rvp_core::task::yield_now;
 use rvp_core::{CodecFactory, Error, LoudnessMeter, Measurement, StreamKind};
 use rvp_host::Source;
 
-/// Packets decoded between two turns given to the rest of the application.
-const YIELD_EVERY: usize = 24;
+/// Decoded frames after which the rest of the application gets a turn (about a third of a second of sound: a few milliseconds of
+/// work even in WebAssembly), and the same for packets that decode to nothing.
+const YIELD_FRAMES: usize = 16_384;
+const YIELD_PACKETS: usize = 64;
 
 /// Decode all of the first audio stream of `source` and measure its integrated loudness. `Ok(None)` if there is nothing audible
 /// in it (silence, or less than a gate block of sound).
@@ -38,12 +40,13 @@ pub async fn measure_source_with<S: Source>(
     let mut dec = codecs.audio(&info)?;
     let mut meter: Option<LoudnessMeter> = None;
     let mut packets = 0usize;
+    let mut since_yield = 0usize;
     while let Some(p) = demux.next_packet().await? {
         if p.stream_id != info.id {
             continue;
         }
         packets += 1;
-        if packets % YIELD_EVERY == 0 {
+        if packets % YIELD_PACKETS == 0 {
             yield_now().await;
         }
         // A packet that does not decode is skipped, as in playback.
@@ -61,6 +64,11 @@ pub async fn measure_source_with<S: Source>(
             });
             if buf.params.sample_rate == m.sample_rate() {
                 m.process(&mix(&buf.samples, buf.params.channels.max(1) as usize, 2));
+            }
+            since_yield += buf.samples.len() / buf.params.channels.max(1) as usize;
+            if since_yield >= YIELD_FRAMES {
+                since_yield = 0;
+                yield_now().await;
             }
         }
     }

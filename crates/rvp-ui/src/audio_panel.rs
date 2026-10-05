@@ -491,7 +491,7 @@ impl Ui {
         self.text(fb, Face::Mono, 12.0, x0, g.footer_cy, &shown, t::TEXT_DIM, 1.0, 0.0);
         let done = g.control(AudioControl::Done).1;
         let hot_done = hot(AudioControl::Done);
-        let d = if self.pressed_done() { done.scaled(0.97) } else { done };
+        let d = done;
         if hot_done || focus == Some(AudioControl::Done) {
             fb.glow_rrect(d, d.h * 0.5, 20.0 * s, t::MAGENTA_500, 0.5);
         }
@@ -515,10 +515,6 @@ impl Ui {
             };
             self.focus_ring(fb, r, radius, 1.0);
         }
-    }
-
-    fn pressed_done(&self) -> bool {
-        false
     }
 
     fn draw_switch(&mut self, fb: &mut FrameBuffer, r: RectF, on: bool, hot: bool) {

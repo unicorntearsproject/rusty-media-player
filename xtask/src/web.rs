@@ -287,6 +287,7 @@ pub fn e2e(args: &[String]) -> Result<(), String> {
         crate::fixtures(&[])?;
     }
     crate::fixture_set("audio")?;
+    crate::fixture_set("levels")?;
     let npm = |args: &[&str]| -> Result<(), String> {
         println!("+ (tests/e2e) {}", args.join(" "));
         let st = Command::new(args[0])

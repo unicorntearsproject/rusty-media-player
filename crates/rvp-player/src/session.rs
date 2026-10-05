@@ -1665,6 +1665,9 @@ impl Session {
             return None;
         }
         let n = self.next.as_ref()?;
+        if n.tag == self.tag {
+            return None; // repeat one: a track is not faded into itself
+        }
         let cur = self.sh.borrow();
         let nx = n.sh.borrow();
         if !cur.opened || !nx.opened || nx.sel_audio.is_none() || cur.sel_audio.is_none() {
@@ -1836,6 +1839,63 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn meta(album: &str, track: Option<u32>, disc: Option<u32>, gapless: bool) -> Metadata {
+        Metadata {
+            album: (!album.is_empty()).then(|| String::from(album)),
+            track,
+            disc,
+            gapless_album: gapless,
+            ..Metadata::default()
+        }
+    }
+
+    #[test]
+    fn gapless_albums_are_recognised_by_flag_album_and_adjacent_numbers() {
+        let a = |t| meta("Live", Some(t), None, true);
+        assert!(same_gapless_album(&a(1), &a(2)));
+        assert!(!same_gapless_album(&a(1), &a(3)), "not consecutive: a shuffled queue is faded");
+        assert!(!same_gapless_album(&a(2), &a(1)));
+        // The flag has to be on both, and the album the same (case and spaces do not matter).
+        assert!(!same_gapless_album(&a(1), &meta("Live", Some(2), None, false)));
+        assert!(!same_gapless_album(&a(1), &meta("Other", Some(2), None, true)));
+        assert!(same_gapless_album(&a(1), &meta(" live ", Some(2), None, true)));
+        assert!(
+            !same_gapless_album(&meta("", Some(1), None, true), &meta("", Some(2), None, true)),
+            "no album, no claim"
+        );
+        // A disc change counts as consecutive when the next disc starts at track 1; missing numbers are taken as consecutive.
+        assert!(same_gapless_album(&meta("L", Some(12), Some(1), true), &meta("L", Some(1), Some(2), true)));
+        assert!(!same_gapless_album(&meta("L", Some(12), Some(1), true), &meta("L", Some(2), Some(2), true)));
+        assert!(same_gapless_album(&meta("L", None, None, true), &meta("L", Some(7), None, true)));
+    }
+
+    #[test]
+    fn loudness_comes_from_tags_then_the_library_and_the_mode_picks_track_or_album() {
+        let tags = LoudnessTags { track_lufs: Some(-10.0), album_lufs: Some(-12.0), ..Default::default() };
+        let hint = LoudnessTags { track_lufs: Some(-20.0), album_lufs: Some(-22.0), ..Default::default() };
+        let none = LoudnessTags::default();
+        assert_eq!(
+            known_loudness(LevelMode::Track, &tags, Some(&hint)),
+            Some(-10.0),
+            "the file's tags first"
+        );
+        assert_eq!(known_loudness(LevelMode::Album, &tags, Some(&hint)), Some(-12.0));
+        assert_eq!(known_loudness(LevelMode::Track, &none, Some(&hint)), Some(-20.0), "then the library");
+        assert_eq!(known_loudness(LevelMode::Album, &none, Some(&hint)), Some(-22.0));
+        let track_only = LoudnessTags { track_lufs: Some(-9.0), ..Default::default() };
+        assert_eq!(
+            known_loudness(LevelMode::Album, &track_only, None),
+            Some(-9.0),
+            "no album figure: the track's own"
+        );
+        assert_eq!(
+            known_loudness(LevelMode::Track, &none, None),
+            None,
+            "nothing known: estimate while playing"
+        );
+        assert_eq!(known_loudness(LevelMode::Album, &none, None), None);
+    }
 
     #[test]
     fn state_machine_without_a_file_reports_failure() {

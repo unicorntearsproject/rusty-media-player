@@ -1987,6 +1987,7 @@ dependencies = [
 name = "rvp-player"
 version = "0.0.1"
 dependencies = [
+ "libm",
  "rvp-core",
  "rvp-demux",
  "rvp-host",
