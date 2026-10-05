@@ -17,10 +17,7 @@ const VP9_OPUS = path.join(FIXTURES, "vp9", "av_opus.webm"); // 6 s, 320x240, li
 const VP9_VORBIS = path.join(FIXTURES, "vp9_vorbis.webm"); // 6 s, 320x240, VP9 + Vorbis
 const VP9_RESIZE = path.join(FIXTURES, "vp9", "r_keyframe.webm"); // 1.5 s, 320x240 then 480x270 then 200x120, video only
 
-const snap = (page) => page.evaluate(() => window.rvp.snapshot());
-const waitFor = (page, fn, arg, timeout) =>
-  page.waitForFunction(fn, arg, { timeout: timeout || 15_000, polling: 50 });
-const waitState = (page, state) => waitFor(page, (s) => window.rvp.snapshot().state === s, state);
+const { snap, waitFor, waitState, frames, ticks, settled, playedFor, rateAgainstDevice } = require("./helpers");
 
 async function load(page, file = LONG, { play = true } = {}) {
   const errors = [];
@@ -54,6 +51,17 @@ const diff = (a, b, thr = 12) => {
   return n / (a.length / 3);
 };
 
+/** Wait until the picture differs from `before` by more than `min` of the sampled pixels; resolves with the new samples. */
+async function pictureChange(page, before, min = 0.01, timeout = 30_000) {
+  const t0 = Date.now();
+  for (;;) {
+    const now = await picture(page);
+    if (diff(before, now) > min) return now;
+    if (Date.now() - t0 > timeout) return now;
+    await frames(page, 3);
+  }
+}
+
 const spread = (a) => {
   let lo = 255, hi = 0;
   for (let i = 0; i < a.length; i += 3) { lo = Math.min(lo, a[i + 1]); hi = Math.max(hi, a[i + 1]); }
@@ -74,8 +82,7 @@ test.describe("player", () => {
     // (a) canvas pixels at the video rect change over 2 s.
     const before = await picture(page);
     expect(spread(before)).toBeGreaterThan(40); // it is a picture, not a flat colour
-    await page.waitForTimeout(2000);
-    const after = await picture(page);
+    const after = await pictureChange(page, before);
     const changed = diff(before, after);
     expect(changed, `only ${(changed * 100).toFixed(1)}% of the sampled pixels changed in 2 s`).toBeGreaterThan(0.01);
 
@@ -83,29 +90,20 @@ test.describe("player", () => {
     const a1 = await page.evaluate(() => window.rvp.audio());
     expect(a1.mode).toBe("worklet");
     expect(a1.state).toBe("running");
-    await page.waitForTimeout(500);
-    const a2 = await page.evaluate(() => window.rvp.audio());
-    expect(a2.played).toBeGreaterThan(a1.played + 10_000);
+    await waitFor(page, (n) => window.rvp.audio().played > n, a1.played + 10_000);
 
-    // (b) Snapshot.position advances at 1x +- 5%.
-    const run = await page.evaluate(async () => {
-      const p0 = window.rvp.snapshot().position_us;
-      const t0 = performance.now();
-      await new Promise((r) => setTimeout(r, 3000));
-      const p1 = window.rvp.snapshot().position_us;
-      return { dp: (p1 - p0) / 1000, dt: performance.now() - t0 };
-    });
-    const ratio = run.dp / run.dt;
-    expect(ratio, `position moved ${run.dp.toFixed(0)} ms in ${run.dt.toFixed(0)} ms`).toBeGreaterThan(0.95);
-    expect(ratio).toBeLessThan(1.05);
+    // (b) The position advances at 1x +- 5% of the audio device's own clock.
+    const run = await rateAgainstDevice(page, 3_000_000);
+    expect(run.ratio, `position moved ${(run.moved / 1000).toFixed(0)} ms in ${(run.device / 1000).toFixed(0)} ms of device time`).toBeGreaterThan(0.95);
+    expect(run.ratio).toBeLessThan(1.05);
 
     // (c) Space pauses: position frozen, the last frame stays on screen.
     await page.keyboard.press("Space");
     await waitState(page, "paused");
-    await page.waitForTimeout(300);
+    await ticks(page, 20);
     const p1 = (await snap(page)).position_us;
     const frozen1 = await picture(page);
-    await page.waitForTimeout(800);
+    await ticks(page, 50);
     const p2 = (await snap(page)).position_us;
     const frozen2 = await picture(page);
     expect(p2).toBe(p1);
@@ -120,19 +118,14 @@ test.describe("player", () => {
     const landed = (await snap(page)).position_us / 1e6;
     expect(Math.abs(landed - target)).toBeLessThan(1);
     // ... and the preview picture follows the seek.
-    let seekedDiff = 0;
-    for (let i = 0; i < 50 && seekedDiff <= 0.01; i++) {
-      await page.waitForTimeout(100);
-      seekedDiff = diff(frozen2, await picture(page));
-    }
+    const seekedDiff = diff(frozen2, await pictureChange(page, frozen2));
     expect(seekedDiff, "the picture shows the new position").toBeGreaterThan(0.01);
     // Playing resumes from there.
     await page.keyboard.press("Space");
     await waitState(page, "playing");
-    await page.waitForTimeout(1500);
-    const resumed = (await snap(page)).position_us / 1e6;
+    const resumed = (await playedFor(page, 1_000_000)) / 1e6;
     expect(resumed).toBeGreaterThan(landed + 0.8);
-    expect(resumed).toBeLessThan(landed + 3);
+    expect(resumed).toBeLessThan(landed + 6);
     expect(errors).toEqual([]);
   });
 
@@ -150,17 +143,11 @@ test.describe("player", () => {
       expect(s0.error).toBeFalsy();
       const before = await picture(page);
       expect(spread(before)).toBeGreaterThan(40);
-      await page.waitForTimeout(1200);
-      const after = await picture(page);
+      const after = await pictureChange(page, before);
       expect(diff(before, after), "the picture changes while playing").toBeGreaterThan(0.01);
-      const run = await page.evaluate(async () => {
-        const p0 = window.rvp.snapshot().position_us;
-        const t0 = performance.now();
-        await new Promise((r) => setTimeout(r, 2000));
-        return { dp: (window.rvp.snapshot().position_us - p0) / 1000, dt: performance.now() - t0 };
-      });
-      expect(run.dp / run.dt, `position moved ${run.dp.toFixed(0)} ms in ${run.dt.toFixed(0)} ms`).toBeGreaterThan(0.95);
-      expect(run.dp / run.dt).toBeLessThan(1.05);
+      const run = await rateAgainstDevice(page, 2_000_000);
+      expect(run.ratio, `position moved ${(run.moved / 1000).toFixed(0)} ms in ${(run.device / 1000).toFixed(0)} ms of device time`).toBeGreaterThan(0.95);
+      expect(run.ratio).toBeLessThan(1.05);
       // Pause, seek to the middle and make sure the frame there decodes (reference chains restart cleanly).
       await page.keyboard.press("Space");
       await waitState(page, "paused");
@@ -169,11 +156,7 @@ test.describe("player", () => {
       const s = await snap(page);
       await page.mouse.click(s.seek.x + s.seek.w * 0.7, s.seek.y + 2);
       await waitFor(page, (t) => Math.abs(window.rvp.snapshot().position_us / 1e6 - t) < 1, 0.7 * (s.duration_us / 1e6));
-      let moved = 0;
-      for (let i = 0; i < 50 && moved <= 0.01; i++) {
-        await page.waitForTimeout(100);
-        moved = diff(held, await picture(page));
-      }
+      const moved = diff(held, await pictureChange(page, held));
       expect(moved, "the picture shows the new position").toBeGreaterThan(0.01);
       expect(errors).toEqual([]);
     });
@@ -306,16 +289,10 @@ test.describe("player", () => {
     await page.keyboard.press("]"); // 2
     expect((await snap(page)).rate).toBe(2);
     await waitState(page, "playing");
-    await page.waitForTimeout(1000);
-    const run = await page.evaluate(async () => {
-      const p0 = window.rvp.snapshot().position_us;
-      const t0 = performance.now();
-      await new Promise((r) => setTimeout(r, 2500));
-      const p1 = window.rvp.snapshot().position_us;
-      return { dp: (p1 - p0) / 1000, dt: performance.now() - t0 };
-    });
-    expect(run.dp / run.dt).toBeGreaterThan(1.85);
-    expect(run.dp / run.dt).toBeLessThan(2.15);
+    await playedFor(page, 2_000_000); // the time stretcher has warmed up
+    const run = await rateAgainstDevice(page, 5_000_000);
+    expect(run.ratio, `position moved ${(run.moved / 1000).toFixed(0)} ms in ${(run.device / 1000).toFixed(0)} ms of device time`).toBeGreaterThan(1.85);
+    expect(run.ratio).toBeLessThan(2.15);
     await page.keyboard.press("\\");
     expect((await snap(page)).rate).toBe(1);
   });
@@ -332,7 +309,7 @@ test.describe("player", () => {
       window.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt, bubbles: true, cancelable: true }));
     }, b64);
     // While a file hovers, the empty screen invites the drop.
-    await page.waitForTimeout(100);
+    await frames(page, 3);
     await page.evaluate(async (b64) => {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const dt = new DataTransfer();
@@ -428,7 +405,8 @@ test.describe("player", () => {
     await page.mouse.move(600, 300);
     await page.mouse.move(640, 320);
     expect((await snap(page)).controls_visible).toBe(true);
-    await page.waitForTimeout(3600); // 2.5 s idle plus the fade
+    await waitFor(page, () => window.rvp.snapshot().controls_visible === false, null, 20_000); // 2.5 s idle plus the fade
+    await waitFor(page, () => window.rvp.snapshot().controls_opacity === 0);
     const hidden = await snap(page);
     expect(hidden.controls_visible).toBe(false);
     expect(await page.evaluate(() => document.getElementById("screen").style.cursor)).toBe("none");
@@ -437,6 +415,7 @@ test.describe("player", () => {
     // Paused controls stay.
     await page.keyboard.press("Space");
     await waitState(page, "paused");
+    // Longer than the idle time: real time is what this is about (it can only be longer on a busy machine).
     await page.waitForTimeout(3600);
     expect((await snap(page)).controls_visible).toBe(true);
   });
@@ -445,13 +424,22 @@ test.describe("player", () => {
     const ctx = await browser.newContext({ reducedMotion: "reduce", viewport: { width: 1280, height: 720 } });
     const page = await ctx.newPage();
     await load(page);
-    const seen = new Set();
-    for (let i = 0; i < 70; i++) {
-      seen.add((await snap(page)).controls_opacity);
-      await page.waitForTimeout(60);
-    }
-    // Opacity only ever takes its two end values.
-    expect([...seen].sort()).toEqual([0, 1]);
+    // Record the opacity on every frame until the controls are gone: it only ever takes its two end values (on a slow machine they
+    // may already have gone when the recording starts, so the other end is not required to be seen).
+    await page.evaluate(() => {
+      window.__opacities = new Set();
+      const look = () => {
+        window.__opacities.add(window.rvp.snapshot().controls_opacity);
+        requestAnimationFrame(look);
+      };
+      look();
+    });
+    await waitFor(page, () => window.rvp.snapshot().controls_opacity === 0, null, 20_000);
+    await frames(page, 10);
+    const seen = await page.evaluate(() => [...window.__opacities]);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((v) => v !== 0 && v !== 1), "no value between the two ends").toEqual([]);
+    expect(seen).toContain(0);
     await ctx.close();
   });
 
@@ -462,9 +450,16 @@ test.describe("player", () => {
     await page.mouse.click(s.seek.x + s.seek.w * 0.25, s.seek.y + 2);
     await waitFor(page, () => Math.abs(window.rvp.snapshot().position_us / 1e6 - 15) < 0.1);
     await page.mouse.move(640, 250);
-    await page.waitForTimeout(900); // the picture for the new position, hover and tooltip timers settled
+    // The picture for the new position is there and nothing moves any more (hover and tooltip timers, the fade of the controls).
     await waitFor(page, () => window.rvp.snapshot().video.presented > 0 && window.rvp.snapshot().state === "paused");
-    await page.waitForTimeout(500);
+    await settled(
+      page,
+      () => {
+        const q = window.rvp.snapshot();
+        return [q.position_us, q.video.presented, q.controls_opacity, q.menu_open];
+      },
+      { n: 8, gap: 3 },
+    );
     const png = await page.evaluate(() => window.rvp.png());
     if (process.env.UPDATE_GOLDEN || !fs.existsSync(GOLDEN)) {
       fs.mkdirSync(path.dirname(GOLDEN), { recursive: true });
@@ -486,7 +481,7 @@ test.describe("crash recovery", () => {
       page.on("console", (m) => m.type() === "error" && logs.push(m.text()));
       page.on("pageerror", (e) => logs.push(String(e)));
       await load(page, H264_AAC);
-      await page.waitForTimeout(1500);
+      await playedFor(page, 1_000_000);
       expect(await page.evaluate(() => window.rvp.recoveries())).toBe(0);
       await page.evaluate((w) => window.rvp.debugCrash(w), what);
       // The page throws the damaged instance away, starts a new one and opens the file again.
@@ -494,8 +489,7 @@ test.describe("crash recovery", () => {
       await waitState(page, "playing");
       await waitFor(page, () => (window.rvp.snapshot().video || { presented: 0 }).presented > 3, null, 30_000);
       const before = await picture(page);
-      await page.waitForTimeout(800);
-      expect(diff(before, await picture(page)), "the picture moves again").toBeGreaterThan(0.005);
+      expect(diff(before, await pictureChange(page, before, 0.005)), "the picture moves again").toBeGreaterThan(0.005);
       expect(logs.some((l) => /crash|panick|unreachable/i.test(l)), "the crash was reported").toBe(true);
     });
   }

@@ -167,6 +167,7 @@ export class RvpAudio {
   debug() {
     return {
       mode: this.mode, state: this.ctx ? this.ctx.state : "none", sampleRate: this.sampleRate(),
+      time: this.ctx ? this.ctx.currentTime : 0,
       played: this.played(), latency: this.latency(), paused: this.paused, volume: this.volume,
     };
   }

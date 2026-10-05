@@ -13,8 +13,8 @@ const SHOWCASE = path.join(FIXTURES, "showcase/music");
 const VIDEO = path.join(FIXTURES, "av1_opus.webm");
 const GOLDEN_DIR = path.join(__dirname, "golden");
 
-const snap = (page) => page.evaluate(() => window.rvp.snapshot());
-const waitFor = (page, fn, arg, timeout) => page.waitForFunction(fn, arg, { timeout: timeout || 20_000, polling: 30 });
+const { snap, waitFor: waitForAt, frames, settled } = require("./helpers");
+const waitFor = (page, fn, arg, timeout) => waitForAt(page, fn, arg, timeout, 30);
 const center = (r) => [r.x + r.w / 2, r.y + r.h / 2];
 
 async function boot(page) {
@@ -33,7 +33,7 @@ async function addFolder(page, dir, tracks) {
     const l = window.rvp.snapshot().lib;
     return l.tracks >= n && !l.scan;
   }, tracks, 60_000);
-  await page.waitForTimeout(300);
+  await frames(page, 6);
 }
 
 async function library(page, dir = LIBRARY, tracks = 201) {
@@ -51,7 +51,7 @@ async function openAlbum(page, title) {
   if (s.lib.view !== "albums" || s.lib.detail) {
     await page.keyboard.press("1");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "albums" && !window.rvp.snapshot().lib.detail);
-    await page.waitForTimeout(100);
+    await frames(page, 3);
   }
   // The grid scrolls: look for the card, scrolling down until it is on screen.
   for (let i = 0; i < 12; i++) {
@@ -60,12 +60,12 @@ async function openAlbum(page, title) {
     if (e) {
       await page.mouse.click(...center(e.rect));
       await waitFor(page, () => window.rvp.snapshot().lib.detail !== null);
-      await page.waitForTimeout(150);
+      await frames(page, 4);
       return;
     }
     await page.mouse.move(s.lib.body.x + 300, s.lib.body.y + 300);
     await page.mouse.wheel(0, 360);
-    await page.waitForTimeout(80);
+    await frames(page, 3);
   }
   throw new Error(`album ${title} not found`);
 }
@@ -86,7 +86,7 @@ test.describe("M10", () => {
       for (const e of s.lib.ents) if (e.kind === "album" && !titles.includes(e.label)) titles.push(e.label);
       await page.mouse.move(s.lib.body.x + 300, s.lib.body.y + 300);
       await page.mouse.wheel(0, 300);
-      await page.waitForTimeout(40);
+      await frames(page, 2);
     }
     for (const want of ["Polar Nights", "Corazón de Neón", "İstanbul Gecesi", "Neon Mixtape Vol. 1", "Road Trip Rips", "夜のドライブ", "Тишина", "Unknown Album"]) {
       expect(titles, want).toContain(want);
@@ -95,14 +95,14 @@ test.describe("M10", () => {
     // Artists.
     await page.keyboard.press("2");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "artists");
-    await page.waitForTimeout(150);
+    await frames(page, 4);
     s = await snap(page);
     expect(s.lib.ents[0].label).toBe("A Tribe of Pines");
     expect(s.lib.ent_count).toBe(16);
     // Tracks: sorted by title, a click on a column head sorts by it, and again reverses it.
     await page.keyboard.press("3");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "tracks");
-    await page.waitForTimeout(150);
+    await frames(page, 4);
     s = await snap(page);
     expect(s.lib.ent_count).toBe(201);
     const first = s.lib.ents[0].label;
@@ -139,7 +139,7 @@ test.describe("M10", () => {
         if (ms) expect(ms.al).toBe("Daybreak");
       }
       if (s.state === "ended" || seen.length === 10) break;
-      await page.waitForTimeout(20);
+      await frames(page, 2);
     }
     // The queue is the whole album and starts at the row that was selected (the first one).
     expect(seen.length).toBeGreaterThanOrEqual(9);
@@ -161,8 +161,8 @@ test.describe("M10", () => {
     const region = async () => page.evaluate(() => window.rvp.sample(0, 100, 1280, 380, 8).join(","));
     // The first moments are silent (the audio has not reached the speakers yet): wait until the picture starts to move.
     let last = await region();
-    for (let i = 0; i < 60; i++) {
-      await page.waitForTimeout(100);
+    for (let i = 0; i < 400; i++) {
+      await frames(page, 6);
       const now = await region();
       if (now !== last) break;
       last = now;
@@ -170,18 +170,18 @@ test.describe("M10", () => {
     const moving = [];
     for (let i = 0; i < 6; i++) {
       moving.push(await region());
-      await page.waitForTimeout(160);
+      await frames(page, 10);
     }
     expect(new Set(moving).size).toBeGreaterThanOrEqual(5);
-    // Pause, let the toast and the controls settle, then it must not change at all.
+    // Pause, let the toast and the controls settle (the picture stops changing), then it must not change at all.
     await page.keyboard.press("Space");
     await waitFor(page, () => window.rvp.snapshot().state === "paused");
     await page.mouse.move(640, 300);
-    await page.waitForTimeout(2800);
+    await settled(page, () => window.rvp.sample(0, 100, 1280, 380, 8).join(","), { n: 12, gap: 5, timeout: 30_000 });
     const still = [];
     for (let i = 0; i < 6; i++) {
       still.push(await region());
-      await page.waitForTimeout(200);
+      await frames(page, 12);
     }
     expect(new Set(still).size).toBe(1);
     // Playing again moves it. Effects step with the arrow keys and all of them draw.
@@ -189,13 +189,20 @@ test.describe("M10", () => {
     await waitFor(page, () => window.rvp.snapshot().state === "playing");
     const names = new Set();
     for (let i = 0; i < 5; i++) {
+      const before = (await snap(page)).viz.effect;
       await page.keyboard.press("ArrowRight");
-      await page.waitForTimeout(500);
+      await waitFor(page, (e) => window.rvp.snapshot().viz.effect !== e, before);
+      await frames(page, 10);
       const s = await snap(page);
       names.add(s.viz.effect);
+      // It moves: within a few seconds of frames the picture is not the one it was.
       const a = await region();
-      await page.waitForTimeout(200);
-      expect(await region(), s.viz.effect).not.toBe(a);
+      let b = a;
+      for (let k = 0; k < 100 && b === a; k++) {
+        await frames(page, 4);
+        b = await region();
+      }
+      expect(b, s.viz.effect).not.toBe(a);
     }
     expect(names.size).toBe(5);
     // Escape leaves the visualizer for the now-playing screen.
@@ -272,7 +279,7 @@ test.describe("M10", () => {
     await waitFor(page, () => window.rvp.snapshot().menu_open);
     s = await snap(page);
     await page.mouse.move(...center(s.menu.find((m) => m.label === "Add to playlist").rect));
-    await page.waitForTimeout(150);
+    await waitFor(page, () => window.rvp.snapshot().menu.some((m) => m.label.startsWith("New playlist")));
     s = await snap(page);
     await page.mouse.click(...center(s.menu.find((m) => m.label.startsWith("New playlist")).rect));
     await waitFor(page, () => window.rvp.snapshot().lib.typing);
@@ -283,24 +290,24 @@ test.describe("M10", () => {
     expect(s.lib.playlist_list[0]).toMatchObject({ name: "Chill mix", tracks: 1, missing: 0 });
     // Add the whole album through the hero's menu path: the album card's context menu.
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(150);
+    await frames(page, 4);
     s = await snap(page);
     await page.mouse.click(...center(ent(s, "Lofi Sketches", "album").rect), { button: "right" });
     await waitFor(page, () => window.rvp.snapshot().menu_open);
     s = await snap(page);
     await page.mouse.move(...center(s.menu.find((m) => m.label === "Add to playlist").rect));
-    await page.waitForTimeout(150);
+    await waitFor(page, () => window.rvp.snapshot().menu.some((m) => m.label === "Chill mix"));
     s = await snap(page);
     await page.mouse.click(...center(s.menu.find((m) => m.label === "Chill mix").rect));
     await waitFor(page, () => window.rvp.snapshot().lib.playlist_list[0].tracks === 12);
     // Open it from the Playlists view and export both formats.
     await page.keyboard.press("4");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "playlists");
-    await page.waitForTimeout(150);
+    await frames(page, 4);
     s = await snap(page);
     await page.mouse.click(...center(s.lib.ents[0].rect));
     await waitFor(page, () => window.rvp.snapshot().lib.detail && window.rvp.snapshot().lib.detail.kind === "playlist");
-    await page.waitForTimeout(150);
+    await frames(page, 4);
     s = await snap(page);
     const files = {};
     for (const [label, ext] of [["M3U8", "m3u8"], ["PLS", "pls"]]) {
@@ -354,8 +361,9 @@ test.describe("M10", () => {
     await page.reload();
     await waitFor(page, () => window.rvp && window.rvp.ready);
     await page.keyboard.press("b");
-    await waitFor(page, () => window.rvp.snapshot().lib.tracks === 201);
-    await page.waitForTimeout(500);
+    await waitFor(page, () => window.rvp.snapshot().lib.tracks === 201 && window.rvp.snapshot().lib.albums === 20);
+    // The covers come back from the store a moment after the albums do: wait until the picture stops changing.
+    await settled(page, () => window.rvp.sample(0, 0, 1280, 720, 16).join(","), { n: 5, gap: 3, timeout: 30_000 });
     let s = await snap(page);
     expect(s.lib.albums).toBe(20);
     // The cards show their covers (flat colours, so a pixel in the middle of a card is the cover's colour, not the ink of a stand-in).
@@ -447,7 +455,9 @@ test.describe("M10", () => {
     // The albums grid at the top, an album's page, and the track table.
     await page.mouse.move(1200, 700);
     const check = async (name) => {
-      await page.waitForTimeout(500);
+      // Covers load a little after the cards are there: the view is ready when the picture stops changing.
+      await frames(page, 4);
+      await settled(page, () => window.rvp.sample(0, 0, 1280, 720, 16).join(","), { n: 6, gap: 3, timeout: 30_000 });
       const file = path.join(GOLDEN_DIR, name);
       const png = await page.evaluate(() => window.rvp.png());
       if (process.env.UPDATE_GOLDEN || !fs.existsSync(file)) {
@@ -483,14 +493,14 @@ test.describe("M10 with reduced motion", () => {
     await waitFor(page, () => window.rvp.snapshot().state === "playing");
     await page.keyboard.press("7");
     await waitFor(page, () => window.rvp.snapshot().lib.view === "visualizer");
-    await page.waitForTimeout(1500);
+    await frames(page, 30);
     let s = await snap(page);
     expect(s.lib.viz_on).toBe(false);
     expect(s.viz.frames).toBe(0); // nothing is drawn, so nothing costs anything
     // The upper part of the screen (no text there) stays exactly the same while the music plays.
     const region = () => page.evaluate(() => window.rvp.sample(0, 80, 1280, 300, 8).join(","));
     const a = await region();
-    await page.waitForTimeout(700);
+    await frames(page, 40);
     expect(await region()).toBe(a);
     // Enter turns it on; it moves, but gently: no frame differs from the one before it by much.
     await page.keyboard.press("Enter");
@@ -507,13 +517,19 @@ test.describe("M10 with reduced motion", () => {
         for (let k = 0; k < c.length; k += 4) sum += Math.abs(c[k] - prev[k]) + Math.abs(c[k + 1] - prev[k + 1]) + Math.abs(c[k + 2] - prev[k + 2]);
         return sum / (c.length / 4) / 3;
       });
+    const stamp = () => page.evaluate(() => performance.now());
     await change();
+    let t0 = await stamp();
     let worst = 0;
     for (let i = 0; i < 12; i++) {
-      await page.waitForTimeout(120);
-      worst = Math.max(worst, await change());
+      await frames(page, 7);
+      const c = await change();
+      const t1 = await stamp();
+      // The music does not wait for a busy machine, so the change is counted per 120 ms of real time between the two samples.
+      worst = Math.max(worst, (c * 120) / Math.max(120, t1 - t0));
+      t0 = t1;
     }
-    // Mean change per pixel channel between samples 120 ms apart stays small (a flash would be tens of levels).
+    // Mean change per pixel channel per 120 ms stays small (a flash would be tens of levels).
     expect(worst).toBeLessThan(12);
     expect(errors).toEqual([]);
   });

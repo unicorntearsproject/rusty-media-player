@@ -119,7 +119,8 @@ mod tests {
         assert_eq!(clock.now_us(), end);
         // One poll per distinct deadline (+ the final poll that lets tasks finish): far fewer than a busy loop.
         assert!(polls <= 160, "{polls} polls");
-        assert!(started.elapsed().as_millis() < 100, "took {:?}", started.elapsed());
+        // (Ten seconds of virtual time: it must not have slept for them, however busy the machine is.)
+        assert!(started.elapsed().as_secs() < 5, "took {:?}", started.elapsed());
     }
 
     #[test]
