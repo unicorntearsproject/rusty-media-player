@@ -1,11 +1,12 @@
 # rusty-video-player — rules
 
 - Commit & push after each substantial milestone.
-- Use at most ONE sub-agent at a time (user, 2026-10-05; briefly allowed two, now back to one): the `coder` agent (`.claude/agents/coder.md`, Sonnet 5.5, effort high). It does all coding, docs and tests; the main session only orchestrates.
+- Use at most TWO sub-agents at a time (user, 2026-10-05; may change, so follow the latest instruction): the `coder` agent (`.claude/agents/coder.md`, Sonnet 5.5, effort high). It does all coding, docs and tests; the main session only orchestrates.
 - Be efficient: minimal reporting, no superfluous output. Ask the user only when genuinely blocked.
 - Never use `rm -rf` or other recursive deletes (user rule). Put scratch/build output in fresh `/tmp` dirs (`mktemp -d /tmp/rvp-XXXX`) and overwrite in place.
 - Never run artificial CPU load generators (`yes`, busy loops, stress) on this machine (user rule).
 - Run all tests headless (user rule): Playwright headless, desktop/Wine under `xvfb-run -a` with DISPLAY/WAYLAND_DISPLAY overridden. Never open windows or steal focus on the user's session.
+- Tests: thorough but proportionate (user rule). Cover edge cases and error paths, sized to realistic use with a few times headroom, never absurd scales. Keep the everyday gate (`cargo test`, e2e) fast and deterministic. Fuzz, stress and long benchmarks are occasional or nightly jobs, run on this shared host only with the user's OK (Rusty Bucket CI shares it). See ../rust-os/docs/testing/testing-guide.md.
 
 ## Context
 - Goal: a VLC-derived media player in Rust, compiled to WebAssembly, as an app for Rusty Bucket (`../rust-os`, plan index: `docs/planning/README.md`).
