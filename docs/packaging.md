@@ -16,6 +16,7 @@ Rusty Wave ships as a native desktop app (Linux and Windows) and as an installab
 | PWA | `dist pwa` | `cargo xtask web` prerequisites | `rusty-wave-web-<ver>.zip` |
 | Signed apt repo | `dist apt-repo --sign` | gpg | `target/dist/apt-repo/` |
 | Checksums, signatures | `dist checksums [--sign]` | gpg for `--sign` | `SHA256SUMS` (+ `.asc` files); `dist verify` checks them |
+| Publish | `dist publish --sign [--windows] [--dry-run]` | the signed, verified deb, rpm and AppImage in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root) |
 
 `cargo xtask dist check` validates the metadata without building (desktop file, AppStream, man page, that the media types agree between the
 `.desktop` file and the AppStream file, that the Windows installer registers the main extensions). `linux` runs stage to flatpak, `all`
@@ -29,6 +30,16 @@ everything. `--version V` stamps another version (a dry run such as `0.0.0-ci1`)
   so there is no migration.
 - Data (settings, library index, thumbnails, saved queue, resume positions): `~/.local/share/rusty-wave/` (`%APPDATA%\rusty-wave\data` on Windows; in the Flatpak
   `~/.var/app/<id>/data/rusty-wave/`). `--data-dir` overrides.
+
+## Publishing builds
+
+Per the project's distribution rule, each verified build goes to `/home/jj/projects/_software-dist/rusty-wave/` and to the root of `s3://ut-software-dist/`.
+`cargo xtask dist publish --sign` first runs `dist verify`, takes `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-1.x86_64.rpm` and
+`rusty-wave-<ver>-x86_64.AppImage` (plus `-x64-Setup.exe` and `-windows-x64.zip` with `--windows`, only when they were built and verified in the same run),
+writes and signs `rusty-wave-<ver>-SHA256SUMS` over exactly those files, and checks both destinations (`ls` and `aws s3api head-object` per file): if any file of
+this version exists in either, it stops before copying anything. Bump `version` in `Cargo.toml` for the next publish. `--dry-run` does all checks and copies nothing.
+Build the files with `dist stage --container`, then `dist deb|rpm|appimage --no-build --sign`, then `dist checksums --sign` (move old files out of `target/dist/release`,
+`linux/stage` and `appimage` first: stale files from an earlier name would be packaged or fail `verify`).
 
 ## Version stamping
 

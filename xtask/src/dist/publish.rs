@@ -42,9 +42,6 @@ impl Ctx {
         // 3. A staging folder with exactly the published files, plus the checksum file for this version, signed and checked.
         let stage = self.dist().join("publish").join(format!("rusty-wave-{ver}"));
         fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
-        if fs::read_dir(&stage).map_err(|e| e.to_string())?.next().is_some() {
-            return Err(format!("publish: {} is not empty (a previous run); move it away first", stage.display()));
-        }
         let mut sums = String::new();
         for n in &names {
             copy(&out.join(n), &stage.join(n))?;
