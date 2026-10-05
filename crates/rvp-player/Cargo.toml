@@ -17,3 +17,4 @@ rvp-host.workspace = true
 rvp-demux.workspace = true
 rvp-subs.workspace = true
 rvp-viz.workspace = true
+libm = "0.2"
