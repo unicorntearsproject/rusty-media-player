@@ -154,6 +154,33 @@ impl Library {
         self.track_album.get(&id).map(|&i| &self.albums[i])
     }
 
+    /// The loudness of an album as a whole, LUFS: what the tags of its tracks state, or, when every track's loudness is known, the
+    /// duration-weighted mean of their energies (what the album would measure as one programme, without the gating of the joins).
+    /// `None` while any track is still without a figure.
+    pub fn album_loudness(&self, album: u32) -> Option<f32> {
+        let a = self.album(album)?;
+        let tracks: Vec<&Track> = a.tracks.iter().filter_map(|&id| self.track(id)).collect();
+        if let Some(l) = tracks.iter().find_map(|t| t.loudness.album_lufs) {
+            return Some(l);
+        }
+        let mut parts = Vec::with_capacity(tracks.len());
+        for t in &tracks {
+            parts.push((t.loudness.lufs?, t.duration_us.max(1)));
+        }
+        rvp_core::loudness::combine_lufs(&parts)
+    }
+
+    /// What the player is told about how loud track `id` is: its own figure and its album's.
+    pub fn loudness_hint(&self, id: TrackId) -> Option<rvp_core::LoudnessTags> {
+        let t = self.track(id)?;
+        let album = self.album_of(id).and_then(|a| self.album_loudness(a.id));
+        (t.loudness.lufs.is_some() || album.is_some()).then(|| rvp_core::LoudnessTags {
+            track_lufs: t.loudness.lufs,
+            album_lufs: album,
+            ..Default::default()
+        })
+    }
+
     /// The thumbnail of picture `art`.
     ///
     /// Thumbnails are kept in a cache with a byte budget ([`Library::set_thumb_budget`]): one that is not in memory returns
@@ -459,6 +486,7 @@ pub(crate) mod tests {
             sample_rate: 44_100,
             channels: 2,
             unreadable: false,
+            loudness: Default::default(),
             src: String::new(),
         }
     }

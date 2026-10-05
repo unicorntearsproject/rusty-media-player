@@ -22,6 +22,8 @@ const INDEX_MAGIC: &[u8; 4] = b"RVPL";
 const PLAYLIST_MAGIC: &[u8; 4] = b"RVPP";
 const THUMB_MAGIC: &[u8; 4] = b"RVPT";
 const VERSION: u8 = 1;
+/// The index is at version 2: version 1 plus the loudness of every track (version 1 loads, with no loudness known).
+const INDEX_VERSION: u8 = 2;
 
 struct W(Vec<u8>);
 
@@ -99,7 +101,7 @@ impl Library {
         self.dirty = false;
         let mut w = W(Vec::new());
         w.0.extend_from_slice(INDEX_MAGIC);
-        w.u8(VERSION);
+        w.u8(INDEX_VERSION);
         w.u32(self.next_id);
         w.u16(self.roots.len() as u16);
         for r in &self.roots {
@@ -129,6 +131,14 @@ impl Library {
             w.str(&t.codec);
             w.u32(t.sample_rate);
             w.u16(t.channels);
+            // Loudness: flags, then the track's figure and the album's tag when there are such.
+            let l = &t.loudness;
+            w.u8(l.lufs.is_some() as u8
+                | (l.measured as u8) << 1
+                | (l.album_lufs.is_some() as u8) << 2
+                | (l.tried as u8) << 3);
+            w.u32(l.lufs.unwrap_or(0.0).to_bits());
+            w.u32(l.album_lufs.unwrap_or(0.0).to_bits());
         }
         w.u32(self.folder_art.len() as u32);
         for ((root, dir), f) in &self.folder_art {
@@ -147,7 +157,11 @@ impl Library {
     /// unconnected until the host lists it again.
     pub fn load_index(bytes: &[u8]) -> Result<Library, String> {
         let mut r = R(bytes);
-        if r.take(4)? != INDEX_MAGIC || r.u8()? != VERSION {
+        if r.take(4)? != INDEX_MAGIC {
+            return Err("not a library index".to_string());
+        }
+        let version = r.u8()?;
+        if !(1..=INDEX_VERSION).contains(&version) {
             return Err("not a library index".to_string());
         }
         let mut l = Library::new();
@@ -182,6 +196,17 @@ impl Library {
             let codec = r.str()?;
             let sample_rate = r.u32()?;
             let channels = r.u16()?;
+            let mut loudness = TrackLoudness::default();
+            if version >= 2 {
+                let flags = r.u8()?;
+                let (lufs, album) = (f32::from_bits(r.u32()?), f32::from_bits(r.u32()?));
+                loudness = TrackLoudness {
+                    lufs: (flags & 1 != 0 && lufs.is_finite()).then_some(lufs),
+                    measured: flags & 2 != 0,
+                    album_lufs: (flags & 4 != 0 && album.is_finite()).then_some(album),
+                    tried: flags & 8 != 0,
+                };
+            }
             l.tracks.push(Track {
                 id,
                 root,
@@ -205,6 +230,7 @@ impl Library {
                 sample_rate,
                 channels,
                 unreadable: flags & 2 != 0,
+                loudness,
                 src: String::new(),
             });
         }

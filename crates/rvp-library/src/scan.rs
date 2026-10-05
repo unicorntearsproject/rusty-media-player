@@ -76,6 +76,8 @@ pub struct TrackTags {
     pub channels: u16,
     /// The embedded cover picture, encoded.
     pub art: Option<Art>,
+    /// What the tags say about loudness (ReplayGain, Opus R128).
+    pub loudness: rvp_core::LoudnessTags,
 }
 
 /// Read the tags, duration and cover art of an audio file. MP3 files are not walked to their end (see
@@ -106,6 +108,7 @@ pub async fn read_tags<S: Source>(src: S) -> Result<TrackTags, Error> {
         sample_rate: audio.audio.map_or(0, |a| a.sample_rate),
         channels: audio.audio.map_or(0, |a| a.channels),
         art: m.art,
+        loudness: m.loudness,
     })
 }
 
@@ -256,6 +259,7 @@ impl Library {
             sample_rate: 0,
             channels: 0,
             unreadable: false,
+            loudness: Default::default(),
             src: entry.id.clone(),
         };
         match result {
@@ -274,6 +278,12 @@ impl Library {
                 t.codec = tags.codec;
                 t.sample_rate = tags.sample_rate;
                 t.channels = tags.channels;
+                t.loudness = TrackLoudness {
+                    lufs: tags.loudness.track_lufs,
+                    measured: false,
+                    album_lufs: tags.loudness.album_lufs,
+                    tried: false,
+                };
                 if let Some(a) = tags.art {
                     let aid = self.keep_picture(&a.data);
                     if aid != 0 {
@@ -316,6 +326,31 @@ impl Library {
             }
             None => 0,
         }
+    }
+
+    /// Tracks whose loudness is not known (no tags that say, never measured): `(track id, what the host opens it with)`. Files
+    /// that cannot be opened in this session (their folder is not connected) are left out, and so are ones that were tried.
+    pub fn pending_loudness(&self) -> Vec<(TrackId, String)> {
+        self.tracks
+            .iter()
+            .filter(|t| !t.unreadable && t.loudness.lufs.is_none() && !t.loudness.tried && !t.src.is_empty())
+            .map(|t| (t.id, t.src.clone()))
+            .collect()
+    }
+
+    /// File the result of measuring track `id`: its integrated loudness, or `None` if there was nothing to measure.
+    pub fn set_measured(&mut self, id: TrackId, lufs: Option<f32>) {
+        let Ok(i) = self.tracks.binary_search_by_key(&id, |t| t.id) else { return };
+        let t = &mut self.tracks[i].loudness;
+        match lufs {
+            Some(l) => {
+                t.lufs = Some(l);
+                t.measured = true;
+            }
+            None => t.tried = true,
+        }
+        self.dirty = true;
+        self.rev += 1;
     }
 
     /// Folder pictures that still have to be read: `(root, directory, id to open, size)`. Only directories that have a track

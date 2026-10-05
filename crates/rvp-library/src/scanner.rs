@@ -4,14 +4,19 @@
 //! A listing is first compared with the index ([`Library::begin_scan`]); the files that are new or changed are read a few at
 //! a time through `rvp-demux` ([`read_tags`]), then folder pictures are read for albums that need them, and the views are
 //! rebuilt ([`Library::finish_scan`]). More listings can be queued while one is running.
+//!
+//! After the scans there is a second, slower job when the automatic level is on: tracks whose tags say nothing about their
+//! loudness are decoded and measured ([`Scanner::start_analysis`]), a track at a time, within a small time budget per tick, and
+//! the result is filed in the index.
 use crate::index::{Library, ScanReport};
+use crate::model::TrackId;
 use crate::scan::{TrackTags, read_all, read_tags};
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use rvp_core::{Error, Timestamp};
+use rvp_core::{CodecFactory, Error, Timestamp};
 use rvp_host::{FileEntry, Host, Listing, OpenRequest};
 use rvp_player::exec::Executor;
 
@@ -23,6 +28,10 @@ const BUDGET_US: Timestamp = 4_000;
 const REBUILD_EVERY_US: Timestamp = 400_000;
 /// Folder pictures bigger than this are not read.
 const MAX_PICTURE: usize = 16 << 20;
+/// Time one tick may spend decoding files to measure them, microseconds (a tenth or less of a frame).
+const ANALYSIS_BUDGET_US: Timestamp = 4_000;
+/// The index is saved after this many tracks have been measured.
+const ANALYSIS_SAVE_EVERY: usize = 25;
 
 type TagResult = (u16, FileEntry, Result<TrackTags, Error>);
 type ArtResult = (u16, String, Option<Vec<u8>>);
@@ -37,12 +46,14 @@ enum Phase {
 /// What a scan is doing, for the status line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanStatus {
-    /// Name of the folder being scanned.
+    /// Name of the folder being scanned (empty while measuring loudness).
     pub root: String,
     /// Files read so far.
     pub done: usize,
     /// Files to read in all.
     pub total: usize,
+    /// Measuring the loudness of tracks (after the scans) rather than reading tags.
+    pub analysing: bool,
 }
 
 /// What a call to [`Scanner::tick`] changed.
@@ -54,6 +65,16 @@ pub enum ScanEvent {
     Progress,
     /// A scan finished; the index is complete and should be saved.
     Finished(ScanReport),
+    /// Loudness measurements were filed (a batch, or the last ones); the index should be saved.
+    Analysed,
+}
+
+/// Tracks being measured.
+struct Analysis {
+    queue: VecDeque<(TrackId, String)>,
+    total: usize,
+    done: usize,
+    since_save: usize,
 }
 
 /// Drives scans.
@@ -73,6 +94,10 @@ pub struct Scanner {
     art_done: usize,
     last_rebuild: Timestamp,
     dirty_view: bool,
+    codecs: Option<Rc<dyn CodecFactory>>,
+    analysis: Option<Analysis>,
+    analysis_results: Rc<RefCell<Vec<(TrackId, Option<f32>)>>>,
+    analysis_alive: usize,
 }
 
 impl Default for Scanner {
@@ -100,7 +125,43 @@ impl Scanner {
             art_done: 0,
             last_rebuild: 0,
             dirty_view: false,
+            codecs: None,
+            analysis: None,
+            analysis_results: Rc::default(),
+            analysis_alive: 0,
         }
+    }
+
+    /// The decoders loudness is measured with (without them [`Scanner::start_analysis`] does nothing).
+    pub fn set_codecs(&mut self, codecs: Rc<dyn CodecFactory>) {
+        self.codecs = Some(codecs);
+    }
+
+    /// Measure the loudness of `tracks` (`(track id, what the host opens it with)`, as [`Library::pending_loudness`] lists them)
+    /// in the background, after any scan that is running. Tracks that are already queued are not queued twice.
+    pub fn start_analysis(&mut self, tracks: Vec<(TrackId, String)>) {
+        if self.codecs.is_none() || tracks.is_empty() {
+            return;
+        }
+        match &mut self.analysis {
+            Some(a) => {
+                for t in tracks {
+                    if !a.queue.iter().any(|q| q.0 == t.0) {
+                        a.queue.push_back(t);
+                        a.total += 1;
+                    }
+                }
+            }
+            None => {
+                let total = tracks.len();
+                self.analysis = Some(Analysis { queue: tracks.into(), total, done: 0, since_save: 0 });
+            }
+        }
+    }
+
+    /// Stop measuring (the setting that wanted it was turned off); what is measured stays filed.
+    pub fn stop_analysis(&mut self) {
+        self.analysis = None;
     }
 
     /// Queue a listing; it starts on the next tick (right away if nothing is running).
@@ -110,15 +171,24 @@ impl Scanner {
 
     /// True while a scan is running or queued.
     pub fn busy(&self) -> bool {
-        self.phase != Phase::Idle || !self.queue.is_empty()
+        self.phase != Phase::Idle || !self.queue.is_empty() || self.analysis.is_some()
     }
 
     /// Progress of the running scan.
     pub fn status(&self) -> Option<ScanStatus> {
-        (self.phase != Phase::Idle).then(|| ScanStatus {
-            root: self.root_name.clone(),
-            done: self.done,
-            total: self.total,
+        if self.phase != Phase::Idle {
+            return Some(ScanStatus {
+                root: self.root_name.clone(),
+                done: self.done,
+                total: self.total,
+                analysing: false,
+            });
+        }
+        self.analysis.as_ref().map(|a| ScanStatus {
+            root: String::new(),
+            done: a.done,
+            total: a.total,
+            analysing: true,
         })
     }
 
@@ -130,7 +200,7 @@ impl Scanner {
     {
         let t0 = host.clock().now_us();
         if self.phase == Phase::Idle {
-            let Some(listing) = self.queue.pop_front() else { return ScanEvent::Quiet };
+            let Some(listing) = self.queue.pop_front() else { return self.analysis_tick(lib, host) };
             let plan = lib.begin_scan(&listing.root, &listing.name, &listing.files);
             self.root = plan.root;
             self.root_name = listing.name;
@@ -222,5 +292,58 @@ impl Scanner {
             event = ScanEvent::Progress;
         }
         event
+    }
+
+    /// One step of the loudness measurement: start the next track when none is being measured, give the decoding a few
+    /// milliseconds, file what is finished.
+    fn analysis_tick<H>(&mut self, lib: &mut Library, host: &mut H) -> ScanEvent
+    where
+        H: Host,
+        H::Source: 'static,
+    {
+        let (Some(an), Some(codecs)) = (&mut self.analysis, &self.codecs) else {
+            self.analysis = None;
+            return ScanEvent::Quiet;
+        };
+        let t0 = host.clock().now_us();
+        while self.analysis_alive == 0 {
+            let Some((id, src)) = an.queue.pop_front() else { break };
+            match rvp_core::task::block_on(host.open(OpenRequest::Id(src))) {
+                Ok(source) => {
+                    let (out, codecs) = (self.analysis_results.clone(), codecs.clone());
+                    self.exec.spawn(async move {
+                        let r = rvp_player::measure_source(source, &*codecs).await;
+                        out.borrow_mut().push((id, r.ok().flatten().map(|m| m.integrated_lufs)));
+                    });
+                    self.analysis_alive = 1;
+                }
+                // A file that cannot be opened is not measured (and not asked for again until it changes).
+                Err(_) => self.analysis_results.borrow_mut().push((id, None)),
+            }
+        }
+        // Decode for a few milliseconds (the task gives the executor a turn every few dozen packets).
+        while self.analysis_alive > 0 {
+            self.analysis_alive = self.exec.poll_all();
+            if host.clock().now_us() - t0 >= ANALYSIS_BUDGET_US {
+                break;
+            }
+        }
+        let results = core::mem::take(&mut *self.analysis_results.borrow_mut());
+        let any = !results.is_empty();
+        for (id, lufs) in results {
+            lib.set_measured(id, lufs);
+            an.done += 1;
+            an.since_save += 1;
+        }
+        let finished = an.queue.is_empty() && self.analysis_alive == 0;
+        if finished {
+            self.analysis = None;
+            return ScanEvent::Analysed;
+        }
+        if an.since_save >= ANALYSIS_SAVE_EVERY {
+            an.since_save = 0;
+            return ScanEvent::Analysed;
+        }
+        if any { ScanEvent::Progress } else { ScanEvent::Quiet }
     }
 }

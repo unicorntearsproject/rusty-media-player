@@ -25,6 +25,20 @@ pub struct Root {
     pub connected: bool,
 }
 
+/// What the library knows about how loud a track is, for the automatic level.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TrackLoudness {
+    /// Integrated loudness, LUFS: what the file's own ReplayGain or R128 tags say, or else what decoding the file measured.
+    pub lufs: Option<f32>,
+    /// `lufs` was measured by decoding the file (not read from tags).
+    pub measured: bool,
+    /// The loudness of the album as the file's tags state it, LUFS.
+    pub album_lufs: Option<f32>,
+    /// A measurement was tried and found nothing to measure (silence, or a file that does not decode): not tried again until the
+    /// file changes.
+    pub tried: bool,
+}
+
 /// One audio file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Track {
@@ -72,6 +86,8 @@ pub struct Track {
     pub channels: u16,
     /// The file could not be read as audio; it is remembered (so it is not read again) but not shown.
     pub unreadable: bool,
+    /// Loudness, from tags or measured.
+    pub loudness: TrackLoudness,
     /// What the host opens this file with in this session; empty when its root is not connected.
     pub src: String,
 }
