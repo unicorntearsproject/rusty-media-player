@@ -1,0 +1,32 @@
+# The full test suite, on demand only (workflow_dispatch). Nothing runs on a push or a pull request.
+name: Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libdbus-1-dev libxkbcommon-dev libwayland-dev ffmpeg python3 \
+            xvfb xauth playerctl dbus-x11 fonts-noto-cjk
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown, x86_64-unknown-none
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        env:
+          RVP_REQUIRE_DESKTOP_TESTS: '1'
+        run: dbus-run-session -- xvfb-run -a cargo test --workspace
+      - run: cargo xtask check

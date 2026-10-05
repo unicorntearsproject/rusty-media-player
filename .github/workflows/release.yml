@@ -1,0 +1,293 @@
+# Release builds: Linux packages (.deb, .rpm, AppImage, Flatpak, tarball), the Windows installer and portable zip, and the PWA.
+#
+# Triggered ONLY by a version tag (v*) or by hand (workflow_dispatch); never on a push or a pull request. A manual run is a dry run: it
+# builds and tests everything under the version you type and uploads the files as workflow artifacts, but publishes nothing. A tag run
+# also attaches the files to a GitHub release (job `publish`, the only job with write access).
+#
+# Signing is optional and uses repository secrets when they exist (see docs/packaging.md); without them the files are unsigned.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Dry-run version, for example 0.0.0-ci1 (a tag run uses the tag)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RVP_TOOLCHAIN: '1.99.0'
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          cargo_version=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml | head -1)
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+            if [[ "$v" != "$cargo_version" ]]; then
+              echo "::error::the tag $GITHUB_REF_NAME does not match version = \"$cargo_version\" in Cargo.toml"
+              exit 1
+            fi
+          else
+            v="${INPUT_VERSION:-${cargo_version}-ci}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Building $v"
+
+  linux:
+    name: Linux binary, .deb, AppImage, tarball
+    needs: version
+    runs-on: ubuntu-22.04   # glibc 2.35: the binary runs on that and anything newer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libdbus-1-dev libxkbcommon-dev libwayland-dev \
+            xvfb xauth ffmpeg python3 desktop-file-utils appstream fuse3 libfuse2 playerctl dbus-x11 fonts-noto-cjk
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RVP_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+      - name: Check the metadata
+        run: cargo xtask dist check --version "${{ needs.version.outputs.version }}"
+      - name: Test the desktop app (unit tests and the Xvfb smoke tests)
+        env:
+          RVP_REQUIRE_DESKTOP_TESTS: '1'
+        run: dbus-run-session -- xvfb-run -a cargo test -p rvp-host-desktop
+      - name: Stage, tarball, .deb, AppImage
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          cargo xtask dist stage --version "$v"
+          cargo xtask dist tarball --version "$v" --no-build
+          cargo xtask dist deb --version "$v" --no-build
+          cargo xtask dist appimage --version "$v" --no-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-stage
+          path: target/dist/linux/stage
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            target/dist/release/*.deb
+            target/dist/release/*.AppImage
+            target/dist/release/rvp-*-linux-x86_64.tar.gz
+
+  rpm:
+    name: .rpm
+    needs: [version, linux]
+    runs-on: ubuntu-latest
+    container: fedora:44   # rpm's own dependency scan (find-requires) reads the binary and writes the exact requirements
+    steps:
+      - name: Tools
+        run: dnf install -y git tar gzip rust cargo rpm-build which
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-stage
+          path: target/dist/linux/stage
+      - name: Build the package
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          cargo install --locked cargo-generate-rpm
+          chmod +x target/dist/linux/stage/usr/bin/rvp
+          RVP_TOOLCHAIN='' cargo xtask dist rpm --version "${{ needs.version.outputs.version }}" --no-build
+      - name: Install it in this clean Fedora and run it
+        run: |
+          dnf install -y ./target/dist/release/*.rpm xorg-x11-server-Xvfb xauth libX11 libXcursor libXi libXrandr libwayland-client
+          rvp --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: target/dist/release/*.rpm
+
+  flatpak-prepare:
+    name: Flatpak manifest
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write the manifest and the source tarball
+        run: cargo xtask dist flatpak --prepare-only --version "${{ needs.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-input
+          path: |
+            target/dist/flatpak/*.yml
+            target/dist/release/*-src.tar.gz
+            packaging/flatpak/cargo-sources.json
+
+  flatpak:
+    name: Flatpak
+    needs: [version, flatpak-prepare]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak-input
+          path: flatpak-input
+      - name: Put the generated files where the manifest expects them
+        shell: bash
+        run: |
+          mkdir -p target/dist/flatpak target/dist/release
+          cp flatpak-input/target/dist/flatpak/*.yml target/dist/flatpak/
+          cp flatpak-input/target/dist/release/*-src.tar.gz target/dist/release/
+          # The manifest names these by absolute path of the runner that wrote it; rewrite them for this workspace.
+          sed -i "s#/home/runner/work/[^/]*/[^/]*#$GITHUB_WORKSPACE#g" target/dist/flatpak/*.yml
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: io.github.idometeor.RustyVideoPlayer-${{ needs.version.outputs.version }}.flatpak
+          manifest-path: target/dist/flatpak/io.github.idometeor.RustyVideoPlayer.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+          arch: x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: '*.flatpak'
+
+  windows:
+    name: Windows exe, zip and installer
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RVP_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Signing (only when the repository has a certificate)
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if [[ -n "$PFX_BASE64" ]]; then
+            echo "$PFX_BASE64" | base64 -d > "$RUNNER_TEMP/cert.pfx"
+            tool=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe -path '*x64*' | sort | tail -1)
+            echo "RVP_WINDOWS_SIGN_CMD=\"$tool\" sign /f \"$RUNNER_TEMP/cert.pfx\" /p \"$PFX_PASSWORD\" /fd sha256 /td sha256 /tr http://timestamp.digicert.com \$f" >> "$GITHUB_ENV"
+            echo "Signing is on"
+          else
+            echo "No certificate: the files stay unsigned (SmartScreen will ask)"
+          fi
+      - name: Unit tests of the desktop host
+        run: cargo test -p rvp-host-desktop --lib
+      - name: Build rvp.exe, the zip and the installer
+        env:
+          ISCC: C:\Program Files (x86)\Inno Setup 6\ISCC.exe
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          cargo xtask dist windows --version "$v"
+          cargo xtask dist installer --version "$v" --no-build
+      - name: Try the installer silently and start the installed program
+        continue-on-error: true   # a window on a hosted runner is best effort; the build above is what counts
+        run: |
+          setup=$(find target/dist/release -name 'RustyVideoPlayer-*-Setup.exe' | head -1)
+          "$setup" //VERYSILENT //SUPPRESSMSGBOXES //CURRENTUSER "//DIR=$RUNNER_TEMP/rvp" //TASKS=assoc
+          test -f "$RUNNER_TEMP/rvp/rvp.exe"
+          "$RUNNER_TEMP/rvp/rvp.exe" --no-audio --no-media-keys --data-dir "$RUNNER_TEMP/rvpdata" --exit-after 4 --report "$RUNNER_TEMP/report.json"
+          cat "$RUNNER_TEMP/report.json"
+          "$RUNNER_TEMP/rvp/unins000.exe" //VERYSILENT //SUPPRESSMSGBOXES
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            target/dist/release/*.exe
+            target/dist/release/*windows-x64.zip
+
+  pwa:
+    name: Web app (PWA)
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RVP_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg python3 binaryen zip
+          cargo install --locked wasm-bindgen-cli --version "$(sed -n '/name = "wasm-bindgen"/{n;s/version = "\(.*\)"/\1/p}' Cargo.lock | head -1)"
+      - name: Build the page
+        run: cargo xtask web
+      - name: Playwright tests of the installable app (manifest, offline, update)
+        run: |
+          RVP_FIXTURE_SET=core bash tools/gen-fixtures.sh target/fixtures
+          cd tests/e2e
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test pwa.spec.js
+      - name: Zip
+        run: cargo xtask dist pwa --version "${{ needs.version.outputs.version }}" --no-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwa
+          path: target/dist/release/*web*.zip
+
+  publish:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, linux, rpm, flatpak, windows, pwa]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+          pattern: '{linux-packages,rpm,flatpak,windows,pwa}'
+      - name: Checksums
+        run: |
+          cd dist
+          rm -f SHA256SUMS
+          sha256sum ./* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Sign the checksums (only when the repository has a GPG key)
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          if [[ -n "$GPG_PRIVATE_KEY" ]]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign dist/SHA256SUMS
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: true   # review the notes and the files, then publish by hand

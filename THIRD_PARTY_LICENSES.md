@@ -25,6 +25,34 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 | `rvp-codec-h264` (our own H.264 decoder; no third-party code, no dependencies besides `rvp-core`) | `MIT OR Apache-2.0` | Written from ITU-T Rec. H.264 (03/2010), which is read as a reference only: its VLC/CABAC/deblocking tables are generated into source by `tools/gen-h264-tables.py` (numeric facts of the standard; the PDF is not redistributed). No FFmpeg, openh264, VLC or JM code was read or used. |
 | Unicorn Tears design-system tokens (`crates/theme/tokens/*.css`) | Project-owner material, included under this project's license | Vendored snapshot of `claude-design-system/tokens` (colours, type scale, spacing). Logos, mascot art, and stream thumbnails are **not** included and stay separately owned. |
 
+## Desktop host and packaging (M11)
+
+Linked into `rvp` (`rvp-host-desktop`) only; the browser build and the `no_std` crates do not have them. Checked with `cargo metadata` for
+`x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu` on 2026-10-05: 188 crates on Linux, 141 on Windows, nothing outside MIT, Apache-2.0,
+Zlib, BSD-2/3-Clause, ISC, 0BSD, Unlicense, CC0-1.0, Unicode-3.0 and MPL-2.0.
+
+| Component | License | Notes |
+| --- | --- | --- |
+| `winit` 0.30 (window, input, drag and drop; `sctk-adwaita` for Wayland decorations, `x11rb`, `wayland-*`, `calloop`, `xkbcommon-dl`, `libloading` (ISC) and `tiny-skia` (BSD-3-Clause) under it) | Apache-2.0 (`winit`); MIT / Apache-2.0 / ISC / BSD-3-Clause for the rest | Window-system libraries are opened at run time (`libX11`, `libxkbcommon-x11`, `libwayland-client`); they are not bundled in any package. |
+| `softbuffer` 0.4 (the window's pixels, on the CPU) | MIT OR Apache-2.0 | |
+| `cpal` 0.18 (audio output; ALSA on Linux, WASAPI on Windows) | Apache-2.0 | Links `libasound` (LGPL-2.1) dynamically from the system; not bundled in the deb, rpm or AppImage (the Flatpak runtime provides it). |
+| `rfd` 0.17 (file dialogs through the desktop portal, the Windows common dialogs) | MIT | The Linux backend is `xdg-portal` (`ashpd`, `zbus`, all MIT, Apache-2.0 or MIT/Apache-2.0). |
+| `souvlaki` 0.8.3, **vendored in `third_party/souvlaki`** with a patch (see its `PATCHES.md`): MPRIS on Linux (D-Bus through `dbus` and `libdbus-1`), System Media Transport Controls on Windows (`windows` 0.44) | MIT (`LICENSE` in the vendored directory) | `libdbus-1` (AFL-2.1 OR GPL-2.0+) is a system library, linked dynamically, not bundled. |
+| `directories` 6 (data directory) and `option-ext` (**MPL-2.0**) | MIT OR Apache-2.0; MPL-2.0 | `option-ext` is used unmodified; MPL-2.0 is file-level, so it does not touch the rest. |
+| `fontdb` 0.24 and `ttf-parser` 0.25 (finding system fonts for scripts the bundled fonts lack) | MIT; MIT OR Apache-2.0 | Fonts are only *read* from where the system keeps them, never copied into a package. |
+| `png` 0.18 (the `--screenshot` option) | MIT OR Apache-2.0 | |
+| `windows-sys` 0.61 (`AttachConsole`) and the `windows` crates (Windows only) | MIT OR Apache-2.0 | |
+| `embed-resource` 3 (build script: the icon, version information and manifest in `rvp.exe`) | MIT | A build tool; uses `windres` (MinGW-w64) or `rc.exe`. |
+
+Packaging tools, run by `cargo xtask dist` and the release workflow; none of them is linked into or shipped with the program: `cargo-deb`
+(MIT), `cargo-generate-rpm` (MIT), `appimagetool` (MIT) and the AppImage runtime it embeds in the `.AppImage` (MIT), `flatpak-builder`
+(LGPL-2.1+), `flatpak-cargo-generator.py` (MIT, `tools/flatpak-cargo-generator.py`), Inno Setup 6 (its own licence, free for this use; the
+generated installer carries Inno Setup's small stub, which its licence allows without a notice), `resvg` (MPL-2.0, only to draw the icons,
+`tools/gen-brand.py`), `appstreamcli`, `desktop-file-validate`, Wine and MinGW-w64 (the Windows cross build and installer test).
+
+Brand: the Rusty Video Player logo and icons (`assets/brand`, `packaging/icons`, `web/icons`) are original work made with Unicorn Tears
+design-system colours (`tools/gen-brand.py`); they contain no traced or copied art, no VLC cone, and no part of the mascot.
+
 ## Planned (see `docs/PLAN.md` section 8)
 
 | Component | License | Obligation |

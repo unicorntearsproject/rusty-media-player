@@ -1,6 +1,6 @@
 # rusty-video-player: Plan
 
-> Status: Milestones 0 to 10 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
+> Status: Milestones 0 to 11 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
 > M7 to M12). Decisions live in `CLAUDE.md`; this file is the architecture and the milestone list. Update it when
 > a decision changes.
 
@@ -826,7 +826,7 @@ M10 notes (what was built, what it cost, what is not there):
   thousands of albums keeps its thumbnails in memory (62 KB each); no ReplayGain, no lyrics, no tag editing, no smart playlists; the queue and
   the current position are not restored after a restart (the library and playlists are); MPRIS and media keys on the desktop are M11.
 
-**M11 The standalone desktop app and packaging.** The "standalone" edition (a):
+**M11 The standalone desktop app and packaging.** *(done 2026-10-05; see the notes below)* The "standalone" edition (a):
 - **Native host** `rvp-host-desktop` (binary `rvp`): `winit` window (Wayland and X11), `softbuffer` presenting the
   RGBA surface (`pixels` only if needed), `cpal` audio with the device clock feeding `queued_frames` and
   `output_latency_us`, real files and folders (command line, `rfd` open dialogs, drag-drop of files and folders,
@@ -852,6 +852,31 @@ surface hash) and plays audio through a null/PipeWire sink with the audio clock 
 produce packages that start and play a fixture in a clean environment (`flatpak run`, the AppImage on a bare
 container); a Playwright test installs the PWA (manifest valid, service worker active), reloads **offline** and
 still plays a locally opened fixture; `THIRD_PARTY_LICENSES.md` lists everything bundled.
+
+M11 notes (what was built, what was checked, what is not there):
+- **Desktop host** (`crates/rvp-host-desktop`, binary `rvp`): `winit` 0.30 (Wayland and X11, Windows), `softbuffer` (the app's RGBA frame converted to the window's pixels;
+  no `pixels`/wgpu), `cpal` through a ring buffer (the device callback reports its latency; a silent wall-clock sink stands in without a device), `rfd` dialogs on a
+  worker thread (so decoding and sound never wait for a dialog), drag and drop of files and folders, `file://` URIs, full screen (`F`, `F11`, Alt+Enter), HiDPI, window size
+  remembered, MPRIS (Linux) and SMTC (Windows) through `souvlaki`, files for settings and the library (atomic writes), folders walked on threads, video decoded on its own
+  thread with H.264 pipelined and the pixel kernels on a pool (`rvp-par`). It depends on nothing browser- or Rusty Bucket-specific. Scripting options (`--exit-after`,
+  `--screenshot`, `--report`, `--press`, `--data-dir`, `--no-audio`) make the Xvfb smoke tests and package checks possible.
+- **souvlaki is vendored** (`third_party/souvlaki`): its D-Bus backend applied a state change only when the next D-Bus message arrived or a second had passed, so
+  `playerctl status` right after `pause` showed the old state. Patch and reasons in its `PATCHES.md`. The `zbus` backend does not build on the nightly toolchain
+  (old `rustix`), which is why the `dbus` backend (and `libdbus-1`) is used. MPRIS clients read `Position` as a plain number, so the position is re-sent every second.
+- **M10 polish done:** a bundled Noto Sans subset (Greek, Cyrillic, Latin extended, Vietnamese; 68 KB, in every host) and a host `FontLoader` hook; the desktop
+  finds a system font for other scripts (CJK, Arabic, ...) on first use, once per character, with a cap on failed searches; thumbnails sit in a byte-budgeted LRU
+  (`rvp-library::thumbs`, evicted ones are read back on demand, unsaved ones are never dropped); the queue and position are restored (`rvp-app::restore`, tests in
+  `m11_restore.rs`: positions, shuffle and repeat, command-line files win, damaged blobs, browser-like ids).
+- **Brand:** an original mark (a tear drop that points right, so it reads as play, with three level bars) in Unicorn Tears tokens, drawn as geometry by `tools/gen-brand.py`
+  into SVG sources, hicolor PNGs 16 to 512, `.ico`, `.icns`, installer bitmaps, PWA icons and favicon. No VLC cone, no mascot.
+- **Packaging** is described in [`packaging.md`](packaging.md): `cargo xtask dist`, Flatpak, AppImage, .deb, .rpm, Windows exe and Inno Setup installer, PWA, signing hooks,
+  release workflows (tag or manual only), and the verification record.
+- **Findings along the way:** winit's X11 backend panics when `libxkbcommon-x11` is missing, so packages depend on it; `cargo-deb` ignores its own copyright asset when a
+  copyright is generated (use `license-file`); Inno Setup under Wine needs `ProgramW6432Dir` set; Docker Hub's CDN is not reachable from every network (an ECR mirror
+  works for the Ubuntu base).
+- **Not done / limits:** no single-instance forwarding (a second `rvp file` starts a second window; it gets an MPRIS name with `.instance<pid>`); the web build still draws
+  CJK as boxes (no system fonts in a page); the Windows build was verified under Wine only; macOS (`.icns` is ready) is later; Flathub submission is not made; the release
+  workflows have never been run (they must not be triggered from a session).
 
 **M12 Rusty Bucket adapter** (was M10). `rvp-host-rb` against the app ABI (Canvas, input, timers, fs, audio) once it
 exists, mapping `rvp-host` (playback, `NowPlaying`, `VisualizerTap`, `Library`) to the App API whose media

@@ -122,7 +122,17 @@ How it is used:
 - The **built-in visualizer** does not need a `VisualizerTap`: while its view is up the player asks the session for the same analysis
   (`Session::set_viz_capture`), so any host can show it. A host that wants the numbers too still gets them through its tap.
 
+## Saved queue and `stable_ids` (M11)
+
+`Host::stable_ids()` (default `false`) says whether the ids given to `OpenRequest::Id` (file paths) still open the same file after a restart. The
+app saves the queue (`library/queue`: names, library track ids, current item, shuffle, repeat) and the position in the current item
+(`session/position`, every 5 s while playing and on `save_state`). At the next start, if nothing was opened from outside, the queue comes back and the current
+item opens *paused* at that position. With stable ids the file ids are saved too; without them (a browser) only library tracks come back, and they open once
+the library folder is listed again. Cover thumbnails are kept in memory under a byte budget (`App::set_thumb_budget`, default 32 MiB, least recently used
+first) and read back from `library/art/<id>` when a view needs one.
+
 ## Changes
 
 - 2026-10-05: first version (M8).
 - 2026-10-05: `Library` capability, effects for folders and playlist files, storage keys (M10).
+- 2026-10-05: `Host::stable_ids`, the saved queue and position keys, the thumbnail budget (M11).

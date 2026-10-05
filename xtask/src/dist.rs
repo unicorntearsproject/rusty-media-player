@@ -29,7 +29,8 @@ targets:
   rpm          rusty-video-player-<ver>-1.x86_64.rpm (cargo-generate-rpm)
   appimage     RustyVideoPlayer-<ver>-x86_64.AppImage (appimagetool)
   flatpak-sources   regenerate packaging/flatpak/cargo-sources.json from Cargo.lock (flatpak-cargo-generator)
-  flatpak      build the Flatpak with flatpak-builder from the working tree and bundle it (.flatpak)
+  flatpak      build the Flatpak with flatpak-builder from the working tree and bundle it (.flatpak);
+               --prepare-only just writes the manifest and the source tarball (CI builds it with the flatpak-builder action)
   windows      rvp.exe (x86_64-pc-windows-gnu in the wine image on Linux; the host toolchain on Windows) and the portable zip
   installer    the Inno Setup installer around it (ISCC.exe on Windows, wine in the image on Linux)
   pwa          the web app (cargo xtask web) as rusty-video-player-web-<ver>.zip
@@ -46,6 +47,7 @@ Outputs go to target/dist/release. Signing: RVP_SIGN_CMD (run once per Linux art
 RVP_WINDOWS_SIGN_CMD (an Inno Setup SignTool command, with $f for the file). No keys live in the repository.";
 
 struct Ctx {
+    prepare_only: bool,
     root: PathBuf,
     version: String,
     date: String,
@@ -57,13 +59,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let Some(target) = args.first() else { return Err(USAGE.into()) };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().map_err(|e| e.to_string())?;
     let mut version = None;
-    let (mut container, mut no_build) = (false, false);
+    let (mut container, mut no_build, mut prepare_only) = (false, false, false);
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--version" => version = Some(it.next().ok_or("--version needs a value")?.clone()),
             "--container" => container = true,
             "--no-build" => no_build = true,
+            "--prepare-only" => prepare_only = true,
             other => return Err(format!("unknown option `{other}`\n\n{USAGE}")),
         }
     }
@@ -72,7 +75,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .or_else(|| std::env::var("RVP_VERSION").ok().filter(|v| !v.is_empty()))
         .unwrap_or(cargo_version);
     let date = release_date(&root);
-    let cx = Ctx { root, version, date, container, no_build };
+    let cx = Ctx { root, version, date, container, no_build, prepare_only };
     fs::create_dir_all(cx.out()).map_err(|e| e.to_string())?;
     match target.as_str() {
         "linux-bin" => cx.linux_bin().map(|_| ()),
@@ -520,7 +523,7 @@ impl Ctx {
     }
 
     fn flatpak(&self) -> Result<(), String> {
-        if !have("flatpak-builder") {
+        if !self.prepare_only && !have("flatpak-builder") {
             return Err("flatpak-builder is missing".into());
         }
         let work = self.dist().join("flatpak");
@@ -546,6 +549,11 @@ impl Ctx {
         );
         let mpath = work.join(format!("{APP_ID}.yml"));
         write(&mpath, local.as_bytes())?;
+        if self.prepare_only {
+            // CI builds it with the flatpak-builder action; this only writes the manifest and the source tarball.
+            println!("{}", mpath.display());
+            return Ok(());
+        }
         let repo = work.join("repo");
         let build = work.join("build");
         let state = work.join("state");

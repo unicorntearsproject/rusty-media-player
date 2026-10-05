@@ -82,10 +82,12 @@ export function setupPwa(api) {
 
   // The service worker, and its update flow.
   if (!("serviceWorker" in navigator) || !(window.isSecureContext)) return;
-  let reloading = false;
+  // The new worker takes over when the user asks; only then does the page reload (the first install also fires `controllerchange`,
+  // when the worker claims the page, and that must not reload anything).
+  let updating = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloading) return;
-    reloading = true;
+    if (!updating) return;
+    updating = false;
     location.reload();
   });
   navigator.serviceWorker
@@ -93,7 +95,10 @@ export function setupPwa(api) {
     .then((reg) => {
       const offer = (worker) => {
         if (document.getElementById("update")) return;
-        const b = pill("update", "Update available: reload", () => worker.postMessage({ type: "SKIP_WAITING" }));
+        const b = pill("update", "Update available: reload", () => {
+          updating = true;
+          worker.postMessage({ type: "SKIP_WAITING" });
+        });
         b.classList.add("pwa-pill-update");
         api.status("A new version of Rusty Video Player is ready");
       };
