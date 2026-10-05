@@ -452,11 +452,12 @@ test.describe("player", () => {
     await page.mouse.move(640, 250);
     // The picture for the new position is there and nothing moves any more (hover and tooltip timers, the fade of the controls).
     await waitFor(page, () => window.rvp.snapshot().video.presented > 0 && window.rvp.snapshot().state === "paused");
+    await waitFor(page, () => window.rvp.snapshot().toast === null, null, 30_000);
     await settled(
       page,
       () => {
         const q = window.rvp.snapshot();
-        return [q.position_us, q.video.presented, q.controls_opacity, q.menu_open];
+        return [q.position_us, q.video.presented, q.controls_opacity, q.menu_open, q.toast];
       },
       { n: 8, gap: 3 },
     );

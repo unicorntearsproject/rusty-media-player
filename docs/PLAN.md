@@ -56,11 +56,11 @@ Workspace layout (`crates/*`, plus `xtask`). All crates are `MIT OR Apache-2.0`.
 | `rvp-host` | `no_std + alloc` | The **host trait set** (section 4): `Source`, `AudioSink`, `VideoSink`, `Surface`, `InputEvents`, `Storage`, `HostClock`, plus (M8) the host-neutral `NowPlaying` model and `VisualizerTap`, and (M10) the optional `Library` capability (directory listing). Mock implementations for tests. This is the source of truth for media interfaces; Rusty Bucket's App API follows it. |
 | `rvp-demux` | `no_std + alloc` | Our own incremental demuxers: ISO BMFF (MP4/M4A), Matroska/WebM (EBML), and (M9) raw audio: MP3 (ID3v1/v2, Xing/Info/LAME gapless), native FLAC, Ogg (Vorbis, Opus, FLAC), WAV (PCM, RF64), ADTS AAC; tags and cover art for all of them; plus probing. Async over `Source`. |
 | `rvp-par` | std (wasm32 with shared memory) | (M9) Worker pool behind `rvp-core::par::Parallel`, `ThreadedVideoDecoder` (a decoder on a thread of its own), the pipelined H.264 decoder (parse and reconstruction threads). Native threads, or Web Workers through a host-provided spawner. |
-| `rvp-codec-audio` | std (wasm32 ok) | `AudioDecoder` impls: AAC, MP3, FLAC, Vorbis (symphonia codec crates, unmodified), Opus (`ropus`), PCM (own, M9). Resampler (rubato). |
+| `rvp-codec-audio` | std (wasm32 ok) | `AudioDecoder` impls: AAC, MPEG layers I-III, FLAC, Vorbis (symphonia codec crates, unmodified), Opus (`ropus`), PCM (own, M9; up to 8 channels). Resampler (rubato). |
 | `rvp-codec-h264` | `no_std + alloc` | **Our own** H.264 decoder (M6), `forbid(unsafe_code)`. Public modules that an encoder can share (Rusty Bucket plans one): `bitstream` (NAL/AVCC/Annex B, RBSP escaping, `BitReader` and `BitWriter`, Exp-Golomb), `params` (SPS with VUI, PPS, scaling lists, slice header, pred weight table, MMCO: each has `parse` and `write`), `transform` (inverse and forward 4x4/8x8/DC transforms, quantisation, dequantisation, scans), `cavlc` (tables plus `read_residual_block` and `write_residual_block`), `cabac` (context init tables, arithmetic decoder, arithmetic encoder, binarisation offsets). The picture decoder is `decoder` (macroblock layer, intra/inter prediction, direct modes, deblocking, DPB, output order); `h264_decoder()` adapts it to `VideoDecoder`. |
 | `rvp-codec-av1` | std (wasm32 ok) | rav1d wrapper (needs a wasm32 patch, see risk R1). |
 | `rvp-codec-vp9` | std (wasm32 ok) | VP9 behind our `VideoDecoder` trait (M7): wraps `rusty_vp9` (Apache-2.0, pinned `=0.1.1`), adds the superframe pull loop, `VideoFrame` conversion with colour tags, size caps and key-frame gating. Both candidate crates are `std`-only, so this crate is not `no_std`. |
-| `rvp-subs` | `no_std + alloc` | SRT and WebVTT parsers, MKV/MP4 subtitle payload decoders (`S_TEXT/UTF8`, `S_TEXT/WEBVTT`, `tx3g`, `wvtt`), `CueList` (what is on screen at t). |
+| `rvp-subs` | `no_std + alloc` | SRT and WebVTT parsers, ASS/SSA (script, styles, override tags), PGS bitmap decoder, MKV/MP4 subtitle payload decoders (`S_TEXT/UTF8`, `S_TEXT/WEBVTT`, `S_TEXT/ASS`, `S_HDMV/PGS`, `tx3g`, `wvtt`), `CueList` (what is on screen at t). |
 | `rvp-viz` | `no_std + alloc` | Visualizer analysis (M8): own radix-2 FFT, 32 log bands, level, adaptive onset detection and autocorrelation tempo, as `VizSummary`s from the audio being heard. M10: the effects (`effects.rs`: spectrum bars, oscilloscope, tunnel, starfield, plasma, three palettes) drawn on the CPU into a small RGBA picture that `rvp-ui` scales to the window; beat pulses capped at 3 a second and 12 percent, a calm mode for reduced motion. |
 | `rvp-library` | `no_std + alloc` | (M10, done) The library: track/album/artist index with accent-folded sorting and search, the scan driver (`Scanner`: new, changed and gone files by path, size and mtime; tags, duration and cover art through `rvp-demux`; folder pictures), thumbnails (`zune-jpeg` and `zune-png`, 144 px), saved playlists with M3U/M3U8/PLS import and export (`rvp-player::listfile`), and the binary format the index, thumbnails and playlists are saved in through `Storage`. Directory walking comes from the `Library` host capability. |
 | `rvp-player` | `no_std + alloc` | The engine: `Session` (cooperative tasks, pipeline, A/V sync, exact seek, frame step, A-B loop, subtitles, audio-track switching, WSOLA speed, gapless chaining, visualizer tap feed), `Playlist` (order, repeat, shuffle), events. Codecs come in through `CodecFactory`. |
@@ -570,10 +570,10 @@ and a tempo estimate within 2 bpm.
   cue ids and settings ignored, `<i>`, `<c.x>`, `<v>`, timestamps tags and `{\an8}` stripped, entities decoded) and the packet
   payloads of Matroska `S_TEXT/UTF8` and `S_TEXT/WEBVTT` (also the older `D_WEBVTT/*` ids) and MP4 `tx3g` (`mov_text`) and `wvtt`.
   The demux task decodes every subtitle packet it passes into a per-track `CueList`, so switching tracks needs no re-read; cues that
-  were skipped over by a forward seek are not recovered (a cue that began before the landing cluster is missed). Sidecar `.srt`/`.vtt`
+  were skipped over by a forward seek are recovered (see "Gap closing after M10"). Sidecar `.srt`/`.vtt`/`.ass`
   files (dropped or picked together with the video, or on their own onto a playing one) load through a session task and are selected
   at once. `SessionEvent::Subtitle` fires with the stream position when the text changes (tests: within one frame of the cue time).
-  The UI draws wrapped lines on dark pills above the bar. ASS/SSA is listed as unsupported; the bundled font is a Latin subset.
+  The UI draws wrapped lines on dark pills above the bar (ASS and PGS have their own drawing, below); the bundled font is a Latin subset.
 - **Audio tracks.** `Session::select_audio` rebuilds the audio decoder, reroutes the demuxer and re-seeks to the current position
   (a short rebuffer). Labels use the language tag (`English`, `Spanish`, ...). `A` and `S` cycle, the Tracks button and the menu pick.
 - **Exact seek, frame step, A-B loop.** Seeking already decoded forward from the keyframe and showed the frame at the target; M8 adds
@@ -598,7 +598,7 @@ and a tempo estimate within 2 bpm.
   an end limit on the audio track. Tests: FLAC pieces cut from one sine reproduce it bit for bit (288000 frames, no gap, nothing doubled);
   Opus pieces match within -64 dBFS (exact frame count), AAC within -50 dBFS (its own coding noise); no click at the joins; also through
   the application with titles changing as each item is heard. A next item with no audio, or one that is not ready in time, starts
-  right after the current one ends (not gapless). Crossfade is out of scope.
+  right after the current one ends (not gapless, but without a stall: see "Gap closing after M10"). Crossfade is out of scope.
 - **Now-playing.** `rvp-host::media` (`NowPlaying`, `NowPlayingMeta`, `Playback`, `TransportCommand`) and `docs/host-api.md`. Tags and cover
   art come from the containers: MP4 `ilst` (title, artist, album artist, album, `covr`), Matroska `Info/Title`, `Tags` and cover attachments.
   The app sends metadata when the item or its tags change and playback only on a change or a jump of more than 0.5 s (the host
@@ -716,16 +716,16 @@ emits `Ended`/`Error` instead of panicking.
   checking, and a full walk of files up to 24 MiB gives an exact duration and a seek index. **FLAC**: STREAMINFO, seek table, Vorbis
   comments, pictures; frames are delimited by CRC-16 plus a valid next header (CRC-8); seeks use the table or a byte bisection.
   **Ogg**: Vorbis (block sizes read from the mode table at the end of the setup header give packet durations), Opus (TOC durations,
-  pre-skip, 80 ms pre-roll after a seek) and FLAC-in-Ogg; other multiplexed streams are skipped, a chained stream ends the file; seeks
-  bisect on page granule positions. **WAV**: RIFF and RF64, PCM 8/16/24/32 and float 32/64 (also `WAVE_FORMAT_EXTENSIBLE`), `LIST/INFO` and
+  pre-skip, 80 ms pre-roll after a seek) and FLAC-in-Ogg; other multiplexed streams are skipped, a chained stream plays on through its links
+  (added after M10); seeks bisect on page granule positions. **WAV**: RIFF and RF64, PCM 8/16/24/32 and float 32/64 (also `WAVE_FORMAT_EXTENSIBLE`), `LIST/INFO` and
   `id3 ` tags; a truncated or open-ended data chunk is clamped to the file. **ADTS AAC**: header to AudioSpecificConfig, exact duration
   by a walk. `rvp-codec-audio` has a PCM decoder (mono and stereo) for WAV. `Metadata` gained album artist, track and disc numbers and
   totals, year and genre. Tests (`rvp-demux/tests/audio.rs`, set `audio` of `tools/gen-fixtures.sh`): stream parameters, durations, tags,
   cover art and **every packet's size and time against `ffprobe -show_packets`** for 14 files; ID3v1; gapless trimming; seeks on all
   formats; truncated and byte-flipped files; `rvp-host-headless/tests/m9_raw_audio.rs` plays each file through the whole pipeline and
   compares the output with ffmpeg's decode (lossless formats and WAV exact, lossy within -70 to -147 dBFS, lengths within a frame);
-  `tests/e2e/m9.spec.js` plays nine of them in the browser. Not done: Layer I/II MPEG audio, APE and AIFF, ReplayGain, multi-channel
-  PCM (the output path is mono or stereo, like the other decoders), chained Ogg playback past the first stream.
+  `tests/e2e/m9.spec.js` plays nine of them in the browser. Not done: APE and AIFF, ReplayGain (MPEG layers I/II, multi-channel PCM and
+  chained Ogg came after M10).
 - **Deviations from the brief.** wasm IDCT SIMD was skipped (not a hot spot); no frame threading for VP9; the "before" numbers come from a
   30 s baseline run, not 60 s; the Node-wasm timing numbers are not tabulated (Node is only used for the bit-exactness smoke tests and
   kernel self-tests, the browser is the speed oracle).
@@ -825,6 +825,93 @@ M10 notes (what was built, what it cost, what is not there):
   Access handle for an origin-private directory back from IndexedDB, so the remembered-folder path is only tested up to storing it; a library of
   thousands of albums keeps its thumbnails in memory (62 KB each); no ReplayGain, no lyrics, no tag editing, no smart playlists; the queue and
   the current position are not restored after a restart (the library and playlists are); MPRIS and media keys on the desktop are M11.
+
+**Gap closing after M10** *(done 2026-10-05; between M10 and M11, on its own branch)*. The known gaps of M8 to M10, closed or settled:
+
+- **Test stability.** The browser specs no longer wait for amounts of time. `tests/e2e/helpers.js` has the waits every spec uses: a state
+  of `window.rvp.snapshot()`, `frames(n)` (n animation frames: "the page has drawn what I just did", which is where the rectangles of the
+  snapshot come from), `ticks(n)` (the page's own frame counter), `settled(read)` (a value that stops changing: the picture after a
+  seek, the cards once their covers are in) and `playedFor(us)`. "Position runs at 1x" (and 2x) is now measured against the audio
+  device's own clock (`AudioContext.currentTime`, shown in `window.rvp.audio().time`), not `performance.now()`, and a window in which
+  the player stalled is measured again (up to four times): that is the one retry, and what it excludes is a stall on a busy machine,
+  which says nothing about the rate. Other things that depended on how fast the machine was: "the subtitle appears within 300 ms" (it
+  must not appear early and must be up while the cue lasts; the headless tests check the frame), A-B loop and playlist watchers (they
+  run until the event happened, not for N seconds), the reduced-motion recording and the visualizer's "calm" check (the change is
+  counted per 120 ms of real time between samples). Real elapsed time is still waited for where the claim is about time (controls
+  hide after 2.5 s idle, a double click needs two clicks apart). One Rust test compared wall time (`exec.rs`: "10 s of virtual time must
+  not sleep" now allows 5 s, not 100 ms). Proof: `cargo xtask e2e --threads` (both builds) three times in a row with CPU load; see the
+  results at the end of this section.
+- **Subtitles.** *A cue already on screen when a forward seek lands now shows:* the demuxer lands on a video keyframe and used to
+  read on from there, so the subtitle blocks that came before it (in the cluster, or in earlier ones) were never seen. After every
+  seek the session asks the demuxer for the subtitle packets of the 20 s before the landing point (`Demuxer::side_packets`, Matroska
+  reads the block headers of those clusters and only the subtitle blocks' payloads, without moving the read position; MP4 already
+  seeks every track to the sample at or before the landing time); equal cues are not added twice. The test fails without the fix
+  (`rvp-host-headless/tests/gaps_subs.rs`: a fresh session per seek, because the demuxer reads ahead and finds the cue by itself
+  when it has read that far). *ASS/SSA:* `rvp_subs::ass` parses the script header (`PlayResX/Y`, `WrapStyle`, V4 and V4+ styles with
+  the SSA alignment numbers), Matroska `S_TEXT/ASS` blocks (`ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text`) and
+  whole `.ass`/`.ssa` files (sidecar). Override tags kept: `\b \i \u \s`, `\c`/`\1c` and `\alpha`/`\1a`, `\fs`, `\an` and `\a`, `\pos` and the
+  start of `\move`, `\r`, `\N \n \h`; karaoke, `\t`, `\fad`, clips, fonts by name, rotation and drawings (`\p`: their text is dropped)
+  are accepted and ignored. A cue carries `Rich` (spans with bold/italic/underline/strike/colour/size in thousandths of the picture
+  height, alignment 1-9, position, margins, layer, outline colour); `Cue::text` stays the plain text, so events and the snapshot
+  are as before. The UI draws styled text on the video's picture area (outline, italics by shearing the glyph rows, bold from the bold
+  face, stacking per edge, word wrap, layers); the bundled fonts are Latin subsets, as before. *PGS (HDMV bitmap subtitles) in Matroska
+  are done:* `rvp_subs::pgs::PgsDecoder` reads the segments of a display set (palette, run-length objects in fragments, composition
+  state, cropping), keeps the epoch's palettes and objects between sets, and gives "show this picture" or "clear"; a picture stays up
+  until the next display set. The UI blends the RGBA objects onto the picture area. The fixture is made by `tools/gen-pgs.py` (ffmpeg
+  has no PGS encoder); the test compares our pictures **pixel by pixel with ffmpeg's rendering** (the same BT.601/BT.709-by-size
+  colours). Fuzzing: the `subs` target covers ASS and PGS (1.0M runs; one overflow in `PlayRes` found and fixed with a regression input).
+- **Audio.** *MPEG layers I and II:* symphonia's `mp1`/`mp2` are enabled; the raw demuxer reads layer I/II frames (all the bit-rate
+  tables, 384 and 1152 samples per frame, MPEG 1 and 2); Matroska `A_MPEG/L1`/`L2`; the decoder follows the layer in each frame header,
+  so a track that says "mp3" can carry any layer (MP4 does). `ffmpeg -c:a mp2` files match ffmpeg's decode to -98 dBFS (stereo and an
+  MPEG 2 mono file at 24 kHz); there is no layer I encoder at hand, so layer I is wired and not tested with a file. *Multichannel:* PCM
+  decodes up to 8 channels (WAVE_FORMAT_EXTENSIBLE too), FLAC and Vorbis already did; the stereo mix (centre and surrounds at -3 dB,
+  the back centre at -6 dB, LFE dropped, scaled so the largest row sums to 1) equals ffmpeg's `aresample=rematrix_maxval=1.0` at
+  -100 dBFS for 5.1 (FLAC, WAV 16 and 24 bit) and 7.1 (FLAC, float WAV): the 7.1 weights of the first version differed from ffmpeg's
+  and were fixed by reading ffmpeg's matrix back from its output. *Chained Ogg (Vorbis, Opus, FLAC):* the demuxer plays on through the
+  links, the timeline continues, the next link's headers go to the decoder as ordinary packets (`ChainDec` in `rvp-codec-audio` rebuilds
+  the decoder and drops the Opus pre-skip, which in a chain is not at the start of the file), the duration is the sum of the links and
+  seeks work across them when the file was scanned (a file whose end belongs to another stream than its start is scanned once; a
+  chain that reuses one serial number and ends in a link longer than 128 KiB plays through but shows the length of the last link).
+  The output equals the links decoded alone, one after the other (Vorbis -163 dBFS, FLAC exact, Opus -96), also after a seek into the
+  second link. *AAC:* symphonia 0.6 has **no SBR and no AAC with more than two channels**. `HE-AAC` signalled backward compatibly (the
+  usual way) decodes as its LC core at the core's sample rate, band-limited; with explicit hierarchical signalling (object type 5/29)
+  and 5.1/7.1 the decoder is refused as `Unsupported` ("aac too complex"), the video plays without sound and the warning says why
+  (`video_aac51.mp4` test; the container does not matter). FDK-AAC here has no SBR encoder either, so HE-AAC files could not be
+  produced: the checks are on hand-made AudioSpecificConfigs (`rvp-codec-audio/tests/aac_limits.rs`). Not done: ReplayGain, layer I
+  test file, Opus multistream (more than two channels).
+- **Gapless with items that have no sound, or arrive late.** Measured with a harness that records the host time of every picture
+  (`rvp-host-headless/tests/gaps_gapless.rs`: audio and video items, video-only items and audio-only ones in every order, and a source
+  whose reads wait for the host clock): a next item without audio joins the previous one with one tick of delay (no picture waits more
+  than 1.5 frames), and a late item shows its first picture within two frames of its file arriving. The bug found on the way was in the
+  test host and in the contract: `NullAudio::open` kept the count of what an earlier stream had left queued (its drain is lazy), so an
+  item with sound after one without it started a second late. `AudioSink::open` now says it starts a new stream, the headless sink
+  starts clean and the session flushes the sink when it opens it (the web host's `open` already did).
+- **AV1 single-thread speed** (1080p30, `cargo xtask perf-web --single --only av1`, headless Chromium, this machine). Profile first:
+  `Profiler.start` through the DevTools protocol on the wasm build with its names kept (`wasm-bindgen --keep-debug`) showed
+  `prep_8tap_rust` at 16% of the time of the page, then `msac` (7%), our colour conversion (5%), CDEF (5%), `decode_coefs` (4%), our
+  scaler (6% with `blend_rows`), `avg` (3.5%). The 8-tap filters kept their intermediate rows in a 34 KB array that was zeroed for every
+  block and read the picture one pixel at a time through the checked accessor; the fix (the same integer sums, row-wise and
+  vectorisable, `MidRows` not cleared), loops over zipped slices in `avg`/`w_avg`/`mask`, a 64-bit arithmetic-decoder window (the
+  32-bit one on wasm32 refilled twice as often) and block-size-generic CDEF are `third_party/rav1d/PATCHES.md` items 9-12. The decoded
+  pictures are bit-identical: the 1800 frames of the stream hash the same before and after (`cargo run --release -p rvp-codec-av1
+  --example av1_bench`, which also times the RGBA conversion), the conformance tests pass and `cargo xtask wasm-smoke` agrees native,
+  wasm and wasm SIMD128 for 8 and 10 bit. Our colour conversion and the frame copy are untouched: the profile shows the conversion
+  already at its SIMD128 limit (1.4 ms a frame) and the copy at 1%.
+  Result, before and after, same harness and machine, alternating runs of 60 s (the machine was shared with other builds, so the
+  absolute numbers wander from run to run; compare the rows of a pair):
+
+  | Pair (1080p30 AV1, single-threaded, 60 s) | Dropped before | Dropped after | Session ms per tick before | after |
+  | --- | --- | --- | --- | --- |
+  | 1 | 21.4% | 14.2% | 15.45 | 10.77 |
+  | 2 | 20.2% | 16.6% | 16.19 | 12.07 |
+  | 3 | 27.3% | 25.3% | 21.42 | 16.52 |
+
+  A CPU profile of 20 s on a quieter minute: the main thread's busy time per frame fell from 22.8 to 19.7 ms (-14%) and the dropped
+  share from 18.5% to 11%. The time per tick is 23 to 30% lower in every pair; the dropped share moves less, and by a smaller step
+  when the machine is busy, because a frame is dropped when a tick (the decode of one frame plus drawing) runs past two vsyncs, which
+  depends on the tail of the load more than on its mean. The 9.57% of M9 was measured on a quieter machine. What remains is rav1d
+  itself in portable Rust (the arithmetic decoder, coefficient reading and the inverse transforms are about a third of the time); the
+  threads build is still the answer for 1080p AV1 on a slow CPU.
 
 **M11 The standalone desktop app and packaging.** *(done 2026-10-05; see the notes below)* The "standalone" edition (a):
 - **Native host** `rvp-host-desktop` (binary `rvp`): `winit` window (Wayland and X11), `softbuffer` presenting the

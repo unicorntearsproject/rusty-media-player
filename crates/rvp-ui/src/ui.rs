@@ -293,6 +293,11 @@ impl Ui {
         self.dirty = true;
     }
 
+    /// The message of the toast that is up, if any (tests wait for it to go before they compare a picture).
+    pub fn toast_text(&self) -> Option<&str> {
+        self.toast.as_ref().map(|(t, _)| t.as_str())
+    }
+
     /// True while a context menu or popup is open.
     pub fn menu_open(&self) -> bool {
         !self.menu.is_empty()

@@ -9,8 +9,11 @@ One codebase, two editions:
   the core, UI or app crates depends on [Rusty Bucket](../rust-os); it is just one more host, next to the
   browser, the desktop and the headless test host.
 
-- Containers: MP4, MKV, WebM, and raw audio files (MP3, FLAC, Ogg, WAV, AAC/ADTS, with tags and cover art). Video: H.264 (our own
-  decoder), AV1, VP9. Audio: AAC, MP3, FLAC, Opus, Vorbis, PCM.
+- Containers: MP4, MKV, WebM, and raw audio files (MP3, MP2, FLAC, Ogg incl. chained files, WAV, AAC/ADTS, with tags and cover art). Video:
+  H.264 (our own decoder), AV1, VP9. Audio: AAC, MPEG layers I-III, FLAC, Opus, Vorbis, PCM (up to 8 channels, mixed down to stereo).
+  Subtitles: SRT, WebVTT, ASS/SSA (styles, colours, position; no karaoke or effects) and PGS pictures, embedded or as files.
+  Limits: AAC is LC, mono or stereo (a symphonia limit: 5.1 and HE-AAC with explicit SBR signalling play as video without sound);
+  Opus is mono or stereo.
 - 1080p30 in the browser: WebAssembly SIMD128 kernels, plus an opt-in threads build (`cargo xtask web --threads`).
 - A portable `no_std + alloc` core behind a small host trait; no threads required.
 - Playlist, gapless playback, subtitles and a host-neutral now-playing model (Media Session in the browser) are in, and so is the

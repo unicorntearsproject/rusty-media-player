@@ -2,7 +2,15 @@
 // of time. State comes from `window.rvp.snapshot()`; "the page has drawn what I just did" is a number of animation frames
 // (`frames`); "playback has moved on" is a change of position, of presented pictures or of the audio device's clock. A machine
 // under load is slower, never different, and a wait that names its condition passes on both.
-const snap = (page) => page.evaluate(() => window.rvp.snapshot());
+
+/**
+ * The snapshot, after two animation frames: input is handled the moment it arrives, but the rectangles and the rows of the
+ * snapshot are what the last frame drew, so what was just clicked or typed has been drawn when this returns.
+ */
+const snap = async (page) => {
+  await frames(page, 2);
+  return page.evaluate(() => window.rvp.snapshot());
+};
 
 /** Wait until `fn(arg)` is true in the page (polled every 50 ms by default; `"raf"` for every frame). */
 const waitFor = (page, fn, arg, timeout, polling = 50) =>

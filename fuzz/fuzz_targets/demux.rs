@@ -28,5 +28,12 @@ fuzz_target!(|data: &[u8]| {
                 let _ = d.next_packet().await;
             }
         }
+        // The packets of other streams before a point (the subtitle cues that began before a seek landed), whatever the ids.
+        let ids: Vec<u32> = d.streams().iter().map(|s| s.id).chain([0, 1, 2, u32::MAX]).collect();
+        for (a, b) in [(0i64, 5_000_000i64), (-1_000_000, 1_000), (123_456_789, 120_000_000), (i64::MIN / 4, i64::MAX / 4)] {
+            if let Ok(v) = d.side_packets(&ids, a, b).await {
+                assert!(v.iter().all(|p| p.pts >= a && p.pts <= b), "a packet outside the asked range");
+            }
+        }
     });
 });

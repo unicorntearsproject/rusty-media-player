@@ -70,6 +70,7 @@ impl App {
             ui.controls_visible(),
             ui.controls_opacity()
         );
+        j += &format!("\"toast\":{},", ui.toast_text().map_or("null".to_string(), esc));
         j += &format!("\"menu_open\":{},\"has_video\":{},", ui.menu_open(), m.has_video);
         let tracks = |v: &[rvp_ui::TrackItem]| -> String {
             let items: alloc::vec::Vec<String> =

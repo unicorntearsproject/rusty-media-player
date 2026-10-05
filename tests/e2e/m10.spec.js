@@ -455,7 +455,8 @@ test.describe("M10", () => {
     // The albums grid at the top, an album's page, and the track table.
     await page.mouse.move(1200, 700);
     const check = async (name) => {
-      // Covers load a little after the cards are there: the view is ready when the picture stops changing.
+      // The toast of the scan has gone, and covers load a little after the cards are there: the view is ready when the picture stops changing.
+      await waitFor(page, () => window.rvp.snapshot().toast === null, null, 30_000);
       await frames(page, 4);
       await settled(page, () => window.rvp.sample(0, 0, 1280, 720, 16).join(","), { n: 6, gap: 3, timeout: 30_000 });
       const file = path.join(GOLDEN_DIR, name);
