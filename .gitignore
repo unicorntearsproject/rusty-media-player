@@ -4,3 +4,4 @@ target/
 .playwright-mcp/
 fuzz/work/
 fuzz/artifacts/
+.claude/worktrees/
