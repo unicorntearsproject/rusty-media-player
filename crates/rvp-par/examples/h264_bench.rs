@@ -2,7 +2,7 @@
 //! Prints the decode time per frame with the decoder, the reconstruction and the given number of parse threads each on
 //! its own thread.
 use rvp_core::task::block_on;
-use rvp_core::{Packet, StreamInfo, StreamKind, VideoDecoder};
+use rvp_core::{Packet, StreamInfo, StreamKind};
 use rvp_demux::{Demuxer, open};
 use rvp_host::mock::MemSource;
 use rvp_par::h264::h264_pipelined_with;

@@ -66,13 +66,16 @@ const FILES: &[&str] = &[
     "h264/h_high_cqm_jvt.mp4",
     "h264/h_high_slices.mp4",
     "h264/h_high_odd.mp4",
-    "h264/h_high_1080p.mp4",
 ];
+
+/// The big stream is only worth its time in an optimised build.
+const BIG: &str = "h264/h_high_1080p.mp4";
 
 #[test]
 fn pipelined_equals_inline() {
     let mut ran = 0;
-    for name in FILES {
+    let big = (!cfg!(debug_assertions)).then_some(BIG);
+    for name in FILES.iter().copied().chain(big) {
         let Some(file) = fixture(name) else { continue };
         ran += 1;
         let (info, pk) = packets(file);
