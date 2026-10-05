@@ -1,15 +1,24 @@
 # rusty-video-player
 
-A VLC-inspired media player in Rust that compiles to WebAssembly. It runs in a browser page, headless on
-native (for tests), and, once its app ABI exists, as an app inside [Rusty Bucket](../rust-os).
+A standalone media app for **audio and video**, written in Rust, with a portable core that compiles to WebAssembly.
+One codebase, two editions:
 
-- Containers: MP4, MKV, WebM. Video: H.264 (our own decoder), AV1, VP9. Audio: AAC, MP3, FLAC, Opus, Vorbis.
+- **Standalone:** an installable web app (PWA) and a native Linux desktop app (Flatpak, AppImage). It never
+  requires Rusty Bucket.
+- **Rusty Bucket's built-in Media app**, through the `rvp-host-rb` adapter, once its app ABI exists. Nothing in
+  the core, UI or app crates depends on [Rusty Bucket](../rust-os); it is just one more host, next to the
+  browser, the desktop and the headless test host.
+
+- Containers: MP4, MKV, WebM. Video: H.264 (our own decoder), AV1, VP9 (M7). Audio: AAC, MP3, FLAC, Opus, Vorbis.
 - A portable `no_std + alloc` core behind a small host trait; no threads required.
+- Planned: gapless playback, a host-neutral now-playing model (Media Session in the browser, MPRIS on Linux), a
+  visualizer, an audio-first library view with playlists (M3U/M3U8/PLS), and the desktop app and packaging.
 - Its own UI, drawn with the Unicorn Tears design-system tokens (`crates/theme`).
 - Clean-room: VLC is an architecture reference only; no VLC code is used.
 
 Status: Milestones 0-6 done (plan, scaffold, host/clock/executor, demuxers, audio, AV1, A/V sync, headless host, the browser host with the themed UI, and our own pure-Rust H.264 decoder: Baseline/Main/High, progressive 8-bit 4:2:0, bit-exact with ffmpeg). Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and the
-milestone list, and [`CLAUDE.md`](CLAUDE.md) for project rules.
+milestone list (M7 VP9, M8 playlist/gapless/now-playing/visualizer tap, M9 performance, M10 audio-first view, M11 desktop app and
+packaging, M12 Rusty Bucket adapter), and [`CLAUDE.md`](CLAUDE.md) for project rules.
 
 ## Layout
 
@@ -23,7 +32,7 @@ milestone list, and [`CLAUDE.md`](CLAUDE.md) for project rules.
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
 | `crates/rvp-ui`, `crates/theme` | the UI (drawn into a pixel surface) and the generated design tokens |
 | `crates/rvp-app` | session + UI + input glue behind the host trait |
-| `crates/rvp-host-{headless,web,rb}` | hosts: native test harness, browser, Rusty Bucket |
+| `crates/rvp-host-{headless,web,rb}` | hosts: native test harness, browser, Rusty Bucket (`rvp-host-desktop` arrives in M11) |
 | `web/`, `tests/e2e/` | the page (canvas, audio worklet, glue) and its Playwright tests |
 | `xtask`, `tools/` | `cargo xtask theme`, `check`, `fixtures`, `web`, `serve`, `e2e` |
 

@@ -1,15 +1,30 @@
 # rusty-video-player: Plan
 
-> Status: Milestone 6 done, 2026-10-05. Decisions live in `CLAUDE.md`; this file is the architecture and the
-> milestone list. Update it when a decision changes.
+> Status: Milestone 6 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
+> M7 to M12). Decisions live in `CLAUDE.md`; this file is the architecture and the milestone list. Update it when
+> a decision changes.
 
 ## 1. Goal and non-goals
 
-A VLC-inspired media player in Rust, compiled to `wasm32-unknown-unknown`, that ships as an app for Rusty
-Bucket (`../rust-os`) and also runs in a browser page and headless on native (the dev/test hosts).
+RVP is a standalone media app for **audio and video**, written in Rust, with a portable core that compiles to
+`wasm32-unknown-unknown` and runs natively. One codebase ships as two editions:
+
+- **(a) Standalone:** an installable web app (PWA) and a native Linux desktop app (Flatpak, AppImage). Neither
+  needs Rusty Bucket.
+- **(b) Rusty Bucket's built-in Media app** (`../rust-os`), through the `rvp-host-rb` adapter
+  (rust-os ADR-0023: RVP is the built-in player for video and audio; ADR-0026: RVP stays host-neutral and
+  Rusty Bucket's App API media interfaces are modelled on RVP's `rvp-host` traits, not the reverse).
+
+**Standalone rule:** `rvp-core`, `rvp-host`, `rvp-player`, `rvp-ui`, `rvp-app` and the codec, demux and library
+crates never depend on Rusty Bucket. Rusty Bucket is one more host (`rvp-host-rb`), alongside the browser, the
+desktop and headless hosts. Rusty Bucket-only extras (the Bucket Bar widget, streaming) are built on top of the
+host traits, never by changing them. The headless and browser hosts are also the dev/test hosts.
 
 - **In scope (v1):** containers MP4, MKV, WebM; video H.264 (our own decoder), AV1, VP9; audio AAC, MP3, FLAC,
   Opus, Vorbis; seek, pause, speed, volume, playlist, SRT/WebVTT subtitles; our own UI.
+- **In scope (after v1, M8 to M11):** gapless playback; a host-neutral now-playing model and a visualizer tap;
+  an audio-first view (library, playlists, queue, album/artist/track views, built-in visualizer); a native
+  desktop host and packaging (PWA, Flatpak, AppImage, MPRIS).
 - **Out of scope:** optical discs, network protocols other than "the host hands us bytes", streaming
   adaptive formats (HLS/DASH), skins, filters/effects, transcoding, DRM, interlaced H.264 (PAFF/MBAFF)
   until after v1, anything in VLC's `modules/` not listed above.
@@ -38,21 +53,24 @@ Workspace layout (`crates/*`, plus `xtask`). All crates are `MIT OR Apache-2.0`.
 | Crate | `no_std`? | Role |
 | --- | --- | --- |
 | `rvp-core` | `no_std + alloc` | Shared types: `Rational`, `Timestamp` (microseconds, `i64`), `StreamInfo`, `Packet`, `VideoFrame` (planar YUV, strides, colour info), `AudioBuffer`, error types, `MasterClock`, `RingBuffer`. No I/O. |
-| `rvp-host` | `no_std + alloc` | The **host trait set** (section 4): `Source`, `AudioSink`, `VideoSink`, `Surface`, `InputEvents`, `Storage`, `HostClock`. Mock implementations for tests. |
+| `rvp-host` | `no_std + alloc` | The **host trait set** (section 4): `Source`, `AudioSink`, `VideoSink`, `Surface`, `InputEvents`, `Storage`, `HostClock`, plus (M8) the host-neutral `NowPlaying` model and `VisualizerTap`, and (M10) the optional `Library` capability (directory listing). Mock implementations for tests. This is the source of truth for media interfaces; Rusty Bucket's App API follows it. |
 | `rvp-demux` | `no_std + alloc` | Our own incremental demuxers: ISO BMFF (MP4/M4A), Matroska/WebM (EBML), plus probing. Async over `Source`. |
 | `rvp-codec-audio` | std (wasm32 ok) | `AudioDecoder` impls: AAC, MP3, FLAC, Vorbis (symphonia codec crates, unmodified), Opus (`opus-decoder`). Resampler (rubato). |
 | `rvp-codec-h264` | `no_std + alloc` | **Our own** H.264 decoder (M6), `forbid(unsafe_code)`. Public modules that an encoder can share (Rusty Bucket plans one): `bitstream` (NAL/AVCC/Annex B, RBSP escaping, `BitReader` and `BitWriter`, Exp-Golomb), `params` (SPS with VUI, PPS, scaling lists, slice header, pred weight table, MMCO: each has `parse` and `write`), `transform` (inverse and forward 4x4/8x8/DC transforms, quantisation, dequantisation, scans), `cavlc` (tables plus `read_residual_block` and `write_residual_block`), `cabac` (context init tables, arithmetic decoder, arithmetic encoder, binarisation offsets). The picture decoder is `decoder` (macroblock layer, intra/inter prediction, direct modes, deblocking, DPB, output order); `h264_decoder()` adapts it to `VideoDecoder`. |
 | `rvp-codec-av1` | std (wasm32 ok) | rav1d wrapper (needs a wasm32 patch, see risk R1). |
 | `rvp-codec-vp9` | no_std + alloc preferred | VP9 behind our `VideoDecoder` trait: adopt `rusty_vp9` (Apache-2.0) or `vp9dec` (MIT) after benchmarking; own port only if both fail (M7). |
 | `rvp-subs` | `no_std + alloc` | SRT and WebVTT parsers, cue timeline. |
+| `rvp-viz` | `no_std + alloc` | (M8, M10) Visualizer analysis and effects: FFT (own radix-2 or `microfft`), band energies, beat/onset and tempo summary from the visualizer tap; in M10 the effect set drawn into an RGBA buffer by `rvp-ui` (Unicorn Viz spirit). |
+| `rvp-library` | `no_std + alloc` | (M10) Library model: scan results, track/album/artist index, tags and cover art (via symphonia metadata, behind a std feature), queue, playlists with M3U/M3U8/PLS import and export. Persistence goes through `Storage`; directory walking through the `Library` host capability. |
 | `rvp-player` | `no_std + alloc` | The engine: `Player`, cooperative task scheduler, pipeline, A/V sync, playlist, seek, events. Depends on all codecs through feature flags. |
 | `theme` | `no_std` | Design-system tokens as `const`s (colour, spacing, radius, type scale, motion, glow). Generated by `cargo xtask theme` from `crates/theme/tokens/*.css`, a snapshot of `claude-design-system/tokens`. |
 | `rvp-app` | `no_std + alloc` | The application glue (added in M5): owns the `Session` and the `Ui`, applies `Action`s to the player, builds the `UiModel`, composes picture + chrome into one RGBA surface and presents it. Hosts only forward input and call `App::tick`. Needs a `Host` whose video sink is `rvp_host::FrameSink`. |
-| `rvp-ui` | `no_std + alloc` | Our UI: a small immediate-mode toolkit drawn into an RGBA framebuffer (rects, rounded rects, gradients, pre-rendered glow sprites, text via `fontdue`, Lucide icons as paths). Player view: video area, transport bar, seek bar, volume, playlist drawer, context menu, subtitle overlay. Same pixels in browser and Rusty Bucket. |
+| `rvp-ui` | `no_std + alloc` | Our UI: a small immediate-mode toolkit drawn into an RGBA framebuffer (rects, rounded rects, gradients, pre-rendered glow sprites, text via `fontdue`, Lucide icons as paths). Player view: video area, transport bar, seek bar, volume, playlist drawer, context menu, subtitle overlay. From M10 also the audio-first views (library, album/artist/track, queue, visualizer). Same pixels in browser, desktop and Rusty Bucket. |
 | `rvp-host-headless` | std | Native host for tests: file `Source`, a virtual-time clock, a null/WAV audio sink, a frame-hash `VideoSink`, scripted `InputEvents`. Binary `rvp-headless`. |
-| `rvp-host-web` | wasm32 only | `wasm-bindgen` cdylib: File API `Source`, WebAudio `AudioSink`, `<canvas>` `Surface`, DOM input, `requestAnimationFrame` clock. |
-| `rvp-host-rb` | wasm32 only | Rusty Bucket adapter (M10). Stub until its app ABI exists. |
-| `xtask` | std | `cargo xtask theme | fixtures | web | serve | licenses`. |
+| `rvp-host-web` | wasm32 only | `wasm-bindgen` cdylib: File API `Source`, WebAudio `AudioSink`, `<canvas>` `Surface`, DOM input, `requestAnimationFrame` clock; Media Session API (now-playing, M8); PWA manifest and service worker (M11). |
+| `rvp-host-desktop` | std | (M11) Native Linux app: `winit` window, `softbuffer` `Surface`, `cpal` `AudioSink`, real files and drag-drop, MPRIS now-playing and media keys. Binary `rvp`. |
+| `rvp-host-rb` | wasm32 only | Rusty Bucket adapter (M12): maps `rvp-host` traits (including now-playing and the visualizer tap) to the App API. Stub until its app ABI exists. |
+| `xtask` | std | `cargo xtask theme | fixtures | web | serve | e2e | check | licenses`; from M11 also `desktop`, `flatpak`, `appimage`. |
 
 Why our own demuxers: they must be incremental, seekable, `no_std`, and async over a host `Source`;
 every candidate crate (section 8) is `std` and blocking `Read + Seek`. They use `matroska-demuxer`, `mp4` and
@@ -74,6 +92,9 @@ pub trait Host {
     fn surface(&mut self) -> &mut dyn Surface;
     fn input(&mut self) -> &mut dyn InputEvents;
     fn storage(&mut self) -> &mut dyn Storage;
+    fn now_playing(&mut self) -> Option<&mut dyn NowPlaying> { None }   // M8, optional
+    fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> { None } // M8, optional
+    fn library(&mut self) -> Option<&mut dyn Library> { None }          // M10, optional (directory access)
     async fn open(&mut self, req: OpenRequest) -> Result<Self::Source, HostError>; // file picker, drop, path, URL id
 }
 
@@ -111,6 +132,27 @@ pub trait Storage {                   // settings, recents, resume positions
 }
 ```
 
+Added in M8 (host-neutral, no Rusty Bucket types; these are the source of truth that Rusty Bucket's App API
+media interfaces follow, rust-os ADR-0026):
+
+```rust
+pub trait NowPlaying {                // MPRIS-like; the host mirrors it to its OS or shell
+    fn set_metadata(&mut self, m: &NowPlayingMeta);  // title, artist, album, art (RGBA or encoded bytes), duration_us
+    fn set_playback(&mut self, state: PlayState, position_us: i64, rate: f32); // Playing | Paused | Stopped
+    fn poll_command(&mut self) -> Option<TransportCommand>; // Play, Pause, Toggle, Stop, Next, Prev,
+                                                            // SeekTo(us), SeekBy(us), SetRate, SetVolume
+}
+pub trait VisualizerTap {             // fed by the audio pipeline after volume, before the sink
+    fn push_block(&mut self, pcm: &VizBlock);        // per-block interleaved f32 PCM + stream time
+    fn push_summary(&mut self, s: &VizSummary);      // FFT magnitudes (log bands), level, beat/onset flag, tempo estimate
+}
+```
+
+`NowPlayingMeta`, `PlayState` and `TransportCommand` live in `rvp-host`; the `Player` raises metadata and state
+changes, the host forwards them (browser: Media Session API; desktop: MPRIS; Rusty Bucket: the shell's media
+interface). The visualizer tap is computed in core (`rvp-viz`) so every host gets the same numbers; hosts that only
+want raw PCM ignore the summary.
+
 Rules: the core never blocks, never spawns, never reads a global clock, and never allocates in a hot path
 without reason. Everything time-dependent goes through `HostClock`, so the headless host can run a 2-hour
 movie in seconds with a virtual clock and get deterministic output.
@@ -118,7 +160,7 @@ movie in seconds with a virtual clock and get deterministic output.
 Mapping to Rusty Bucket (`../rust-os/docs/planning/README.md`; our page: `docs/planning/rusty-video-player.md`; App API draft: `docs/developer/app-api.md`): its apps get a Canvas surface (our `Surface`), input events,
 timers (`HostClock`), fs (`Source`/`Storage`), and audio later (HDA; our `AudioSink`). Its D8 rule
 (full keyboard *and* full pointer control, right-click menus, scroll, middle-click, back/forward buttons)
-is a UI requirement here (section 9). Its draft host API v0 has no audio or file-pick yet; M10 tracks that.
+is a UI requirement here (section 9). Its draft host API v0 has no audio or file-pick yet; M12 tracks that.
 
 ## 5. Threading model (works with no threads)
 
@@ -150,7 +192,7 @@ path is, in order: (a) frame skipping up to the next reference-safe frame (VLC-s
 without it everything still works single-threaded. (c) is not required by any milestone before M9.
 
 For Rusty Bucket the same applies, with one extra caveat from its plan: `wasmi` is an interpreter, so
-HD decoding will not be realtime there. M10 must either use a JIT/AOT wasm runtime or a native
+HD decoding will not be realtime there. M12 must either use a JIT/AOT wasm runtime or a native
 "codec service" imported through the app ABI; our `VideoDecoder` trait is the seam for that.
 
 ## 6. Clock and A/V sync
@@ -211,9 +253,20 @@ rate, playlist). The same API is exposed to JS by `rvp-host-web` for page integr
 | `thiserror` | 2.0.21 | MIT OR Apache-2.0 | yes (v2, `default-features = false`) | yes | Error derive for `std` crates. |
 | `wasm-bindgen`, `web-sys`, `js-sys` | 0.2.129 / 0.3.106 / 0.3.106 | MIT OR Apache-2.0 | n/a | target | Browser host. Build with the `wasm-bindgen` CLI (no `trunk`) driven by `xtask`. |
 | `pollster` / `futures-lite` | 1.0.1 / 2.6.1 | Apache-2.0 OR MIT | n/a | yes | Native test hosts only; the player has its own hand-rolled poller. |
-| `cpal` | 0.18.2 | Apache-2.0 | no | web backend exists | Optional native audio for the dev host (M3, nice to have). |
+| `symphonia-metadata` (and the bundle's tag readers) | 0.6.1 | MPL-2.0 | no | builds | **Use** (M10) for ID3v1/v2, Vorbis comments, MP4 `ilst` tags and embedded cover art; same unmodified-MPL stance as symphonia. `lofty` (0.25.4, MIT OR Apache-2.0) is the fallback or a writer if we ever edit tags. |
+| `microfft` | 0.6.0 | MIT | **yes** | expected | Candidate for the `no_std` visualizer FFT (fixed power-of-two sizes); otherwise a small own radix-2 FFT in `rvp-viz`. `rustfft` (6.4.1, MIT OR Apache-2.0) and `realfft` (3.5.0, MIT) are std alternatives, not needed. |
+| `winit` | 0.30.13 stable (0.31 is beta) | Apache-2.0 | no | n/a | Desktop window, input, drag-drop, fullscreen (M11). Pin the 0.30 line. |
+| `softbuffer` | 0.4.8 | MIT OR Apache-2.0 | no | n/a | **Preferred desktop presenter** (M11): we already produce a finished RGBA frame, so a CPU-to-window blit is enough and avoids wgpu. |
+| `pixels` | 0.17.2 | MIT | no | n/a | Alternative presenter (wgpu based, GPU scaling); heavier. Only if softbuffer is too slow at 4K. |
+| `cpal` | 0.18.2 | Apache-2.0 | no | n/a | Native audio output (M11); PipeWire, PulseAudio and ALSA on Linux. |
+| `rfd` | 0.17.2 | MIT | no | n/a | Native open/save dialogs (portal-aware on Linux), for open file/folder and playlist export (M11). |
+| `souvlaki` | 0.8.3 | MIT | no | n/a | Media controls and MPRIS on Linux (M11, via `zbus`, MIT). `mpris-server` (0.10.0, **MPL-2.0**) is the alternative; fine unmodified. |
+| `directories` | 6.0.0 | MIT OR Apache-2.0 | no | n/a | XDG paths for the desktop library database and settings (M11). |
+| `walkdir` | 2.5.0 | Unlicense OR MIT | no | n/a | Library scan on desktop (M10). |
+| `ashpd` | 0.12.3 | MIT | no | n/a | Optional: XDG portals when sandboxed (Flatpak), if `rfd` does not cover it. |
 | `matroska-demuxer`, `mp4` | 0.8.1 / 0.14.0 | Zlib OR MIT OR Apache-2.0 / MIT | no | builds | Test oracles only (dev-dependencies). |
 | `mp4parse` | 0.17.0 | MPL-2.0 | no | n/a | Not used. |
+| `appimagetool`, `flatpak-builder` | n/a | MIT / LGPL-2.1 | n/a | n/a | Packaging **tools** run by `cargo xtask` (M11); not linked and not shipped, so their licences do not touch ours. Bundled runtime libraries inside the packages (for example `libasound`, `libxkbcommon`) keep their own licences and are listed in `THIRD_PARTY_LICENSES.md` per package. |
 | `libopus`/`audiopus_sys`, `fdk-aac`, `vorbis_rs`, `minimp3`, `x264`-family | various | C code | no | no | Rejected (C, and GPL for x264). |
 
 Tools (not shipped): `ffmpeg`/`ffprobe` (present on this machine, with libx264, libaom, libsvtav1,
@@ -247,6 +300,14 @@ Source of truth: the Unicorn Tears design system, mirrored into the `theme` crat
   the keyboard and with only the pointer.
 - **Voice:** playful, short, technical (`"Can't decode this one. HEVC isn't on the guest list."`).
 - Icons: Lucide (ISC), compiled to path data at build time.
+- **Audio-first view (M10):** when the open item is audio (or the user picks Library), the picture area becomes
+  a cover-art-forward now-playing screen with the visualizer behind it; a left rail switches Library, Albums,
+  Artists, Tracks, Playlists, Queue. Same tokens, same input rules (full keyboard and full pointer, right-click
+  menus). The visualizer view is full window and borrows the Unicorn Viz spirit (`../unicorn-viz`, MIT: audio
+  reactive demoscene effects driven by FFT bands, beat and tempo tracking): a small set of effects written
+  from scratch in Rust (spectrum bars, scope, tunnel/plasma, beat-pulsed particle field), audio-reactive via the
+  `VisualizerTap` summary, `reduce-motion` and photosensitivity safe (flash rate capped, off by default for
+  reduced motion). Ideas and algorithms may be studied; no code is copied without keeping its MIT notice.
 
 ## 10. Test strategy
 
@@ -436,19 +497,40 @@ the deblocking filter, table masking in the CABAC engine); no SIMD or threads. T
 (about 25% in `decision`), typical ones by prediction and deblocking. 1080p stress in a browser tab sharing a thread
 with the UI is the case M9 still has to win.
 
-**M7 VP9.** Benchmark `rusty_vp9` and `vp9dec` on the VP9 fixtures (correctness against ffmpeg `framemd5`,
-speed, wasm32 build, memory); wrap the winner as `rvp-codec-vp9`. If neither is acceptable, port our own
-(stage like M6). *Done when:* VP9 (profile 0, 8-bit) fixtures decode bit-exact to `framemd5`, 1080p30 decodes
-at >= 30 fps native release single thread, and the browser E2E passes with a VP9+Opus WebM.
+**M7 VP9.** Benchmark `rusty_vp9` and `vp9dec` on the VP9 fixtures against: licence, correctness
+(ffmpeg `framemd5`), speed, wasm32 build, `no_std` support and memory; wrap the winner as `rvp-codec-vp9` behind
+`CodecFactory`. Fixtures: profile 0, 8-bit, several sizes and encoder settings, odd sizes, and resolution change
+mid-stream if the crate supports it. If neither is acceptable, report why and propose options before porting our
+own (stage like M6). *Done when:* VP9 (profile 0, 8-bit) fixtures decode bit-exact to `framemd5`, 1080p30 decodes
+at >= 30 fps native release single thread, a headless test plays a VP9+Opus WebM end to end, and the browser E2E
+passes with it.
 
-**M8 Playlist, seek, subtitles.** `Playlist` (add/remove/reorder, repeat, shuffle, drag to add), resume
-positions in `Storage`, accurate seek (decode forward to the exact frame), frame step, speed 0.25x-4x with
-WSOLA audio, track selection (audio/subtitle), A-B loop, chapters (MKV/MP4), `rvp-subs` (SRT, WebVTT, MKV
-`S_TEXT/UTF8` and `S_TEXT/WEBVTT`) with rendering in `rvp-ui`. *Done when:* unit tests parse a corpus of
-SRT/WebVTT edge cases (BOM, CRLF, overlapping cues, styling tags stripped, cue settings ignored) into the
-expected cue list; headless play with a subtitle file emits `SubtitleCue` events at the right virtual times (+-1 frame);
-exact-seek test shows frame N's decoded hash equals the hash from sequential decode for 50 random N; a
-playlist E2E plays 3 items back to back with no gap > 100 ms and resumes the saved position after reload.
+**M8 Playlist, seek, subtitles, gapless, now-playing, visualizer tap.** `Playlist` (add/remove/reorder, repeat,
+shuffle, drag to add), resume positions in `Storage`, accurate seek (decode forward to the exact frame), frame
+step, speed 0.25x-4x with WSOLA audio, track selection (audio/subtitle), A-B loop, chapters (MKV/MP4), `rvp-subs`
+(SRT, WebVTT, MKV `S_TEXT/UTF8` and `S_TEXT/WEBVTT`) with rendering in `rvp-ui`. Additions:
+- **Gapless playback:** the next playlist item is opened and its decoder primed while the current one plays; the
+  audio pipeline joins the two streams sample-accurately (container/encoder delay and padding trimmed using
+  MP4 edit lists, Matroska `CodecDelay`, LAME/Xing gapless tags where present), with the sample rate converted
+  once at the join and no clock discontinuity. Crossfade is out of scope.
+- **Now-playing model** in `rvp-host` (`NowPlaying`, `NowPlayingMeta`, `TransportCommand`; section 4): title, artist,
+  album, art, position, duration, state, plus transport commands, MPRIS-like and host-neutral. The player updates
+  it from container metadata (and, from M10, library tags). In the browser `rvp-host-web` wires it to the **Media
+  Session API** (metadata, playback state, position state, action handlers for play, pause, seek, previous/next).
+- **Visualizer tap** (`VisualizerTap`, `rvp-viz`): the audio pipeline hands every output block (interleaved f32
+  PCM plus stream time) to a tap in `rvp-host`, and core computes an FFT/beat summary (log-spaced bands, level,
+  onset flag, tempo estimate) that rides along. The browser host exposes both to JS for tests.
+*Done when:* unit tests parse a corpus of SRT/WebVTT edge cases (BOM, CRLF, overlapping cues, styling tags
+stripped, cue settings ignored) into the expected cue list; headless play with a subtitle file emits `SubtitleCue`
+events at the right virtual times (+-1 frame); exact-seek test shows frame N's decoded hash equals the hash from
+sequential decode for 50 random N; a playlist E2E plays 3 items back to back with no gap > 100 ms and resumes the
+saved position after reload; **gapless:** a headless test of consecutive FLAC (or Opus, MP3 with gapless tags)
+tracks cut from one continuous sine is bit-continuous across the join (no gap, no extra samples; for lossy
+codecs the join error stays under -60 dBFS RMS) and reports a gap of 0 frames; **now-playing:** a headless test
+sees metadata, state and position updates and applies each `TransportCommand`, and a Playwright test checks
+`navigator.mediaSession.metadata`/`playbackState` and that a Media Session action pauses playback; **visualizer:**
+a 1 kHz sine puts its energy in the expected band and an impulse train at 120 bpm gives onsets at 500 ms +- 1 block
+and a tempo estimate within 2 bpm.
 
 **M9 Performance and robustness.** wasm SIMD128 kernels for YUV->RGBA, deblocking, inter prediction, IDCT;
 optional worker pool (`Parallel` host capability); fuzzing the demuxers and bitstream parsers (`cargo fuzz`,
@@ -457,9 +539,69 @@ High and VP9 play at 1x in headless **wasm** (run with Node or the Playwright br
 over 60 s; fuzz targets run 10 min each with no findings; a truncated-file test plays to the end of the
 available data and emits `Ended`/`Error` instead of panicking.
 
-**M10 Rusty Bucket adapter.** `rvp-host-rb` against the app ABI (Canvas, input, timers, fs, audio) once it
-exists; decide runtime vs codec service (wasmi is too slow; see section 5). *Done when:* the player app runs
-inside Rusty Bucket under QEMU, opens a video from the ramdisk/FAT image, and a headless QEMU screendump
+**M10 The audio-first view.** Makes RVP a music player as well as a video player; all of it lives in host-neutral
+crates and `rvp-ui`, so every edition gets it.
+- **Library:** scan and index (`rvp-library`) a folder or a set of files handed over through the optional `Library`
+  host capability (desktop: directory walk; browser: File System Access directory handle with an
+  `<input webkitdirectory>` fallback; Rusty Bucket: its fs); incremental rescans keyed by path, size and mtime;
+  tags (title, artist, album artist, album, track/disc, year, genre, duration) and **cover art** from symphonia's
+  metadata (ID3v2, Vorbis comments, MP4 `ilst`, FLAC pictures) with a folder-art fallback (`cover.jpg`/`folder.png`);
+  the index and a downscaled art cache persist through `Storage`. Art decoding is JPEG/PNG; a small decoder crate
+  is chosen in this milestone (MIT/Apache only).
+- **Playlists:** M3U, M3U8 (UTF-8, `#EXTINF`) and PLS import and export; relative paths resolved against the
+  playlist's location; missing entries are kept and flagged, never silently dropped.
+- **Queue:** play next, add to queue, reorder, remove, clear, repeat, shuffle (no immediate repeats), save queue
+  as a playlist; the queue is the M8 `Playlist` seen through the library.
+- **Views:** Albums (art grid), Artists, Tracks (sortable list), Playlists, Queue, search-as-you-type, all
+  keyboard and pointer driven, with the now-playing screen from section 9.
+- **Gapless album playback:** playing an album or a queue uses the M8 gapless path end to end (including the
+  next-track prefetch across files in a folder and across containers).
+- **Visualizer view** (Unicorn Viz spirit, `../unicorn-viz`, MIT, reference only): a full-window view with at
+  least four effects (spectrum bars, oscilloscope, tunnel/plasma, beat-reactive particles), a preset switcher,
+  an optional overlay (title, artist, time), driven by the M8 `VisualizerTap` summary and drawn in `rvp-viz`
+  into the RGBA surface so it looks the same everywhere; effects run within the tick budget at 1080p in wasm.
+*Done when:* a generated library (about 200 tracks across 20 albums, mixed MP3/FLAC/Opus/AAC/Vorbis, with and
+without embedded art, odd tags, Unicode, missing tags) scans in a headless test into the exact expected
+artist/album/track tree with art for the right albums, and a rescan after adding, changing and deleting files
+updates only what changed; M3U, M3U8 and PLS fixtures round-trip (import, export, import gives an equal list) and
+relative, absolute, missing and BOM/CRLF cases are covered; the queue operations pass unit tests; a headless
+album playback test shows gapless joins (section M8 criterion) for the whole album and the right now-playing
+metadata per track; a Playwright test scans a folder in the browser, opens an album and verifies view contents,
+now-playing metadata, and that the visualizer canvas pixels move with the music and stay still when paused
+(golden screenshots with a tolerance for the static views).
+
+**M11 The standalone desktop app and packaging.** The "standalone" edition (a):
+- **Native host** `rvp-host-desktop` (binary `rvp`): `winit` window (Wayland and X11), `softbuffer` presenting the
+  RGBA surface (`pixels` only if needed), `cpal` audio with the device clock feeding `queued_frames` and
+  `output_latency_us`, real files and folders (command line, `rfd` open dialogs, drag-drop of files and folders,
+  "open with"), settings and library database under the XDG directories, fullscreen, window state, HiDPI.
+- **MPRIS on Linux** (`org.mpris.MediaPlayer2`, via `souvlaki` or `mpris-server`) implementing `NowPlaying`:
+  metadata, art, position, transport commands, media keys; checked with `playerctl`.
+- **PWA:** web app manifest (name, icons from the theme, `display: standalone`, file handlers and a share/open target
+  where the browser supports them), a service worker that precaches the wasm, JS and fonts so the app starts
+  offline (versioned cache, update flow), install prompt handling, and the Media Session wiring from M8.
+- **Packaging:** a Flatpak (manifest in `packaging/flatpak`, runtime `org.freedesktop.Platform`, permissions: Wayland,
+  fallback X11, PulseAudio/PipeWire, `--filesystem=xdg-music:ro`, `xdg-videos:ro`, MPRIS own-name; portals for the
+  rest) and an AppImage (`packaging/appimage`, built by `cargo xtask appimage`), plus a `.desktop` file, AppStream
+  metainfo and icons. Release builds are static where possible and `cargo xtask licenses` lists every bundled
+  component.
+- **Licence check (done 2026-10-05, in section 8):** `winit` Apache-2.0, `softbuffer` MIT OR Apache-2.0, `cpal`
+  Apache-2.0, `rfd` MIT, `souvlaki` MIT (`mpris-server` MPL-2.0 as the alternative), `directories` MIT OR Apache-2.0,
+  all compatible with MIT OR Apache-2.0; the packages' bundled system libraries are audited per package before a
+  release and recorded in `THIRD_PARTY_LICENSES.md`. No GPL/LGPL code is linked statically into the binary.
+*Done when:* `cargo xtask desktop` builds `rvp`; a headless-display test (Xvfb or a Wayland compositor in CI, plus
+the virtual-time host for logic) opens a fixture from the command line, shows decoded frames (screenshot or
+surface hash) and plays audio through a null/PipeWire sink with the audio clock advancing at 1x +- 5%;
+`playerctl` can read metadata and position and pause and seek it; `cargo xtask flatpak` and `cargo xtask appimage`
+produce packages that start and play a fixture in a clean environment (`flatpak run`, the AppImage on a bare
+container); a Playwright test installs the PWA (manifest valid, service worker active), reloads **offline** and
+still plays a locally opened fixture; `THIRD_PARTY_LICENSES.md` lists everything bundled.
+
+**M12 Rusty Bucket adapter** (was M10). `rvp-host-rb` against the app ABI (Canvas, input, timers, fs, audio) once it
+exists, mapping `rvp-host` (playback, `NowPlaying`, `VisualizerTap`, `Library`) to the App API whose media
+interfaces rust-os models on ours (ADR-0026); decide runtime vs codec service (wasmi is too slow; see section 5).
+Nothing here may change core, `rvp-host`, `rvp-ui` or `rvp-app` for Rusty Bucket's sake. *Done when:* the player app
+runs inside Rusty Bucket under QEMU, opens a video from the ramdisk/FAT image, and a headless QEMU screendump
 shows decoded frames and the themed UI; **blocked** until `../rust-os` Phase 3 (host API v0) lands, plus
 audio and file APIs.
 
@@ -469,11 +611,14 @@ audio and file APIs.
 | --- | --- | --- |
 | R1 | `rav1d` 1.1.0 does not compile on `wasm32-unknown-unknown` (libc imports). | **Resolved in M4**: a private `libc` shim module (see `third_party/rav1d/PATCHES.md`) was the only change needed. The vendored copy decodes bit-exact in Node (`cargo xtask wasm-smoke`). Upstreaming the shim is still worthwhile. |
 | R2 | Real-time 1080p in single-threaded wasm for H.264/AV1/VP9. | Budgeted ticks, frame skipping, SIMD128 (M9), optional workers; lower-resolution graceful degrade; honest "performance mode" in UI. |
-| R3 | Rusty Bucket's `wasmi` is an interpreter: video will not be realtime there. | M10; native codec service or a JIT/AOT runtime; tracked in `../rust-os/docs/planning/architecture.md` (D12 compile-ahead engine, D16 threads). |
+| R3 | Rusty Bucket's `wasmi` is an interpreter: video will not be realtime there. | M12; native codec service or a JIT/AOT runtime; tracked in `../rust-os/docs/planning/architecture.md` (D12 compile-ahead engine, D16 threads). |
 | R4 | Bit-exact H.264 is long, detail-heavy work. | **Resolved in M6**: staged ffmpeg oracles, generated tables, synthetic streams for features x264 does not emit. |
 | R5 | `opus-decoder` is a 0.1.x crate. | Test vectors in M3; fallback `ropus`. |
 | R6 | Symphonia is MPL-2.0 and `std`. | Fine unmodified (file-level copyleft); audio crate is isolated, so it could be swapped for `nanomp3`/own decoders without touching the core. |
 | R7 | Browser audio latency/clock accuracy differs by browser. | Measure `AudioContext.outputLatency/baseLatency`; fall back to monotonic master when unreliable; test on Chromium and Firefox. |
+| R9 | Desktop and packaging dependencies (`winit`, `cpal`, `souvlaki`, bundled system libs) add native licences and a Linux-only surface. | All direct deps checked (section 8); the desktop host is its own crate so core stays `no_std`; package audit and `cargo xtask licenses` in M11; Flatpak/AppImage built in CI-like clean environments. |
+| R10 | Gapless needs exact encoder delay/padding, which not every file carries (older MP3s without LAME tags). | Use container and tag data when present; otherwise trim only the decoder delay and report `gapless: approximate` in the now-playing metadata; tests use generated files with known cuts. |
+| R11 | The browser cannot always read a whole music folder (File System Access is Chromium-only). | `<input webkitdirectory>` fallback; the library persists its index so a rescan is only needed after changes; document per-browser limits. |
 | R8 | Fonts: OFL files must be bundled for `fontdue`. | M5: Space Grotesk and JetBrains Mono (OFL) subsets; licence text in `THIRD_PARTY_LICENSES.md`. |
 | Q1 | Do we want a hardware-decode escape hatch (WebCodecs) in the browser host? | Decide after M4 numbers. It would be an optional `VideoDecoder` impl, never required. |
 | Q2 | Keyboard seek step defaults (for example 5 s and 30 s with Shift). | **Decided in M5**: 5 s, 30 s with Shift, `J`/`L` 10 s. |
