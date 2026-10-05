@@ -81,6 +81,37 @@ pub struct StreamInfo {
     pub duration_us: Option<Timestamp>,
 }
 
+/// A cover picture as stored in a file (JPEG or PNG bytes, not decoded).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Art {
+    /// MIME type, for example `image/jpeg`.
+    pub mime: String,
+    /// The encoded image.
+    pub data: Vec<u8>,
+}
+
+/// Descriptive tags read from the container.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Metadata {
+    /// Title.
+    pub title: Option<String>,
+    /// Artist.
+    pub artist: Option<String>,
+    /// Album.
+    pub album: Option<String>,
+    /// Cover art.
+    pub art: Option<Art>,
+}
+
+/// A chapter mark.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chapter {
+    /// Start, microseconds.
+    pub start_us: Timestamp,
+    /// Title (may be empty).
+    pub title: String,
+}
+
 /// One compressed access unit from a demuxer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Packet {

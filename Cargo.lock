@@ -464,6 +464,7 @@ dependencies = [
  "rvp-demux",
  "rvp-host",
  "rvp-subs",
+ "rvp-viz",
 ]
 
 [[package]]
@@ -481,6 +482,15 @@ dependencies = [
  "libm",
  "rvp-host",
  "theme",
+]
+
+[[package]]
+name = "rvp-viz"
+version = "0.0.1"
+dependencies = [
+ "libm",
+ "rvp-core",
+ "rvp-host",
 ]
 
 [[package]]

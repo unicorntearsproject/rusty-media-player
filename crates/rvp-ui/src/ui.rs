@@ -795,7 +795,7 @@ impl Ui {
                 }
                 return;
             }
-            Key::Other(name) => {
+            Key::Other(name) if name != "PageUp" && name != "PageDown" => {
                 match name.as_str() {
                     "Tab" => self.cycle_focus(mods.shift, model),
                     "ContextMenu" => self.open_key_menu(model),

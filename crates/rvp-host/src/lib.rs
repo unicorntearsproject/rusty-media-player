@@ -12,11 +12,16 @@ extern crate std;
 
 pub mod frame;
 pub mod input;
+pub mod media;
 pub mod mock;
 
 pub use frame::FrameSink;
 
 pub use input::{InputEvent, Key, Modifiers, PointerButton, Rect};
+pub use media::{
+    Art, NowPlaying, NowPlayingMeta, PlayState, Playback, RecordingNowPlaying, RecordingTap,
+    TransportCommand, VIZ_BANDS, VisualizerTap, VizBlock, VizSummary,
+};
 
 use alloc::{string::String, vec::Vec};
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
@@ -138,4 +143,12 @@ pub trait Host {
     fn storage(&mut self) -> &mut Self::Store;
     /// Open a media source.
     async fn open(&mut self, req: OpenRequest) -> Result<Self::Source, HostError>;
+    /// The host's now-playing integration (Media Session, MPRIS, a shell), if it has one.
+    fn now_playing(&mut self) -> Option<&mut dyn NowPlaying> {
+        None
+    }
+    /// The host's visualizer tap, if it wants the audio analysis.
+    fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> {
+        None
+    }
 }

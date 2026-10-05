@@ -21,7 +21,7 @@ pub mod mkv;
 pub mod mp4;
 
 use alloc::string::ToString;
-use rvp_core::{Error, Packet, Result, StreamInfo, Timestamp};
+use rvp_core::{Chapter, Error, Metadata, Packet, Result, StreamInfo, Timestamp};
 use rvp_host::Source;
 
 pub use mkv::MkvDemuxer;
@@ -53,6 +53,10 @@ pub trait Demuxer {
     fn streams(&self) -> &[StreamInfo];
     /// Duration in microseconds, if known.
     fn duration_us(&self) -> Option<Timestamp>;
+    /// Title, artist, album and cover art, as far as the container has them.
+    fn metadata(&self) -> &Metadata;
+    /// Chapter marks in time order (empty when there are none).
+    fn chapters(&self) -> &[Chapter];
     /// Next packet in file order, `None` at the end.
     async fn next_packet(&mut self) -> Result<Option<Packet>>;
     /// Seek so the next packets start at the keyframe (of the first video stream, else the first stream) at or
@@ -98,6 +102,20 @@ impl<S: Source> Demuxer for AnyDemuxer<S> {
         match self {
             Self::Mp4(d) => d.duration_us(),
             Self::Mkv(d) => d.duration_us(),
+        }
+    }
+
+    fn metadata(&self) -> &Metadata {
+        match self {
+            Self::Mp4(d) => d.metadata(),
+            Self::Mkv(d) => d.metadata(),
+        }
+    }
+
+    fn chapters(&self) -> &[Chapter] {
+        match self {
+            Self::Mp4(d) => d.chapters(),
+            Self::Mkv(d) => d.chapters(),
         }
     }
 

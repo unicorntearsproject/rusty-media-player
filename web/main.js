@@ -2,6 +2,7 @@
 // input to the wasm `WebPlayer`. All drawing happens in Rust; this file only blits and forwards.
 import init, { WebPlayer } from "./pkg/rvp.js";
 import { RvpAudio } from "./audio.js";
+import { RvpMediaSession } from "./mediasession.js";
 
 const canvas = document.getElementById("screen");
 const fileInput = document.getElementById("file");
@@ -14,6 +15,9 @@ const audio = new RvpAudio();
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const player = new WebPlayer(canvas, audio, reduceMotion.matches);
 reduceMotion.addEventListener("change", () => player.set_reduce_motion(reduceMotion.matches));
+// Now-playing in the browser's media controls (lock screen, media keys) through the Media Session API.
+const media = new RvpMediaSession();
+player.set_media_session(media);
 
 // ---- size -----------------------------------------------------------------------------------------------
 
@@ -185,6 +189,9 @@ window.rvp = {
   openFile,
   openFiles,
   saveState: () => player.save_state(),
+  /** Switch the audio-analysis tap on or off, and read what it has seen (counts and the latest summary). */
+  visualizer: (on) => player.enable_visualizer(on),
+  vizState: () => JSON.parse(player.viz_state()),
   audio: () => audio.debug(),
   /** RGBA bytes of a canvas region (physical pixels). */
   pixels: (x, y, w, h) => Array.from(canvas.getContext("2d").getImageData(x, y, w, h).data),

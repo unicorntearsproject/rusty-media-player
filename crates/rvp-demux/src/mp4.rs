@@ -10,7 +10,10 @@ use crate::Demuxer;
 use crate::io::{Cur, Reader, invalid};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use rvp_core::{AudioInfo, Error, Packet, Rational, Result, StreamInfo, StreamKind, Timestamp, VideoInfo};
+use rvp_core::{
+    Art, AudioInfo, Chapter, Error, Metadata, Packet, Rational, Result, StreamInfo, StreamKind, Timestamp,
+    VideoInfo,
+};
 use rvp_host::Source;
 
 type Fourcc = [u8; 4];
@@ -65,6 +68,62 @@ pub struct Mp4Demuxer<S: Source> {
     streams: Vec<StreamInfo>,
     tracks: Vec<Track>,
     duration_us: Option<Timestamp>,
+    meta: Metadata,
+    chapters: Vec<Chapter>,
+}
+
+/// Tags from `udta/meta/ilst` (iTunes style) and chapters from the Nero `udta/chpl` box.
+fn parse_udta(udta: &[u8], meta: &mut Metadata, chapters: &mut Vec<Chapter>) {
+    let Ok(kids) = boxes(udta) else { return };
+    if let Some(m) = find(&kids, b"meta") {
+        // `meta` is a full box: skip version and flags.
+        if let Some(body) = m.get(4..) {
+            if let Ok(mk) = boxes(body) {
+                if let Some(ilst) = find(&mk, b"ilst") {
+                    for (ty, item) in boxes(ilst).unwrap_or_default() {
+                        let Some(data) = boxes(item).ok().and_then(|b| find(&b, b"data")) else { continue };
+                        // version/flags (type in the low 24 bits), 4 reserved bytes, then the value.
+                        let (Some(flags), Some(value)) = (data.get(0..4), data.get(8..)) else { continue };
+                        let kind = u32::from_be_bytes([flags[0], flags[1], flags[2], flags[3]]) & 0xFF_FFFF;
+                        let text = || {
+                            core::str::from_utf8(value)
+                                .ok()
+                                .map(ToString::to_string)
+                                .filter(|s| !s.is_empty())
+                        };
+                        match &ty {
+                            [0xA9, b'n', b'a', b'm'] => meta.title = text(),
+                            [0xA9, b'A', b'R', b'T'] => meta.artist = text().or(meta.artist.take()),
+                            b"aART" => meta.artist = meta.artist.take().or_else(text),
+                            [0xA9, b'a', b'l', b'b'] => meta.album = text(),
+                            b"covr" if !value.is_empty() => {
+                                let mime = if kind == 14 { "image/png" } else { "image/jpeg" };
+                                meta.art = Some(Art { mime: mime.to_string(), data: value.to_vec() });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(c) = find(&kids, b"chpl") {
+        // version, flags, 4 reserved bytes, a count byte, then (start in 100 ns, title length, title) entries.
+        let mut cur = Cur::new(c);
+        let mut go = |cur: &mut Cur| -> Result<()> {
+            cur.skip(8)?;
+            let n = cur.u8()?;
+            for _ in 0..n {
+                let start = cur.u64()? as i64 / 10;
+                let len = cur.u8()? as usize;
+                let title = String::from_utf8_lossy(cur.take(len)?).into_owned();
+                chapters.push(Chapter { start_us: start, title });
+            }
+            Ok(())
+        };
+        let _ = go(&mut cur);
+        chapters.sort_by_key(|c| c.start_us);
+    }
 }
 
 fn boxes(d: &[u8]) -> Result<Vec<(Fourcc, &[u8])>> {
@@ -519,6 +578,8 @@ impl<S: Source> Mp4Demuxer<S> {
         let mut tracks: Vec<Track> = Vec::new();
         let mut trex: Vec<(u32, Trex)> = Vec::new();
         let mut have_moov = false;
+        let mut meta = Metadata::default();
+        let mut chapters: Vec<Chapter> = Vec::new();
         let mut have_ftyp = false;
         loop {
             let mut hdr = [0u8; 16];
@@ -562,6 +623,9 @@ impl<S: Source> Mp4Demuxer<S> {
                                 tracks.push(tb.track);
                             }
                         }
+                    }
+                    if let Some(udta) = find(&kids, b"udta") {
+                        parse_udta(udta, &mut meta, &mut chapters);
                     }
                     if let Some(mvex) = find(&kids, b"mvex") {
                         for (t, b) in boxes(mvex)? {
@@ -617,7 +681,7 @@ impl<S: Source> Mp4Demuxer<S> {
                 info.duration_us = (ticks > 0).then(|| t.time_base.ticks_to_us(ticks));
             }
         }
-        Ok(Self { rd, streams, tracks, duration_us })
+        Ok(Self { rd, streams, tracks, duration_us, meta, chapters })
     }
 
     /// Index of the track seeks are keyed on: the first video track, else the first track.
@@ -633,6 +697,14 @@ impl<S: Source> Demuxer for Mp4Demuxer<S> {
 
     fn duration_us(&self) -> Option<Timestamp> {
         self.duration_us
+    }
+
+    fn metadata(&self) -> &Metadata {
+        &self.meta
+    }
+
+    fn chapters(&self) -> &[Chapter] {
+        &self.chapters
     }
 
     async fn next_packet(&mut self) -> Result<Option<Packet>> {

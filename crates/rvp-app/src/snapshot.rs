@@ -81,6 +81,12 @@ impl App {
             .iter()
             .map(|e| format!("{{\"id\":{},\"label\":{},\"current\":{}}}", e.id, esc(&e.label), e.current))
             .collect();
+        let ch: alloc::vec::Vec<String> = m
+            .chapters
+            .iter()
+            .map(|c| format!("{{\"start_us\":{},\"title\":{}}}", c.start_us, esc(&c.title)))
+            .collect();
+        j += &format!("\"chapters\":[{}],", ch.join(","));
         j += &format!(
             "\"playlist\":[{}],\"repeat\":{},\"shuffle\":{},\"loop_a\":{},\"loop_b\":{},",
             pl.join(","),

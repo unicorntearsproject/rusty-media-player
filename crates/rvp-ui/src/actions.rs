@@ -77,6 +77,10 @@ pub enum Action {
     AddFiles,
     /// Show the playlist menu.
     ShowPlaylist,
+    /// Seek to an absolute position, microseconds (a chapter).
+    SeekAbs(i64),
+    /// The next chapter (+1) or the start of this one and then the previous one (-1).
+    ChapterStep(i8),
 }
 
 /// The physical key of a shortcut.
@@ -96,6 +100,10 @@ pub enum ShortKey {
     Home,
     /// End.
     End,
+    /// Page up.
+    PageUp,
+    /// Page down.
+    PageDown,
     /// A character key (lower case).
     Char(char),
 }
@@ -149,6 +157,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::Char('r'), Action::CycleRepeat),
     sc(ShortKey::Char('z'), Action::ToggleShuffle),
     sc(ShortKey::Char('q'), Action::ShowPlaylist),
+    sc(ShortKey::PageDown, Action::ChapterStep(1)),
+    sc(ShortKey::PageUp, Action::ChapterStep(-1)),
 ];
 
 /// The action bound to a key press, if any. Browser-style combinations (Ctrl, Alt or Meta with a letter)
@@ -166,6 +176,8 @@ pub fn shortcut_for(key: &Key, mods: &Modifiers) -> Option<Action> {
         Key::Home => ShortKey::Home,
         Key::End => ShortKey::End,
         Key::Char(c) => ShortKey::Char(c.to_ascii_lowercase()),
+        Key::Other(n) if n == "PageUp" => ShortKey::PageUp,
+        Key::Other(n) if n == "PageDown" => ShortKey::PageDown,
         _ => return None,
     };
     let arrow = matches!(k, ShortKey::Left | ShortKey::Right);
@@ -184,6 +196,8 @@ fn key_name(k: ShortKey) -> String {
         ShortKey::Down => "\u{2193}".to_string(),
         ShortKey::Home => "Home".to_string(),
         ShortKey::End => "End".to_string(),
+        ShortKey::PageUp => "Page Up".to_string(),
+        ShortKey::PageDown => "Page Down".to_string(),
         ShortKey::Char(c) => c.to_ascii_uppercase().to_string(),
     }
 }
@@ -369,6 +383,34 @@ pub fn tracks_menu(model: &UiModel) -> Vec<MenuItem> {
     v
 }
 
+/// The chapter submenu: next and previous, then the chapters around the current one.
+pub fn chapter_menu(model: &UiModel) -> Vec<MenuItem> {
+    let n = model.chapters.len();
+    let mut v = alloc::vec![
+        MenuItem::act("Next chapter", Action::ChapterStep(1)).enabled(n > 0),
+        MenuItem::act("Previous chapter", Action::ChapterStep(-1)).enabled(n > 0),
+    ];
+    if n > 0 {
+        let cur = model.chapters.iter().rposition(|c| c.start_us <= model.position_us + 500_000).unwrap_or(0);
+        let first = cur.saturating_sub(PLAYLIST_ROWS / 3).min(n.saturating_sub(PLAYLIST_ROWS));
+        let last = (first + PLAYLIST_ROWS).min(n);
+        for (i, c) in model.chapters[first..last].iter().enumerate() {
+            let label = if c.title.is_empty() {
+                alloc::format!("Chapter {}", first + i + 1)
+            } else {
+                alloc::format!("{}  {}", crate::model::format_time(c.start_us), c.title)
+            };
+            let mut m = MenuItem::act(&label, Action::SeekAbs(c.start_us)).checked(first + i == cur);
+            m.hint.clear();
+            if i == 0 {
+                m.separator = true;
+            }
+            v.push(m);
+        }
+    }
+    v
+}
+
 /// Playlist rows shown at most (the list scrolls by showing the part around the current item).
 const PLAYLIST_ROWS: usize = 12;
 
@@ -457,6 +499,7 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::parent("Volume", volume),
         MenuItem::parent("Audio track", audio_menu(model)).sep().enabled(has),
         MenuItem::parent("Subtitles", subtitle_menu(model)).enabled(has),
+        MenuItem::parent("Chapters", chapter_menu(model)).enabled(!model.chapters.is_empty()),
         MenuItem::act("Show playlist", Action::ShowPlaylist).sep(),
         MenuItem::parent("Playlist", {
             let mut v = alloc::vec![

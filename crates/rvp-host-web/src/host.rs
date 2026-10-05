@@ -117,6 +117,28 @@ impl Storage for WebStorage {
     }
 }
 
+/// The visualizer tap of the page: counts what it gets and keeps the latest summary, which scripts read through
+/// `WebPlayer::viz_state` (tests, and later the page's own visualizer).
+#[derive(Default)]
+pub struct WebTap {
+    pub frames: u64,
+    pub summaries: u64,
+    pub onsets: u64,
+    pub last: Option<rvp_host::VizSummary>,
+}
+
+impl rvp_host::VisualizerTap for WebTap {
+    fn push_block(&mut self, block: &rvp_host::VizBlock<'_>) {
+        self.frames += (block.samples.len() / block.channels.max(1) as usize) as u64;
+    }
+
+    fn push_summary(&mut self, s: &rvp_host::VizSummary) {
+        self.summaries += 1;
+        self.onsets += s.onset as u64;
+        self.last = Some(*s);
+    }
+}
+
 /// Everything the app needs from the page.
 pub struct WebHost {
     pub clock: WebClock,
@@ -126,6 +148,10 @@ pub struct WebHost {
     pub input: WebInput,
     pub storage: WebStorage,
     pub files: HashMap<String, web_sys::File>,
+    /// The Media Session adapter, once the page has set one.
+    pub media: Option<crate::media::WebNowPlaying>,
+    /// The visualizer tap, while the page has it switched on.
+    pub tap: Option<WebTap>,
 }
 
 impl Host for WebHost {
@@ -162,5 +188,11 @@ impl Host for WebHost {
                 .ok_or_else(|| HostError(format!("no dropped file `{id}`"))),
             OpenRequest::Pick => Err(HostError("the page shows the file picker itself".into())),
         }
+    }
+    fn visualizer(&mut self) -> Option<&mut dyn rvp_host::VisualizerTap> {
+        self.tap.as_mut().map(|t| t as &mut dyn rvp_host::VisualizerTap)
+    }
+    fn now_playing(&mut self) -> Option<&mut dyn rvp_host::NowPlaying> {
+        self.media.as_mut().map(|m| m as &mut dyn rvp_host::NowPlaying)
     }
 }

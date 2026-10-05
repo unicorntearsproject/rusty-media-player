@@ -11,14 +11,24 @@ One codebase, two editions:
 
 - Containers: MP4, MKV, WebM. Video: H.264 (our own decoder), AV1, VP9. Audio: AAC, MP3, FLAC, Opus, Vorbis.
 - A portable `no_std + alloc` core behind a small host trait; no threads required.
-- Planned: gapless playback, a host-neutral now-playing model (Media Session in the browser, MPRIS on Linux), a
-  visualizer, an audio-first library view with playlists (M3U/M3U8/PLS), and the desktop app and packaging.
+- Playlist, gapless playback, subtitles and a host-neutral now-playing model (Media Session in the browser) are in; planned: MPRIS on
+  Linux, an audio-first library view with M3U/M3U8/PLS playlists and a visualizer view, and the desktop app and packaging.
 - Its own UI, drawn with the Unicorn Tears design-system tokens (`crates/theme`).
 - Clean-room: VLC is an architecture reference only; no VLC code is used.
 
-Status: Milestones 0-7 done (VP9 via `rusty_vp9`, bit-exact with ffmpeg; plan, scaffold, host/clock/executor, demuxers, audio, AV1, A/V sync, headless host, the browser host with the themed UI, and our own pure-Rust H.264 decoder: Baseline/Main/High, progressive 8-bit 4:2:0, bit-exact with ffmpeg). Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and the
-milestone list (M8 playlist/gapless/now-playing/visualizer tap, M9 performance, M10 audio-first view, M11 desktop app and
-packaging, M12 Rusty Bucket adapter), and [`CLAUDE.md`](CLAUDE.md) for project rules.
+Status: milestones 0 to 8 done.
+
+- M0-M6: scaffold, host/clock/executor, demuxers, audio, AV1, A/V sync, the headless host, the browser host with the themed
+  UI, and our own pure-Rust H.264 decoder (Baseline/Main/High, progressive 8-bit 4:2:0, bit-exact with ffmpeg).
+- M7: VP9 through `rusty_vp9`, bit-exact with ffmpeg.
+- M8: playlist with gapless playback, SRT/WebVTT and embedded subtitles, audio-track switching, pitch-preserving speed,
+  exact seek, frame step, A-B loop, chapters, resume positions, the now-playing model (Media Session in the browser)
+  and the visualizer tap.
+
+Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Read [`docs/PLAN.md`](docs/PLAN.md)
+for the architecture and the milestone list (M9 performance, M10 audio-first view, M11 desktop app and packaging, M12 Rusty
+Bucket adapter), [`docs/host-api.md`](docs/host-api.md) for the host-neutral media interfaces, and [`CLAUDE.md`](CLAUDE.md)
+for project rules.
 
 ## Layout
 
@@ -28,7 +38,7 @@ packaging, M12 Rusty Bucket adapter), and [`CLAUDE.md`](CLAUDE.md) for project r
 | `crates/rvp-host` | host trait set (source, audio, video, surface, input, storage, clock) |
 | `crates/rvp-demux` | MP4 and Matroska/WebM demuxers |
 | `crates/rvp-codec-*` | audio, H.264 (own decoder; its bitstream, parameter-set, transform, CAVLC and CABAC modules are reusable by an encoder), AV1, VP9 decoders |
-| `crates/rvp-subs` | SRT and WebVTT |
+| `crates/rvp-subs`, `crates/rvp-viz` | text subtitles; audio analysis for visualizers |
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
 | `crates/rvp-ui`, `crates/theme` | the UI (drawn into a pixel surface) and the generated design tokens |
 | `crates/rvp-app` | session + UI + input glue behind the host trait |
@@ -52,8 +62,8 @@ cargo xtask e2e                 # build, make fixtures, run the Playwright tests
 ```
 
 Browser player: drop a file on the page or press `O`. Keys: `Space`/`K` play, arrows seek 5 s (Shift 30 s), `J`/`L` 10 s,
-`Up`/`Down` volume, `M` mute, `F` fullscreen, `[`/`]` speed, `\` normal speed, `Home`/`End`; right-click for a menu with all
-of them. Screenshots are in [`docs/screenshots`](docs/screenshots).
+`Up`/`Down` volume, `M` mute, `F` fullscreen, `[`/`]` speed, `\` normal speed, `Home`/`End`, `S`/`A` subtitle and audio track, `.`/`,` frame step, `I` A-B loop, `N`/`P` next and previous, `R` repeat, `Z` shuffle, `Q` playlist, Page Up/Down chapters; right-click for a menu with all
+of them. Open several files to make a playlist; they play gaplessly. See [`docs/host-api.md`](docs/host-api.md) for the now-playing and visualizer interfaces. Screenshots are in [`docs/screenshots`](docs/screenshots).
 
 ## License
 

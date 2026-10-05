@@ -219,7 +219,9 @@ PY
 gen_m8() {
   local d="$out/m8"
   mkdir -p "$d"
-  [[ -s "$d/.done" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
+  # The marker holds a version, so adding fixtures to this set regenerates it once.
+  local version=3
+  [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
   # Sidecar subtitle files with known timing (also the source of the embedded ones).
   cat > "$d/sub.srt" <<'SRT'
 1
@@ -304,7 +306,11 @@ CH
   ff "${a[@]}" -i "$d/cover.jpg" -map 0:a -map 1:v -c:a aac -b:a 64k -c:v mjpeg -disposition:v:0 attached_pic \
      -metadata title="Sine Song" -metadata artist="The Tones" -metadata album="Pure" "$d/tagged.m4a"
   ff "${a[@]}" -c:a libopus -b:a 64k -metadata title="Sine Song" -metadata artist="The Tones" -metadata album="Pure" "$d/tagged.webm"
-  touch "$d/.done"
+  ff "${a[@]}" -c:a libopus -b:a 64k -metadata title="Sine Song" -metadata artist="The Tones" -metadata album="Pure" \
+     -attach "$d/cover.jpg" -metadata:s:t:0 mimetype=image/jpeg -metadata:s:t:0 filename=cover.jpg "$d/tagged_art.mka"
+  # Clicks at 120 bpm (4 ms bursts of 2 kHz every 0.5 s, 8 s) for the visualizer's onset and tempo tests.
+  ff -f lavfi -i "aevalsrc='if(lt(mod(t,0.5),0.004), 0.8*sin(2*PI*2000*t), 0)':s=48000:d=8" -c:a flac "$d/clicks_120.mkv"
+  echo "$version" > "$d/.done"
   echo "m8 fixtures in $d"
 }
 

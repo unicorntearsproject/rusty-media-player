@@ -202,4 +202,104 @@ test.describe("M8", () => {
     expect(p).toBeLessThan(36);
     expect(errors).toEqual([]);
   });
+
+  test("Media Session: tags, art and state reach the browser, and its buttons control the player", async ({ page }) => {
+    // Capture the handlers the page registers so the test can press the "media keys".
+    await page.addInitScript(() => {
+      window.__msHandlers = {};
+      const ms = navigator.mediaSession;
+      const orig = ms.setActionHandler.bind(ms);
+      ms.setActionHandler = (a, f) => { window.__msHandlers[a] = f; return orig(a, f); };
+    });
+    const errors = await load(page, M8("tagged.m4a"));
+    const meta = () => page.evaluate(() => {
+      const m = navigator.mediaSession.metadata;
+      return m && { title: m.title, artist: m.artist, album: m.album, art: m.artwork.length, state: navigator.mediaSession.playbackState };
+    });
+    await waitFor(page, () => navigator.mediaSession.metadata && navigator.mediaSession.metadata.title === "Sine Song");
+    let m = await meta();
+    expect(m).toEqual({ title: "Sine Song", artist: "The Tones", album: "Pure", art: 1, state: "playing" });
+    // The cover is a real image the browser can decode.
+    const ok = await page.evaluate(async () => {
+      const img = new Image();
+      img.src = navigator.mediaSession.metadata.artwork[0].src;
+      await img.decode();
+      return [img.width, img.height];
+    });
+    expect(ok).toEqual([64, 64]);
+    // Pause, seek and play through the handlers.
+    await page.evaluate(() => window.__msHandlers.pause());
+    await waitState(page, "paused");
+    await waitFor(page, () => navigator.mediaSession.playbackState === "paused");
+    await page.evaluate(() => window.__msHandlers.seekto({ seekTime: 3 }));
+    await waitFor(page, () => Math.abs(window.rvp.snapshot().position_us / 1e6 - 3) < 0.4);
+    await page.evaluate(() => window.__msHandlers.play());
+    await waitState(page, "playing");
+    await waitFor(page, () => navigator.mediaSession.playbackState === "playing");
+    expect(errors).toEqual([]);
+  });
+
+  test("Media Session: next and previous track move through the playlist", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__msHandlers = {};
+      const ms = navigator.mediaSession;
+      const orig = ms.setActionHandler.bind(ms);
+      ms.setActionHandler = (a, f) => { window.__msHandlers[a] = f; return orig(a, f); };
+    });
+    const errors = await load(page, [M8("gap_0.mkv"), M8("gap_1.mkv")]);
+    await waitFor(page, () => navigator.mediaSession.metadata && navigator.mediaSession.metadata.title === "gap_0");
+    await page.evaluate(() => window.__msHandlers.nexttrack());
+    await waitFor(page, () => navigator.mediaSession.metadata.title === "gap_1");
+    expect((await snap(page)).title).toBe("gap_1.mkv");
+    await page.evaluate(() => window.__msHandlers.previoustrack());
+    await waitFor(page, () => navigator.mediaSession.metadata.title === "gap_0");
+    expect(errors).toEqual([]);
+  });
+
+  test("visualizer tap: the page sees the analysis of what it plays (a sine's band, clicks as onsets and a tempo)", async ({ page }) => {
+    const errors = await boot(page);
+    await page.evaluate(() => window.rvp.visualizer(true));
+    await page.setInputFiles("#file", M8("clicks_120.mkv"));
+    await waitState(page, "playing");
+    await waitFor(page, () => window.rvp.vizState() && window.rvp.vizState().onsets >= 8, undefined, 20_000);
+    const v = await page.evaluate(() => window.rvp.vizState());
+    expect(v.summaries).toBeGreaterThan(300);
+    expect(v.last.bands).toHaveLength(32);
+    await waitFor(page, () => window.rvp.vizState().last.tempo_bpm > 0, undefined, 20_000);
+    const t = await page.evaluate(() => window.rvp.vizState().last.tempo_bpm);
+    expect(Math.abs(t - 120)).toBeLessThan(3);
+    // Off again: nothing is analysed.
+    await page.evaluate(() => window.rvp.visualizer(false));
+    expect(await page.evaluate(() => window.rvp.vizState())).toBeNull();
+    expect(errors).toEqual([]);
+  });
+
+  test("chapters: Page Down and Page Up move between the marks, the menu lists them", async ({ page }) => {
+    for (const file of ["chapters.mkv", "chapters.mp4"]) {
+      const errors = await load(page, M8(file));
+      let s = await snap(page);
+      expect(s.chapters.map((c) => c.title)).toEqual(["Intro", "Middle", "End"]);
+      await page.keyboard.press("Space");
+      await waitState(page, "paused");
+      await page.keyboard.press("PageDown");
+      await waitFor(page, () => Math.abs(window.rvp.snapshot().position_us / 1e6 - 2) < 0.3);
+      await page.keyboard.press("PageDown");
+      await waitFor(page, () => Math.abs(window.rvp.snapshot().position_us / 1e6 - 4) < 0.3);
+      await page.keyboard.press("PageUp"); // near the start of "End": back to "Middle"
+      await waitFor(page, () => Math.abs(window.rvp.snapshot().position_us / 1e6 - 2) < 0.3);
+      // The menu: right click, Chapters submenu lists them; clicking one seeks there.
+      await page.mouse.click(300, 200, { button: "right" });
+      await waitFor(page, () => window.rvp.snapshot().menu_open);
+      s = await snap(page);
+      const parent = s.menu.find((m) => m.label === "Chapters");
+      expect(parent.enabled).toBe(true);
+      await page.mouse.move(parent.rect.x + 20, parent.rect.y + parent.rect.h / 2);
+      await waitFor(page, () => window.rvp.snapshot().menu.some((m) => m.label.endsWith("Intro")));
+      s = await snap(page);
+      const row = s.menu.find((m) => m.label.endsWith("Intro"));
+      await page.mouse.click(row.rect.x + 10, row.rect.y + row.rect.h / 2);
+      await waitFor(page, () => window.rvp.snapshot().position_us < 300_000);
+      expect(errors).toEqual([]);
+    }
+  });
 });

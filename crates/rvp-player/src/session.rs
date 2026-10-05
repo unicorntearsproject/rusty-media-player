@@ -148,6 +148,8 @@ struct Shared {
     subs: Vec<SubSlot>,
     sel_sub: Option<u32>,
     next_external: u32,
+    meta: rvp_core::Metadata,
+    chapters: Vec<rvp_core::Chapter>,
     /// Bumped when the selected audio stream changes; the audio task rebuilds its decoder.
     audio_epoch: u32,
     opened: bool,
@@ -205,6 +207,8 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
         let mut s = sh.borrow_mut();
         s.streams = d.streams().to_vec();
         s.duration_us = d.duration_us();
+        s.meta = d.metadata().clone();
+        s.chapters = d.chapters().to_vec();
         s.sel_audio = s.streams.iter().find(|i| i.kind == StreamKind::Audio).cloned();
         s.sel_video = s.streams.iter().find(|i| i.kind == StreamKind::Video).cloned();
         let tracks: Vec<StreamInfo> =
@@ -525,6 +529,8 @@ pub struct Session {
     tag: u32,
     /// Item number stamped on audio segments (increments at every item change).
     item_no: u32,
+    viz: Option<rvp_viz::Analyzer>,
+    viz_reset: bool,
     next: Option<NextItem>,
     /// The audio feed has moved on to the next item; the current one is only being heard out.
     feed_next: bool,
@@ -563,6 +569,8 @@ impl Session {
             item_no: 0,
             next: None,
             feed_next: false,
+            viz: None,
+            viz_reset: false,
         }
     }
 
@@ -626,6 +634,16 @@ impl Session {
         if self.steps.len() < 8 {
             self.steps.push_back(if forward { 1 } else { -1 });
         }
+    }
+
+    /// Title, artist, album and cover art from the container.
+    pub fn metadata(&self) -> rvp_core::Metadata {
+        self.sh.borrow().meta.clone()
+    }
+
+    /// Chapter marks from the container, in time order.
+    pub fn chapters(&self) -> Vec<rvp_core::Chapter> {
+        self.sh.borrow().chapters.clone()
     }
 
     /// Next pending event, if any.
@@ -896,6 +914,7 @@ impl Session {
         s.seek = Some(demux_target);
         s.seeking = true;
         drop(s);
+        self.viz_reset = true;
         if self.feed_next {
             // Seeking out of the tail of an item: the joined next item is dropped (the caller queues it again).
             self.next = None;
@@ -960,6 +979,7 @@ impl Session {
             if has_audio && self.audio.is_none() {
                 if let Ok(p) = host.audio().open(WANT_AUDIO) {
                     let mut out = AudioOut::new(p);
+                    out.set_tap(host.visualizer().is_some());
                     out.set_rate(self.rate);
                     if self.trace {
                         out.enable_trace();
@@ -1121,6 +1141,9 @@ impl Session {
             }
         }
 
+        // 6b. Visualizer tap: hand over what has been heard since the last tick, with its analysis.
+        self.feed_visualizer(host);
+
         // 7b. A-B loop: past B, jump back to A and keep playing.
         if let (true, Some((a, b))) = (self.running, self.ab_loop) {
             if self.clock.now_stream(now) >= b {
@@ -1193,6 +1216,42 @@ impl Session {
 }
 
 impl Session {
+    /// Feed the host's visualizer tap (if it has one) the audio heard since the last call.
+    fn feed_visualizer<H: Host>(&mut self, host: &mut H) {
+        let want = host.visualizer().is_some();
+        let Some(out) = &mut self.audio else { return };
+        out.set_tap(want);
+        if !want {
+            self.viz = None;
+            return;
+        }
+        let params = out.sink_params();
+        if self.viz.as_ref().is_none_or(|a| a.sample_rate() != params.sample_rate) {
+            self.viz = Some(rvp_viz::Analyzer::new(params.sample_rate));
+        }
+        if core::mem::take(&mut self.viz_reset) {
+            if let Some(a) = &mut self.viz {
+                a.reset();
+            }
+        }
+        let Some((pts, pcm)) = out.take_heard(&*host.audio()) else { return };
+        let mut summaries = Vec::new();
+        if let Some(a) = &mut self.viz {
+            a.process(&pcm, params.channels as usize, pts, &mut summaries);
+        }
+        if let Some(tap) = host.visualizer() {
+            tap.push_block(&rvp_host::VizBlock {
+                pts_us: pts,
+                sample_rate: params.sample_rate,
+                channels: params.channels,
+                samples: &pcm,
+            });
+            for s in &summaries {
+                tap.push_summary(s);
+            }
+        }
+    }
+
     /// Make the queued next item the current one. `heard` is the position its audio has reached when the switch
     /// happens during playback (gapless); `None` means the previous item ended and the new one starts from zero.
     fn promote(&mut self, now: Timestamp, heard: Option<Timestamp>) {

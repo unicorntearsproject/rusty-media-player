@@ -91,6 +91,8 @@ pub struct PlayOptions {
     pub audio_track: Option<u32>,
     /// Loop between these stream times (A, B) from the start.
     pub ab_loop: Option<(Timestamp, Timestamp)>,
+    /// Offer a visualizer tap and record what it gets.
+    pub visualizer: bool,
     /// Files to play after the first one, joined gaplessly (each is queued when the session asks for the next).
     pub chain: Vec<String>,
 }
@@ -114,6 +116,10 @@ pub struct PlayReport {
     pub virtual_us: Timestamp,
     /// Final state.
     pub state: SessionState,
+    /// What the visualizer tap received (frames of PCM, and every summary), when it was asked for.
+    pub viz_frames: u64,
+    /// The summaries the visualizer tap received.
+    pub viz: Vec<rvp_host::VizSummary>,
     /// Session events with the virtual host time at which they were raised.
     pub events: Vec<(Timestamp, SessionEvent)>,
     /// Subtitle tracks known at the end.
@@ -128,6 +134,9 @@ pub struct PlayReport {
 pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
     let mut host = HeadlessHost::new();
     host.audio.capture = Some(Vec::new());
+    if opts.visualizer {
+        host.tap = Some(rvp_host::RecordingTap::default());
+    }
     let clock = host.virtual_clock();
     let codecs = DefaultCodecs { stall: opts.video_stall, clock: Some(clock.clone()) };
     let mut session = Session::new(FileSource::open(path)?, Rc::new(codecs));
@@ -199,6 +208,8 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         warnings: session.warnings(),
         virtual_us: now,
         state: session.state(),
+        viz_frames: host.tap.as_ref().map_or(0, |t| t.frames),
+        viz: host.tap.take().map(|t| t.summaries).unwrap_or_default(),
         events,
         subtitle_tracks: session.subtitle_tracks(),
         duration_us: session.duration_us(),

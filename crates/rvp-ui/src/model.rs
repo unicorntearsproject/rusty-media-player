@@ -38,6 +38,15 @@ pub struct TrackItem {
     pub label: String,
 }
 
+/// A chapter mark.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChapterItem {
+    /// Start, microseconds.
+    pub start_us: i64,
+    /// Title (may be empty).
+    pub title: String,
+}
+
 /// One row of the playlist menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlaylistEntry {
@@ -80,6 +89,8 @@ pub struct UiModel {
     pub selected_subtitle: Option<u32>,
     /// The subtitle text on screen right now.
     pub subtitle: Option<String>,
+    /// Chapter marks, in time order.
+    pub chapters: Vec<ChapterItem>,
     /// The playlist, in list order.
     pub playlist: Vec<PlaylistEntry>,
     /// Repeat mode: 0 off, 1 all, 2 one.

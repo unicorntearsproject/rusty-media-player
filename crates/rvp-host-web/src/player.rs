@@ -83,6 +83,8 @@ impl WebPlayer {
             input: WebInput::default(),
             storage: WebStorage::new(),
             files: HashMap::new(),
+            media: None,
+            tap: None,
         };
         let app = App::new(Rc::new(WebCodecs), UiConfig { reduce_motion });
         Ok(WebPlayer { host, app, next_file: 0 })
@@ -107,6 +109,42 @@ impl WebPlayer {
             .collect();
         self.app.open_items(&mut self.host, &items, append);
         self.app.pump(&mut self.host);
+    }
+
+    /// Give the player the page's Media Session adapter (`web/mediasession.js`), so lock screens, media keys and
+    /// the browser's media controls show what is playing and can control it.
+    pub fn set_media_session(&mut self, js: crate::media::JsMediaSession) {
+        self.host.media = Some(crate::media::WebNowPlaying::new(js));
+    }
+
+    /// Switch the visualizer tap (audio analysis) on or off.
+    pub fn enable_visualizer(&mut self, on: bool) {
+        self.host.tap = on.then(crate::host::WebTap::default);
+    }
+
+    /// JSON with what the visualizer tap has received: counts, and the latest summary (level, bass/mid/treble, the
+    /// 32 bands, tempo). `null` while the tap is off.
+    pub fn viz_state(&self) -> String {
+        let Some(t) = &self.host.tap else { return "null".into() };
+        let last = match &t.last {
+            Some(s) => format!(
+                "{{\"pts_us\":{},\"level\":{:.4},\"peak\":{:.4},\"bass\":{:.4},\"mid\":{:.4},\"treble\":{:.4},\"onset\":{},\"tempo_bpm\":{:.2},\"bands\":[{}]}}",
+                s.pts_us,
+                s.level,
+                s.peak,
+                s.bass,
+                s.mid,
+                s.treble,
+                s.onset,
+                s.tempo_bpm,
+                s.bands.iter().map(|b| format!("{b:.3}")).collect::<Vec<_>>().join(",")
+            ),
+            None => "null".into(),
+        };
+        format!(
+            "{{\"frames\":{},\"summaries\":{},\"onsets\":{},\"last\":{}}}",
+            t.frames, t.summaries, t.onsets, last
+        )
     }
 
     /// Write what must survive a reload (the resume position). Call before the page unloads.

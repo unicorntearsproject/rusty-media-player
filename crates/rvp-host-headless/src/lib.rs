@@ -6,8 +6,8 @@ pub use rvp_host::mock::{FakeClock as VirtualClock, ScriptedInput};
 
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
 use rvp_host::{
-    AudioSink, FrameSink, Host, HostClock, HostError, InputEvents, OpenRequest, Rect, Source, Storage,
-    Surface, VideoSink,
+    AudioSink, FrameSink, Host, HostClock, HostError, InputEvents, NowPlaying, OpenRequest, Rect, RecordingNowPlaying,
+    RecordingTap, Source, Storage, Surface, VideoSink, VisualizerTap,
 };
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -222,6 +222,10 @@ pub struct HeadlessHost {
     pub input: ScriptedInput,
     /// Storage.
     pub storage: MemStorage,
+    /// When set, the host offers a visualizer tap and records what it receives.
+    pub tap: Option<RecordingTap>,
+    /// When set, the host offers a now-playing sink and records what it receives.
+    pub now_playing: Option<RecordingNowPlaying>,
 }
 
 impl Default for HeadlessHost {
@@ -241,6 +245,8 @@ impl HeadlessHost {
             surface: MemSurface { size: (1280, 720, 1.0), rgba: Vec::new(), fullscreen: false },
             input: ScriptedInput::default(),
             storage: MemStorage::default(),
+            tap: None,
+            now_playing: None,
         }
     }
 
@@ -280,6 +286,12 @@ impl Host for HeadlessHost {
             OpenRequest::Pick => Err(HostError("no file picker in the headless host".into())),
         }
     }
+    fn now_playing(&mut self) -> Option<&mut dyn NowPlaying> {
+        self.now_playing.as_mut().map(|n| n as &mut dyn NowPlaying)
+    }
+    fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> {
+        self.tap.as_mut().map(|t| t as &mut dyn VisualizerTap)
+    }
 }
 
 /// A headless host for the full application ([`rvp_app::App`]): like [`HeadlessHost`], but the video sink keeps
@@ -298,6 +310,10 @@ pub struct UiHost {
     pub storage: MemStorage,
     /// Frames presented to the surface.
     pub presents: u64,
+    /// When set, the host offers a visualizer tap and records what it receives.
+    pub tap: Option<RecordingTap>,
+    /// When set, the host offers a now-playing sink and records what it receives.
+    pub now_playing: Option<RecordingNowPlaying>,
 }
 
 impl Default for UiHost {
@@ -317,6 +333,8 @@ impl UiHost {
             surface: MemSurface { size: (1280, 720, 1.0), rgba: Vec::new(), fullscreen: false },
             input: ScriptedInput::default(),
             storage: MemStorage::default(),
+            tap: None,
+            now_playing: None,
             presents: 0,
         }
     }
@@ -356,6 +374,12 @@ impl Host for UiHost {
             OpenRequest::Id(path) => FileSource::open(&path),
             OpenRequest::Pick => Err(HostError("no file picker in the headless host".into())),
         }
+    }
+    fn now_playing(&mut self) -> Option<&mut dyn NowPlaying> {
+        self.now_playing.as_mut().map(|n| n as &mut dyn NowPlaying)
+    }
+    fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> {
+        self.tap.as_mut().map(|t| t as &mut dyn VisualizerTap)
     }
 }
 

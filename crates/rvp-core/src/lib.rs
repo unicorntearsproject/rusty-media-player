@@ -23,8 +23,8 @@ pub use clock::{ClockSource, MasterClock};
 pub use codec::{AudioDecoder, CodecFactory, VideoDecoder};
 pub use error::{Error, Result};
 pub use media::{
-    AudioBuffer, AudioCodec, AudioInfo, AudioParams, ColorMatrix, ColorRange, Packet, PixelFormat,
-    StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
+    Art, AudioBuffer, AudioCodec, AudioInfo, AudioParams, Chapter, ColorMatrix, ColorRange, Metadata, Packet,
+    PixelFormat, StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
 };
 pub use resample::Resampler;
 pub use ring::RingBuffer;

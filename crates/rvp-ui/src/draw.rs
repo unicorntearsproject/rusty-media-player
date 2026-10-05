@@ -324,6 +324,17 @@ impl Ui {
             let played = RectF::new(track.x, track.y, (px - track.x).max(th), th);
             fb.fill_rrect(played, th * 0.5, Paint::Horizontal(t::MAGENTA_500, t::VIOLET_400), a);
         }
+        // Chapter marks: small gaps in the track.
+        if let Some(d) = model.duration_us.filter(|d| *d > 0) {
+            for c in model.chapters.iter().filter(|c| c.start_us > 0) {
+                let x = track.x + track.w * (c.start_us as f32 / d as f32).clamp(0.0, 1.0);
+                fb.fill_rect_paint(
+                    RectF::new(x - 1.0 * s, track.y, 2.0 * s, th),
+                    Paint::Solid(t::INK_900),
+                    a,
+                );
+            }
+        }
         // The A-B loop: a cyan band between the marks, and a tick at each mark.
         if let Some(d) = model.duration_us.filter(|d| *d > 0) {
             let at = |us: i64| track.x + track.w * (us as f32 / d as f32).clamp(0.0, 1.0);
@@ -370,7 +381,13 @@ impl Ui {
         if let (Some(f), Some(d)) = (self.scrub.or(self.hover_seek), model.duration_us) {
             if hot {
                 let hx = track.x + track.w * f;
-                let label = format_time((f as f64 * d as f64) as i64);
+                let at = (f as f64 * d as f64) as i64;
+                let mut label = format_time(at);
+                if let Some(c) = model.chapters.iter().rev().find(|c| c.start_us <= at) {
+                    if !c.title.is_empty() {
+                        label = alloc::format!("{label}  {}", c.title);
+                    }
+                }
                 let tw = self.text_w(Face::MonoBold, 12.0, &label, 0.0);
                 let pill = RectF::new(
                     (hx - tw * 0.5 - 10.0 * s).clamp(8.0 * s, l.w - tw - 28.0 * s),

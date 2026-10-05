@@ -11,7 +11,10 @@ use crate::io::{Cur, Reader, invalid};
 use alloc::collections::VecDeque;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use rvp_core::{AudioInfo, Error, Packet, Rational, Result, StreamInfo, StreamKind, Timestamp, VideoInfo};
+use rvp_core::{
+    Art, AudioInfo, Chapter, Error, Metadata, Packet, Rational, Result, StreamInfo, StreamKind, Timestamp,
+    VideoInfo,
+};
 use rvp_host::Source;
 
 const ID_EBML: u32 = 0x1A45_DFA3;
@@ -43,6 +46,25 @@ const ID_BLOCK: u32 = 0xA1;
 const ID_BLOCK_DURATION: u32 = 0x9B;
 const ID_REFERENCE_BLOCK: u32 = 0xFB;
 const ID_DISCARD_PADDING: u32 = 0x75A2;
+const ID_TITLE: u32 = 0x7BA9;
+const ID_TAGS: u32 = 0x1254_C367;
+const ID_TAG: u32 = 0x7373;
+const ID_SIMPLE_TAG: u32 = 0x67C8;
+const ID_TAG_NAME: u32 = 0x45A3;
+const ID_TAG_STRING: u32 = 0x4487;
+const ID_CHAPTERS: u32 = 0x1043_A770;
+const ID_EDITION_ENTRY: u32 = 0x45B9;
+const ID_CHAPTER_ATOM: u32 = 0xB6;
+const ID_CHAPTER_TIME_START: u32 = 0x91;
+const ID_CHAPTER_DISPLAY: u32 = 0x80;
+const ID_CHAP_STRING: u32 = 0x85;
+const ID_ATTACHMENTS: u32 = 0x1941_A469;
+const ID_ATTACHED_FILE: u32 = 0x61A7;
+const ID_FILE_NAME: u32 = 0x466E;
+const ID_FILE_MIME: u32 = 0x4660;
+const ID_FILE_DATA: u32 = 0x465C;
+/// Attachments and tag blocks larger than this are not read.
+const MAX_META_BYTES: u64 = 8 << 20;
 
 #[derive(Debug, Clone, Copy)]
 struct Hdr {
@@ -248,6 +270,78 @@ pub struct MkvDemuxer<S: Source> {
     cluster_end: u64,
     cluster_ts: i64,
     pending: VecDeque<Packet>,
+    meta: Metadata,
+    chapters: Vec<Chapter>,
+}
+
+/// Read `SimpleTag`s (recursively) into `meta`: TITLE, ARTIST, ALBUM.
+fn read_simple_tags(body: &[u8], meta: &mut Metadata) {
+    for (id, b) in children(body).unwrap_or_default() {
+        match id {
+            ID_TAG => read_simple_tags(b, meta),
+            ID_SIMPLE_TAG => {
+                let (mut name, mut value) = (None, None);
+                for (cid, cb) in children(b).unwrap_or_default() {
+                    match cid {
+                        ID_TAG_NAME => name = Some(String::from_utf8_lossy(cb).to_ascii_uppercase()),
+                        ID_TAG_STRING => value = Some(String::from_utf8_lossy(cb).into_owned()),
+                        ID_SIMPLE_TAG => read_simple_tags(b, meta),
+                        _ => {}
+                    }
+                }
+                if let (Some(n), Some(v)) = (name, value) {
+                    let v = v.trim_end_matches('\0').to_string();
+                    if v.is_empty() {
+                        continue;
+                    }
+                    match n.as_str() {
+                        "TITLE" => meta.title.get_or_insert(v),
+                        "ARTIST" => meta.artist.get_or_insert(v),
+                        "ALBUM" => meta.album.get_or_insert(v),
+                        _ => continue,
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Chapter atoms of every edition, flattened and sorted by start time.
+fn read_chapters(body: &[u8], out: &mut Vec<Chapter>) {
+    for (id, ed) in children(body).unwrap_or_default() {
+        if id != ID_EDITION_ENTRY {
+            continue;
+        }
+        fn atoms(b: &[u8], out: &mut Vec<Chapter>) {
+            for (id, a) in children(b).unwrap_or_default() {
+                if id != ID_CHAPTER_ATOM {
+                    continue;
+                }
+                let (mut start, mut title) = (0i64, String::new());
+                for (cid, cb) in children(a).unwrap_or_default() {
+                    match cid {
+                        ID_CHAPTER_TIME_START => start = uint(cb) as i64 / 1000,
+                        ID_CHAPTER_DISPLAY => {
+                            if title.is_empty() {
+                                for (did, db) in children(cb).unwrap_or_default() {
+                                    if did == ID_CHAP_STRING {
+                                        title = String::from_utf8_lossy(db).into_owned();
+                                    }
+                                }
+                            }
+                        }
+                        ID_CHAPTER_ATOM => atoms(a, out),
+                        _ => {}
+                    }
+                }
+                out.push(Chapter { start_us: start, title });
+            }
+        }
+        atoms(ed, out);
+        break; // the first edition is the default one
+    }
+    out.sort_by_key(|c| c.start_us);
 }
 
 impl<S: Source> MkvDemuxer<S> {
@@ -286,6 +380,8 @@ impl<S: Source> MkvDemuxer<S> {
         let mut duration_ticks = 0.0f64;
         let mut tracks_body: Option<Vec<u8>> = None;
         let mut clusters: Vec<ClusterIdx> = Vec::new();
+        let mut meta = Metadata::default();
+        let mut chapters: Vec<Chapter> = Vec::new();
         let mut pos = data_start;
         while pos < seg_end {
             let n = rd.read_upto(pos, &mut hb).await?;
@@ -302,7 +398,46 @@ impl<S: Source> MkvDemuxer<S> {
                             match id {
                                 ID_TIMESTAMP_SCALE => timescale = uint(v).max(1),
                                 ID_DURATION => duration_ticks = float(v),
+                                ID_TITLE => {
+                                    let t = String::from_utf8_lossy(v).trim_end_matches('\0').to_string();
+                                    if !t.is_empty() {
+                                        meta.title = Some(t);
+                                    }
+                                }
                                 _ => {}
+                            }
+                        }
+                    }
+                }
+                ID_TAGS | ID_CHAPTERS | ID_ATTACHMENTS if h.size.is_some_and(|s| s <= MAX_META_BYTES) => {
+                    let b = rd.read_vec(body, h.size.unwrap_or(0)).await?;
+                    match h.id {
+                        ID_TAGS => read_simple_tags(&b, &mut meta),
+                        ID_CHAPTERS => read_chapters(&b, &mut chapters),
+                        _ => {
+                            for (id, f) in children(&b).unwrap_or_default() {
+                                if id != ID_ATTACHED_FILE {
+                                    continue;
+                                }
+                                let (mut name, mut mime, mut data) = (String::new(), String::new(), None);
+                                for (cid, cb) in children(f).unwrap_or_default() {
+                                    match cid {
+                                        ID_FILE_NAME => {
+                                            name = String::from_utf8_lossy(cb).to_ascii_lowercase()
+                                        }
+                                        ID_FILE_MIME => mime = String::from_utf8_lossy(cb).into_owned(),
+                                        ID_FILE_DATA => data = Some(cb.to_vec()),
+                                        _ => {}
+                                    }
+                                }
+                                if let Some(data) = data {
+                                    if name.starts_with("cover")
+                                        && mime.starts_with("image/")
+                                        && meta.art.is_none()
+                                    {
+                                        meta.art = Some(Art { mime, data });
+                                    }
+                                }
                             }
                         }
                     }
@@ -351,6 +486,8 @@ impl<S: Source> MkvDemuxer<S> {
             cluster_end: 0,
             cluster_ts: 0,
             pending: VecDeque::new(),
+            meta,
+            chapters,
         })
     }
 
@@ -624,6 +761,14 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
 
     fn duration_us(&self) -> Option<Timestamp> {
         self.duration_us
+    }
+
+    fn metadata(&self) -> &Metadata {
+        &self.meta
+    }
+
+    fn chapters(&self) -> &[Chapter] {
+        &self.chapters
     }
 
     async fn next_packet(&mut self) -> Result<Option<Packet>> {

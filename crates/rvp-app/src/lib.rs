@@ -20,7 +20,10 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use rvp_core::{CodecFactory, Error, Timestamp};
-use rvp_host::{FrameSink, Host, InputEvent, OpenRequest, Rect, Storage};
+use rvp_host::{
+    FrameSink, Host, InputEvent, NowPlayingMeta, OpenRequest, PlayState, Playback, Rect, Storage,
+    TransportCommand,
+};
 use rvp_player::{Playlist, Repeat, Session, SessionEvent, SessionState};
 use rvp_ui::{
     Action, Cursor, FrameBuffer, MediaState, PlaylistEntry, SPEEDS, TrackItem, Ui, UiConfig, UiModel,
@@ -77,9 +80,19 @@ pub struct App {
     resume_key: Option<String>,
     resume_checked: bool,
     last_resume_save: Timestamp,
+    np: NpState,
     now: Timestamp,
     frames_drawn: u64,
     perf: Perf,
+}
+
+/// What was last told to the host's now-playing sink.
+#[derive(Default)]
+struct NpState {
+    meta: Option<NowPlayingMeta>,
+    playback: Option<Playback>,
+    /// Host time at which `playback` was sent.
+    sent_at: Timestamp,
 }
 
 /// Where tick time goes, in host microseconds (cumulative).
@@ -131,6 +144,7 @@ impl App {
             resume_key: None,
             resume_checked: true,
             last_resume_save: 0,
+            np: NpState::default(),
             now: 0,
             frames_drawn: 0,
             perf: Perf::default(),
@@ -361,6 +375,127 @@ impl App {
         }
     }
 
+    /// Mirror the playback state to the host's now-playing sink and carry out the commands it passes back.
+    fn sync_now_playing<H>(&mut self, host: &mut H, now: Timestamp)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
+        if host.now_playing().is_none() {
+            return;
+        }
+        // Metadata: the file's tags, or its name.
+        let meta = self.session.as_ref().map(|s| {
+            let m = s.metadata();
+            let stem = match self.title.rsplit_once('.') {
+                Some((stem, ext)) if !stem.is_empty() && ext.len() <= 5 => stem,
+                _ => self.title.as_str(),
+            };
+            NowPlayingMeta {
+                title: m.title.unwrap_or_else(|| stem.to_string()),
+                artist: m.artist.unwrap_or_default(),
+                album: m.album.unwrap_or_default(),
+                art: m.art,
+                duration_us: s.duration_us(),
+                has_video: s.container_has_video(),
+            }
+        });
+        if meta != self.np.meta {
+            self.np.meta = meta.clone();
+            self.np.playback = None;
+            if let (Some(np), Some(m)) = (host.now_playing(), &meta) {
+                np.set_metadata(m);
+            }
+        }
+        let st = match self.model.state {
+            MediaState::Playing | MediaState::Buffering => PlayState::Playing,
+            MediaState::Paused | MediaState::Ended => PlayState::Paused,
+            _ => PlayState::Stopped,
+        };
+        let idx = self.playlist.current_id().and_then(|id| self.playlist.index_of(id));
+        let can_next =
+            idx.is_some_and(|i| i + 1 < self.playlist.len() || self.playlist.repeat() == Repeat::All);
+        let playback = Playback {
+            state: st,
+            position_us: self.model.position_us,
+            rate: self.rate as f32,
+            can_next,
+            can_prev: self.model.has_media(),
+            can_seek: self.model.duration_us.is_some(),
+        };
+        let send = match &self.np.playback {
+            None => true,
+            Some(p) => {
+                let predicted = if p.state == PlayState::Playing {
+                    p.position_us + ((now - self.np.sent_at) as f64 * p.rate as f64) as i64
+                } else {
+                    p.position_us
+                };
+                p.state != playback.state
+                    || p.rate != playback.rate
+                    || p.can_next != playback.can_next
+                    || p.can_prev != playback.can_prev
+                    || p.can_seek != playback.can_seek
+                    || (predicted - playback.position_us).abs() > 500_000
+            }
+        };
+        if send {
+            self.np.playback = Some(playback);
+            self.np.sent_at = now;
+            if let Some(np) = host.now_playing() {
+                np.set_playback(&playback);
+            }
+        }
+        // Commands from outside.
+        let mut cmds = Vec::new();
+        if let Some(np) = host.now_playing() {
+            while let Some(c) = np.poll_command() {
+                cmds.push(c);
+            }
+        }
+        for c in cmds {
+            self.run_command(host, c, now);
+        }
+    }
+
+    fn run_command<H>(&mut self, host: &mut H, c: TransportCommand, now: Timestamp)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
+        let active = self.model.state.is_active();
+        match c {
+            TransportCommand::Play if !active => self.apply(host, Action::PlayPause, now),
+            TransportCommand::Pause if active => self.apply(host, Action::PlayPause, now),
+            TransportCommand::Toggle => self.apply(host, Action::PlayPause, now),
+            TransportCommand::Stop => {
+                if active {
+                    self.apply(host, Action::PlayPause, now);
+                }
+                if let Some(s) = &mut self.session {
+                    s.seek(0);
+                }
+            }
+            TransportCommand::Next => self.apply(host, Action::Next, now),
+            TransportCommand::Prev => self.apply(host, Action::Prev, now),
+            TransportCommand::SeekTo(us) => {
+                if let Some(s) = &mut self.session {
+                    let t = Self::clamp_pos(us, s.duration_us());
+                    s.seek(t);
+                }
+            }
+            TransportCommand::SeekBy(us) => {
+                if let Some(s) = &mut self.session {
+                    let t = Self::clamp_pos(s.position_us(now) + us, s.duration_us());
+                    s.seek(t);
+                }
+            }
+            TransportCommand::SetRate(r) => self.set_speed(r as f64, now),
+            TransportCommand::SetVolume(v) => self.apply(host, Action::SetVolume(v), now),
+            _ => {}
+        }
+    }
+
     /// Gapless chaining and playlist upkeep after each session tick.
     fn run_playlist<H>(&mut self, host: &mut H, now: Timestamp)
     where
@@ -484,6 +619,7 @@ impl App {
         let t1 = host.clock().now_us();
         self.now = t1;
         self.refresh_model(t1);
+        self.sync_now_playing(host, t1);
         let drawn = self.render(host, t1);
         let t2 = host.clock().now_us();
         self.perf.ticks += 1;
@@ -652,6 +788,42 @@ impl App {
                 (Some(_), None) => self.set_loop_point(false, now),
                 (Some(_), Some(_)) => self.clear_loop(now),
             },
+            Action::SeekAbs(us) => {
+                if let Some(s) = &mut self.session {
+                    s.seek(Self::clamp_pos(us, s.duration_us()));
+                }
+            }
+            Action::ChapterStep(d) => {
+                let pos = self.session.as_ref().map_or(0, |s| s.position_us(now));
+                let ch = self.model.chapters.clone();
+                if ch.is_empty() {
+                    self.ui.show_toast("No chapters in this file.", now);
+                } else {
+                    // Forward: the first chapter after here. Back: the start of this chapter, or the one before
+                    // when already near its start.
+                    let target = if d > 0 {
+                        ch.iter().find(|c| c.start_us > pos + 500_000)
+                    } else {
+                        let cur = ch.iter().rposition(|c| c.start_us <= pos).unwrap_or(0);
+                        if pos - ch[cur].start_us > 3_000_000 || cur == 0 {
+                            Some(&ch[cur])
+                        } else {
+                            Some(&ch[cur - 1])
+                        }
+                    };
+                    match target {
+                        Some(c) => {
+                            if let Some(s) = &mut self.session {
+                                s.seek(c.start_us);
+                            }
+                            let title =
+                                if c.title.is_empty() { String::from("Chapter") } else { c.title.clone() };
+                            self.ui.show_toast(&format!("Chapter: {title}"), now);
+                        }
+                        None => self.ui.show_toast("That was the last chapter.", now),
+                    }
+                }
+            }
             Action::SetLoopA => self.set_loop_point(true, now),
             Action::SetLoopB => self.set_loop_point(false, now),
             Action::ClearLoop => self.clear_loop(now),
@@ -854,6 +1026,11 @@ impl App {
                 m.subtitle_tracks.push(TrackItem { id: t.id, label: t.label });
             }
             m.selected_subtitle = s.selected_subtitle();
+            m.chapters = s
+                .chapters()
+                .into_iter()
+                .map(|c| rvp_ui::ChapterItem { start_us: c.start_us, title: c.title })
+                .collect();
             m.repeat = match self.playlist.repeat() {
                 Repeat::Off => 0,
                 Repeat::All => 1,

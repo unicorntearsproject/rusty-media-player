@@ -21,6 +21,15 @@ fn main() {
                 s.extra_data.len()
             );
         }
+        let m = d.metadata();
+        println!(
+            "title={:?} artist={:?} album={:?} art={:?}",
+            m.title,
+            m.artist,
+            m.album,
+            m.art.as_ref().map(|a| (a.mime.clone(), a.data.len()))
+        );
+        println!("chapters: {:?}", d.chapters());
         let (mut n, mut last) = (0, None);
         while let Some(p) = d.next_packet().await.unwrap() {
             n += 1;

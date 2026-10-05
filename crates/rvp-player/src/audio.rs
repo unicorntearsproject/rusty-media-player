@@ -57,6 +57,11 @@ pub struct AudioOut {
     /// Playback rate: the input is consumed `rate` times faster than real time (pitch is kept by WSOLA).
     rate: f64,
     stretcher: Option<TimeStretcher>,
+    /// Copy what the sink accepts so the visualizer tap can be fed what is being heard.
+    tap: bool,
+    tap_buf: Vec<f32>,
+    /// Output frame index of the first frame in `tap_buf`.
+    tap_base: u64,
 }
 
 impl AudioOut {
@@ -78,6 +83,9 @@ impl AudioOut {
             trace: None,
             rate: 1.0,
             stretcher: None,
+            tap: false,
+            tap_buf: Vec::new(),
+            tap_base: 0,
         }
     }
 
@@ -119,6 +127,8 @@ impl AudioOut {
         self.need_seg = true;
         self.pushed = 0;
         self.written = 0;
+        self.tap_buf.clear();
+        self.tap_base = 0;
         self.discard_until = discard_until;
         if let Some(r) = &mut self.resampler {
             r.reset();
@@ -158,6 +168,55 @@ impl AudioOut {
     fn heard_seg(&self, sink: &impl AudioSink) -> Option<Seg> {
         let pf = self.heard_frame(sink);
         self.segs.iter().rev().find(|s| s.start_frame as i64 <= pf).or(self.segs.first()).copied()
+    }
+
+    /// Turn the copy of the output for the visualizer tap on or off.
+    pub fn set_tap(&mut self, on: bool) {
+        if self.tap && !on {
+            self.tap_buf.clear();
+        }
+        if !self.tap && on {
+            // Start from what is being heard now, not from everything written so far.
+            self.tap_buf.clear();
+            self.tap_base = self.written;
+        }
+        self.tap = on;
+    }
+
+    /// The output parameters (what the sink was opened with).
+    pub fn sink_params(&self) -> AudioParams {
+        self.sink
+    }
+
+    /// Stream time of output frame `frame` (counted since the last reset).
+    fn frame_pts(&self, frame: u64) -> Timestamp {
+        let seg = self.segs.iter().rev().find(|s| s.start_frame <= frame).or(self.segs.first());
+        match seg {
+            Some(s) => s.origin + self.frames_to_us(frame as i64 - s.start_frame as i64),
+            None => 0,
+        }
+    }
+
+    /// The part of the output that has been heard since the last call, with the stream time of its first frame.
+    /// Only available while the tap is on.
+    pub fn take_heard(&mut self, sink: &impl AudioSink) -> Option<(Timestamp, Vec<f32>)> {
+        if !self.tap {
+            return None;
+        }
+        let heard = self.heard_frame(sink);
+        if heard <= self.tap_base as i64 {
+            return None;
+        }
+        let ch = self.sink.channels as usize;
+        let n =
+            ((heard as u64).min(self.tap_base + (self.tap_buf.len() / ch) as u64) - self.tap_base) as usize;
+        if n == 0 {
+            return None;
+        }
+        let pts = self.frame_pts(self.tap_base);
+        let samples: Vec<f32> = self.tap_buf.drain(..n * ch).collect();
+        self.tap_base += n as u64;
+        Some((pts, samples))
     }
 
     /// The item number of the audio being heard.
@@ -243,6 +302,9 @@ impl AudioOut {
             let n = sink.write(&self.pending[self.pending_off..]);
             if n == 0 {
                 break;
+            }
+            if self.tap {
+                self.tap_buf.extend_from_slice(&self.pending[self.pending_off..self.pending_off + n * ch]);
             }
             self.pending_off += n * ch;
             self.written += n as u64;
