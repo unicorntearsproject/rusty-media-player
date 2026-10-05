@@ -228,7 +228,7 @@ gen_m8() {
   local d="$out/m8"
   mkdir -p "$d"
   # The marker holds a version, so adding fixtures to this set regenerates it once.
-  local version=4
+  local version=5
   [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
   # Sidecar subtitle files with known timing (also the source of the embedded ones).
   cat > "$d/sub.srt" <<'SRT'
@@ -323,6 +323,9 @@ SRT
   # PGS bitmap subtitles (no ffmpeg encoder: tools/gen-pgs.py writes a .sup stream by hand).
   python3 "$root/tools/gen-pgs.py" "$d/sub.sup"
   ff "${v[@]}" "${a[@]}" -f sup -i "$d/sub.sup" -map 0 -map 1 -map 2 "${h[@]}" -c:a aac -b:a 64k -c:s copy -metadata:s:s:0 language=eng "$d/subs_pgs.mkv"
+  # Two seconds of picture with sound (a chain item that has both) and one with a picture only, in Matroska.
+  ff "${v[@]}" "${a[@]}" -t 2 "${h[@]}" -c:a aac -b:a 64k "$d/av_2s.mkv"
+  ff "${v[@]}" -f lavfi -i "sine=frequency=660:sample_rate=48000:duration=6" -t 2 "${h[@]}" -c:a libopus -b:a 64k -ac 2 "$d/av_2s_opus.mkv"
   # A video without audio (the next item of a gapless chain that has no sound).
   ff "${v[@]}" -t 2 "${h[@]}" -an "$d/video_only.mkv"
   ff "${v[@]}" -t 2 "${h[@]}" -an -movflags +faststart "$d/video_only.mp4"

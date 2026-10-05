@@ -6,6 +6,7 @@
 //! feed the audio sink, update the clock. Tasks never touch the host; they communicate through [`Shared`].
 use crate::audio::{AudioOut, TraceEntry};
 use crate::exec::Executor;
+use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -18,7 +19,7 @@ use rvp_core::{
 };
 use rvp_demux::{Demuxer, open};
 use rvp_host::{AudioSink, Host, Source, VideoSink};
-use rvp_subs::{Cue, CueList};
+use rvp_subs::{AssScript, Cue, CueList, pgs::PgsDecoder, pgs::Update as PgsUpdate};
 
 /// First id given to subtitle tracks that do not come from the container (sidecar files).
 pub const EXTERNAL_TRACK_BASE: u32 = 0x1000_0000;
@@ -26,6 +27,11 @@ pub const EXTERNAL_TRACK_BASE: u32 = 0x1000_0000;
 const MAX_SUB_FILE: usize = 8 << 20;
 /// A cue without a known duration stays up this long, microseconds.
 const DEFAULT_CUE_US: i64 = 3_000_000;
+/// A PGS picture without a known duration stays up until the next display set, but never longer than this.
+const PGS_MAX_US: i64 = 60_000_000;
+/// After a seek, subtitle packets this far before the target are read again, so cues that began earlier but are
+/// still on screen show (the demuxer lands on a video keyframe and reads on from there).
+const SUB_LOOKBACK_US: i64 = 20_000_000;
 
 /// Packets buffered between the demuxer and a decoder.
 const MAX_PACKETS: usize = 128;
@@ -83,11 +89,76 @@ pub struct SubtitleTrack {
     pub external: bool,
 }
 
+/// What a subtitle track's packets hold.
+enum SubKind {
+    /// Plain text: Matroska SRT/WebVTT, MP4 `wvtt`.
+    Text,
+    /// MP4 `tx3g` samples.
+    MovText,
+    /// Matroska ASS/SSA blocks, with the script header from the track's codec private data.
+    Ass(Box<AssScript>),
+    /// PGS display sets.
+    Pgs(Box<PgsDecoder>),
+    /// A sidecar file, already parsed.
+    File,
+}
+
 struct SubSlot {
     track: SubtitleTrack,
     cues: CueList,
-    /// Packets are MP4 `tx3g` samples rather than plain text.
-    mov_text: bool,
+    kind: SubKind,
+}
+
+impl SubSlot {
+    /// Turn one container packet into a cue (or, for PGS, into a change of what is on screen).
+    fn ingest(&mut self, p: &Packet) {
+        let (start, dur) = (p.pts, p.duration);
+        let end = start + if dur > 0 { dur } else { DEFAULT_CUE_US };
+        match &mut self.kind {
+            SubKind::Ass(script) => {
+                let dur = if dur > 0 { dur } else { DEFAULT_CUE_US };
+                if let Some(cue) = script.cue_from_block(&p.data, start, dur) {
+                    self.cues.insert(cue);
+                }
+            }
+            SubKind::Pgs(dec) => match dec.decode(&p.data) {
+                PgsUpdate::None => {}
+                PgsUpdate::Clear => self.cues.clip_images(start),
+                PgsUpdate::Show(img) => {
+                    self.cues.clip_images(start);
+                    let mut cue = Cue::new(
+                        start,
+                        if dur > 0 { start + dur } else { start + PGS_MAX_US },
+                        String::new(),
+                    );
+                    cue.image = Some(img);
+                    self.cues.insert(cue);
+                }
+            },
+            kind => {
+                let text = match p.data.get(4..8) {
+                    Some(b"vttc") | Some(b"vtte") => rvp_subs::decode_wvtt_sample(&p.data),
+                    _ if matches!(kind, SubKind::MovText) => rvp_subs::decode_mov_text(&p.data),
+                    _ => rvp_subs::decode_mkv_text(&p.data),
+                };
+                if let Some(text) = text {
+                    self.cues.insert(Cue::new(start, end, text));
+                }
+            }
+        }
+    }
+}
+
+/// The plain text of cues on screen together, lines of different cues one under the other.
+fn join_text(cues: &[Cue]) -> Option<String> {
+    let mut out = String::new();
+    for c in cues.iter().filter(|c| !c.text.is_empty()) {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&c.text);
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// English name of a language tag (ISO 639-1/2 for the common ones), or the tag itself.
@@ -225,7 +296,7 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
         let tracks: Vec<StreamInfo> =
             s.streams.iter().filter(|i| i.kind == StreamKind::Subtitle).cloned().collect();
         for (n, st) in tracks.iter().enumerate() {
-            if !matches!(st.codec.as_str(), "subrip" | "webvtt" | "mov_text") {
+            if !matches!(st.codec.as_str(), "subrip" | "webvtt" | "mov_text" | "ass" | "hdmv_pgs") {
                 s.warnings.push(alloc::format!("subtitle track {} ({}) is not supported", st.id, st.codec));
                 continue;
             }
@@ -236,7 +307,14 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
             s.subs.push(SubSlot {
                 track: SubtitleTrack { id: st.id, language: st.language.clone(), label, external: false },
                 cues: CueList::new(),
-                mov_text: st.codec == "mov_text",
+                kind: match st.codec.as_str() {
+                    "mov_text" => SubKind::MovText,
+                    "ass" => SubKind::Ass(Box::new(AssScript::parse_header(&String::from_utf8_lossy(
+                        &st.extra_data,
+                    )))),
+                    "hdmv_pgs" => SubKind::Pgs(Box::default()),
+                    _ => SubKind::Text,
+                },
             });
         }
         s.opened = true;
@@ -246,6 +324,28 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
         let req = sh.borrow_mut().seek.take();
         if let Some(target) = req {
             let res = d.seek(target).await;
+            // Cues that began before the landing point but are still showing at the target: read the subtitle
+            // packets of the stretch before it again (an equal cue is not added twice).
+            if let Ok(landed) = res {
+                let ids: Vec<u32> = sh
+                    .borrow()
+                    .subs
+                    .iter()
+                    .filter(|t| !t.track.external && !matches!(t.kind, SubKind::File))
+                    .map(|t| t.track.id)
+                    .collect();
+                if !ids.is_empty() {
+                    let from = target.min(landed) - SUB_LOOKBACK_US;
+                    if let Ok(pkts) = d.side_packets(&ids, from, landed.max(target)).await {
+                        let mut s = sh.borrow_mut();
+                        for p in &pkts {
+                            if let Some(slot) = s.subs.iter_mut().find(|t| t.track.id == p.stream_id) {
+                                slot.ingest(p);
+                            }
+                        }
+                    }
+                }
+            }
             let mut s = sh.borrow_mut();
             s.audio_in.clear();
             s.audio_dec.clear();
@@ -289,15 +389,7 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
                         } else if s.sel_video.as_ref().is_some_and(|v| v.id == p.stream_id) {
                             s.video_in.push_back(p);
                         } else if let Some(slot) = s.subs.iter_mut().find(|t| t.track.id == p.stream_id) {
-                            let text = match p.data.get(4..8) {
-                                Some(b"vttc") | Some(b"vtte") => rvp_subs::decode_wvtt_sample(&p.data),
-                                _ if slot.mov_text => rvp_subs::decode_mov_text(&p.data),
-                                _ => rvp_subs::decode_mkv_text(&p.data),
-                            };
-                            if let Some(text) = text {
-                                let end = p.pts + if p.duration > 0 { p.duration } else { DEFAULT_CUE_US };
-                                slot.cues.insert(Cue { start: p.pts, end, text });
-                            }
+                            slot.ingest(&p);
                         }
                         s.progress += 1;
                     }
@@ -555,6 +647,7 @@ pub struct Session {
     last_presented: Option<Timestamp>,
     events: VecDeque<SessionEvent>,
     shown_subtitle: Option<String>,
+    shown_cues: Vec<Cue>,
     /// Frame steps requested and not yet shown: +1 forward, -1 back (consumed one at a time while paused).
     steps: VecDeque<i8>,
     /// A frame step moved the position, so resuming must re-seek to restart audio there.
@@ -604,6 +697,7 @@ impl Session {
             last_presented: None,
             events: VecDeque::new(),
             shown_subtitle: None,
+            shown_cues: Vec::new(),
             steps: VecDeque::new(),
             stepped: false,
             ab_loop: None,
@@ -730,9 +824,23 @@ impl Session {
 
     /// The text of the selected subtitle track at stream time `t`.
     pub fn subtitle_text_at(&self, t: Timestamp) -> Option<String> {
+        join_text(&self.subtitle_cues_at(t))
+    }
+
+    /// The cues of the selected subtitle track on screen at stream time `t`, in drawing order (text with its ASS
+    /// styling, or a PGS picture).
+    pub fn subtitle_cues_at(&self, t: Timestamp) -> Vec<Cue> {
         let s = self.sh.borrow();
-        let id = s.sel_sub?;
-        s.subs.iter().find(|x| x.track.id == id)?.cues.text_at(t)
+        let Some(id) = s.sel_sub else { return Vec::new() };
+        match s.subs.iter().find(|x| x.track.id == id) {
+            Some(slot) => slot.cues.cues_at(t).into_iter().cloned().collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// The cues on screen as of the last tick ([`Session::subtitle_cues_at`] at that time).
+    pub fn subtitle_cues(&self) -> &[Cue] {
+        &self.shown_cues
     }
 
     /// The subtitle text currently on screen (as of the last tick).
@@ -750,7 +858,7 @@ impl Session {
             s.subs.push(SubSlot {
                 track: SubtitleTrack { id, language: None, label: String::from(name), external: true },
                 cues: CueList::new(),
-                mov_text: false,
+                kind: SubKind::File,
             });
             id
         };
@@ -1227,10 +1335,12 @@ impl Session {
 
         // 8. Subtitles: report changes.
         let pos = self.clock.now_stream(now);
-        let text = self.subtitle_text_at(pos);
-        if text != self.shown_subtitle {
+        let cues = self.subtitle_cues_at(pos);
+        if cues != self.shown_cues {
+            let text = join_text(&cues);
             self.events.push_back(SessionEvent::Subtitle { at_us: pos, text: text.clone() });
             self.shown_subtitle = text;
+            self.shown_cues = cues;
         }
 
         host.clock().request_wake(now + TICK_US);
@@ -1354,6 +1464,7 @@ impl Session {
         self.stepped = false;
         self.ab_loop = None;
         self.shown_subtitle = None;
+        self.shown_cues.clear();
         self.shown_preview = false;
         self.audio_opened = false; // let the sink logic look at the new item's streams
         match heard {

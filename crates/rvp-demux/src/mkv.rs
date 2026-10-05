@@ -180,7 +180,10 @@ fn codec_name(id: &str) -> String {
         "A_EAC3" => "eac3",
         "S_TEXT/UTF8" => "subrip",
         "S_TEXT/WEBVTT" | "D_WEBVTT/SUBTITLES" | "D_WEBVTT/CAPTIONS" => "webvtt",
-        "S_TEXT/ASS" | "S_TEXT/SSA" => "ass",
+        "S_TEXT/ASS" | "S_TEXT/SSA" | "S_ASS" | "S_SSA" => "ass",
+        "S_HDMV/PGS" => "hdmv_pgs",
+        "A_MPEG/L2" => "mp2",
+        "A_MPEG/L1" => "mp1",
         s if s.starts_with("A_AAC") => "aac",
         s if s.starts_with("V_MPEG4/ISO/") => "mpeg4",
         s => return s.to_lowercase(),
@@ -820,6 +823,59 @@ impl<S: Source> MkvDemuxer<S> {
         }
         Ok(hits)
     }
+
+    /// Blocks of the tracks `numbers` in cluster `idx` (the caller filters by time).
+    async fn scan_tracks(&mut self, idx: usize, numbers: &[u64], out: &mut Vec<Packet>) -> Result<()> {
+        let c = self.clusters[idx];
+        let mut pos = c.data_start;
+        let mut ts = c.ts;
+        let mut hb = [0u8; 48];
+        while pos < c.end {
+            let n = self.rd.read_upto(pos, &mut hb).await?;
+            let Ok(h) = parse_hdr(&hb[..n]) else { break };
+            let body = pos + h.hlen;
+            let Some(size) = h.size else { break };
+            let head = &hb[(h.hlen as usize).min(n)..n];
+            match h.id {
+                ID_CLUSTER_TIMESTAMP => {
+                    let v = self.rd.read_vec(body, size.min(8)).await?;
+                    ts = uint(&v) as i64;
+                }
+                ID_SIMPLE_BLOCK => {
+                    if matches!(vint(head), Ok((Some(tn), _)) if numbers.contains(&tn)) {
+                        let b = self.rd.read_vec(body, size).await?;
+                        out.extend(self.parse_block(&b, ts, None, None)?);
+                    }
+                }
+                ID_BLOCK_GROUP => {
+                    // The block is normally the group's first child: look at its track number before reading the rest.
+                    let mut at = 0usize;
+                    let mut wanted = false;
+                    while let Ok(g) = parse_hdr(head.get(at..).unwrap_or(&[])) {
+                        let inner = at + g.hlen as usize;
+                        if g.id == ID_BLOCK {
+                            let tn = vint(head.get(inner..).unwrap_or(&[]));
+                            wanted = matches!(tn, Ok((Some(tn), _)) if numbers.contains(&tn));
+                            break;
+                        }
+                        match g.size {
+                            Some(s) if (inner as u64).saturating_add(s) < head.len() as u64 => {
+                                at = inner + s as usize
+                            }
+                            _ => break,
+                        }
+                    }
+                    if wanted {
+                        let g = self.rd.read_vec(body, size).await?;
+                        out.extend(self.parse_group(&g, ts)?);
+                    }
+                }
+                _ => {}
+            }
+            pos = body.saturating_add(size).max(pos + 1);
+        }
+        Ok(())
+    }
 }
 
 impl<S: Source> Demuxer for MkvDemuxer<S> {
@@ -956,6 +1012,31 @@ impl<S: Source> Demuxer for MkvDemuxer<S> {
         self.enter_cluster(ci);
         self.pos = hit.offset;
         Ok(hit.pts_us)
+    }
+
+    async fn side_packets(
+        &mut self,
+        ids: &[u32],
+        from_us: Timestamp,
+        to_us: Timestamp,
+    ) -> Result<Vec<Packet>> {
+        let numbers: Vec<u64> = ids.iter().map(|&i| i as u64).collect();
+        let mut out = Vec::new();
+        if numbers.is_empty() || self.clusters.is_empty() || to_us < from_us {
+            return Ok(out);
+        }
+        // Blocks sit in the cluster that starts at or before them (a little later is possible with negative offsets).
+        let slack = self.time_base.us_to_ticks_floor(1_000_000);
+        let from_ticks = self.time_base.us_to_ticks_floor(from_us.max(0));
+        let to_ticks = self.time_base.us_to_ticks_floor(to_us);
+        let mut i = self.clusters.partition_point(|c| c.ts <= from_ticks).saturating_sub(1);
+        while i < self.clusters.len() && self.clusters[i].ts <= to_ticks + slack {
+            self.scan_tracks(i, &numbers, &mut out).await?;
+            i += 1;
+        }
+        out.retain(|p| p.pts >= from_us && p.pts <= to_us);
+        out.sort_by_key(|p| p.pts);
+        Ok(out)
     }
 }
 

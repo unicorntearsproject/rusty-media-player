@@ -27,6 +27,7 @@ mod tags;
 pub mod wav;
 
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use rvp_core::{Chapter, Error, Metadata, Packet, Result, StreamInfo, Timestamp};
 use rvp_host::Source;
 
@@ -44,7 +45,7 @@ pub enum Container {
     Mp4,
     /// EBML: Matroska (`.mkv`) or WebM (`.webm`).
     Matroska,
-    /// MPEG audio layer III, raw (`.mp3`), with or without ID3 tags.
+    /// MPEG audio layers I to III, raw (`.mp3`, `.mp2`), with or without ID3 tags.
     Mp3,
     /// Native FLAC (`.flac`).
     Flac,
@@ -107,6 +108,18 @@ pub trait Demuxer {
     /// Seek so the next packets start at the keyframe (of the first video stream, else the first stream) at or
     /// before `target_us`, clamped to the first keyframe; returns the time landed on.
     async fn seek(&mut self, target_us: Timestamp) -> Result<Timestamp>;
+    /// Packets of the streams `ids` that start in `[from_us, to_us]`, in time order, read without moving the read
+    /// position (the next `next_packet` is unaffected). After a seek this recovers what lies before the landing point:
+    /// the subtitle cues that began earlier but are still on screen. The default finds nothing (MP4 seeks every
+    /// track to the sample at or before the landing time already).
+    async fn side_packets(
+        &mut self,
+        _ids: &[u32],
+        _from_us: Timestamp,
+        _to_us: Timestamp,
+    ) -> Result<Vec<Packet>> {
+        Ok(Vec::new())
+    }
 }
 
 /// Any of the demuxers, chosen by [`open`].
@@ -226,6 +239,15 @@ impl<S: Source> Demuxer for AnyDemuxer<S> {
 
     async fn seek(&mut self, target_us: Timestamp) -> Result<Timestamp> {
         each!(self, d => d.seek(target_us).await)
+    }
+
+    async fn side_packets(
+        &mut self,
+        ids: &[u32],
+        from_us: Timestamp,
+        to_us: Timestamp,
+    ) -> Result<Vec<Packet>> {
+        each!(self, d => d.side_packets(ids, from_us, to_us).await)
     }
 }
 

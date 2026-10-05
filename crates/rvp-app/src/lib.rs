@@ -1166,6 +1166,8 @@ impl App {
             };
             m.shuffle = self.playlist.shuffle();
             m.subtitle = s.subtitle_text().map(|t| t.to_string());
+            m.subtitle_cues = s.subtitle_cues().to_vec();
+            m.video_size = self.drawn_size;
             let warnings = s.warnings();
             if warnings.len() > self.warnings_seen {
                 for w in &warnings[self.warnings_seen..] {
@@ -1260,6 +1262,7 @@ impl App {
             && self.model.state == MediaState::Playing
             && self.model.has_video
             && self.model.subtitle.is_none()
+            && self.model.subtitle_cues.is_empty()
             && !self.ui.has_overlay();
         if !bare {
             self.fb.copy_from(&self.base);
@@ -1291,7 +1294,7 @@ impl App {
 /// True for the names of sidecar subtitle files.
 fn is_subtitle_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    n.ends_with(".srt") || n.ends_with(".vtt")
+    n.ends_with(".srt") || n.ends_with(".vtt") || n.ends_with(".ass") || n.ends_with(".ssa")
 }
 
 /// An error in the app's voice.

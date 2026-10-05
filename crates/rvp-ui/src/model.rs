@@ -98,6 +98,10 @@ pub struct UiModel {
     pub selected_subtitle: Option<u32>,
     /// The subtitle text on screen right now.
     pub subtitle: Option<String>,
+    /// The cues on screen right now: plain text, styled text (ASS) or pictures (PGS). `subtitle` is their text.
+    pub subtitle_cues: Vec<rvp_subs::Cue>,
+    /// Size of the video picture (0 x 0 when there is none): subtitle positions refer to it, not to the window.
+    pub video_size: (u32, u32),
     /// Chapter marks, in time order.
     pub chapters: Vec<ChapterItem>,
     /// The playlist (the queue), in list order. Shared so a model that is cloned every tick stays cheap.

@@ -103,6 +103,19 @@ impl App {
             m.selected_subtitle.map_or("null".to_string(), |i| i.to_string()),
             m.subtitle.as_deref().map_or("null".to_string(), esc),
         );
+        let cues: alloc::vec::Vec<String> = m
+            .subtitle_cues
+            .iter()
+            .map(|c| {
+                format!(
+                    "{{\"text\":{},\"styled\":{},\"image\":{}}}",
+                    esc(&c.text),
+                    c.rich.is_some(),
+                    c.image.is_some()
+                )
+            })
+            .collect();
+        j += &format!("\"subtitle_cues\":[{}],", cues.join(","));
         j += &match &m.error {
             Some(e) => format!("\"error\":{},", esc(e)),
             None => "\"error\":null,".to_string(),

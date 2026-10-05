@@ -46,7 +46,8 @@ impl Ui {
                 MediaState::Buffering | MediaState::Opening => self.draw_spinner(fb, &l),
                 _ => {}
             }
-            if model.subtitle.is_some() && model.state != MediaState::Failed {
+            if (model.subtitle.is_some() || Self::has_styled_cues(model)) && model.state != MediaState::Failed
+            {
                 self.draw_subtitle(fb, &l, model);
             }
             if self.controls_alpha > 0.005 && model.state != MediaState::Failed {
@@ -543,6 +544,10 @@ impl Ui {
 
     /// Subtitles: centred lines on dark pills, above the bar while it is showing and near the bottom otherwise.
     fn draw_subtitle(&mut self, fb: &mut FrameBuffer, l: &Layout, model: &UiModel) {
+        if Self::has_styled_cues(model) {
+            self.draw_styled_cues(fb, l, model);
+            return;
+        }
         let Some(text) = model.subtitle.as_deref() else { return };
         let s = l.s;
         let size = (l.h / s * 0.042).clamp(15.0, 34.0);

@@ -23,6 +23,7 @@ pub mod icon;
 mod icon_data;
 pub mod lib_ui;
 pub mod model;
+mod subs;
 pub mod ui;
 
 pub use actions::{Action, MenuItem, SHORTCUTS, SPEEDS, Shortcut};

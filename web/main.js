@@ -308,7 +308,7 @@ function openFiles(files, append = false) {
   audio.unlock();
   openedFiles = append ? openedFiles.concat(files) : files;
   player.open_files(files, append);
-  const first = files.find((f) => !/\.(srt|vtt)$/i.test(f.name)) || files[0];
+  const first = files.find((f) => !/\.(srt|vtt|ass|ssa)$/i.test(f.name)) || files[0];
   document.title = `${first.name} – Rusty Video Player`;
   statusEl.textContent = files.length > 1 ? `Opened ${files.length} files` : `Opened ${first.name}`;
   if (audio.suspended) player.toast("Click anywhere to turn the sound on.");

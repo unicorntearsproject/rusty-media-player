@@ -213,6 +213,40 @@ impl Fonts {
         pen
     }
 
+    /// Like [`Fonts::draw`], leaning to the right by `slant` (the tangent of the angle, 0.2 or so for italics): each row of a glyph
+    /// is shifted in proportion to its height above the baseline.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_slanted(
+        &mut self,
+        fb: &mut FrameBuffer,
+        face: Face,
+        px: f32,
+        x: f32,
+        baseline: f32,
+        text: &str,
+        color: Rgba,
+        opacity: f32,
+        slant: f32,
+    ) -> f32 {
+        let mut pen = x;
+        let base = roundf(baseline);
+        for ch in text.chars() {
+            let g = self.glyph(face, ch, px);
+            if g.w > 0 {
+                let gx = roundf(pen) as i32 + g.xmin;
+                let gy = base as i32 - g.ymin - g.h as i32;
+                for row in 0..g.h as i32 {
+                    let above = base - (gy + row) as f32;
+                    let shift = roundf(above * slant) as i32;
+                    let line = &g.bitmap[row as usize * g.w as usize..][..g.w as usize];
+                    fb.blit_mask(gx + shift, gy + row, g.w, 1, line, color, opacity);
+                }
+            }
+            pen += g.advance;
+        }
+        pen
+    }
+
     /// Draw `text` horizontally centred on `cx` with its cap-height centred on `cy`.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_centered(

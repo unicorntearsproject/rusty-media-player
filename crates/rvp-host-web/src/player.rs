@@ -143,7 +143,7 @@ impl WebPlayer {
     }
 
     /// Open several files (picker or drop): they become the playlist and the first one plays, or with `append`
-    /// they are added to the end. Subtitle files (.srt, .vtt) attach to the video that is playing.
+    /// they are added to the end. Subtitle files (.srt, .vtt, .ass, .ssa) attach to the video that is playing.
     pub fn open_files(&mut self, files: Vec<JsValue>, append: bool) {
         self.host.input.0.push_back(InputEvent::DragOver(false));
         let items: Vec<(String, String)> = files

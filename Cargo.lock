@@ -2010,6 +2010,7 @@ dependencies = [
  "rvp-core",
  "rvp-host",
  "rvp-library",
+ "rvp-subs",
  "rvp-viz",
  "theme",
 ]

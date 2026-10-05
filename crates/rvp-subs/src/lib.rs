@@ -1,9 +1,11 @@
-//! Text subtitles: SRT and WebVTT files, the packet payloads of Matroska (`S_TEXT/UTF8`, `S_TEXT/WEBVTT`) and MP4
-//! (`tx3g` / `mov_text`, `wvtt`), and a [`CueList`] that answers "what is on screen at time t".
+//! Subtitles: SRT and WebVTT files, ASS/SSA scripts and the Matroska ASS blocks ([`ass`]), the packet payloads of
+//! Matroska (`S_TEXT/UTF8`, `S_TEXT/WEBVTT`) and MP4 (`tx3g` / `mov_text`, `wvtt`), PGS bitmap subtitles
+//! ([`pgs`]), and a [`CueList`] that answers "what is on screen at time t".
 //!
-//! Everything is lenient: malformed blocks are skipped, never an error. Styling is dropped (tags such as
-//! `<i>`, `<c.red>`, `{\an8}` are stripped, entities decoded) and cue settings are ignored; the UI draws every
-//! cue the same way.
+//! Everything is lenient: malformed blocks are skipped, never an error. SRT and WebVTT styling is dropped (tags
+//! such as `<i>`, `<c.red>`, `{\an8}` are stripped, entities decoded) and cue settings are ignored; the UI draws
+//! those cues all the same way. ASS cues also carry a [`Rich`] description (spans with bold, italic, colour and size,
+//! alignment and position) and PGS cues an [`Image`].
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -11,13 +13,20 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{rc::Rc, string::String, vec::Vec};
 use rvp_core::Timestamp;
+
+pub mod ass;
+pub mod pgs;
+
+pub use ass::{AssScript, AssStyle};
 
 /// Most cues a list keeps, and the longest cue text (bytes).
 pub const MAX_CUES: usize = 200_000;
 /// See [`MAX_CUES`].
 pub const MAX_CUE_TEXT: usize = 4096;
+/// How many cues before `t` a lookup considers (overlapping cues; a signs-and-songs ASS track can have dozens).
+const LOOKBACK_CUES: usize = 64;
 
 /// One subtitle cue.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +35,100 @@ pub struct Cue {
     pub start: Timestamp,
     /// End, microseconds.
     pub end: Timestamp,
-    /// Plain text, lines joined with `\n`.
+    /// Plain text, lines joined with `\n` (empty for a bitmap cue).
     pub text: String,
+    /// Styled lines (ASS), when the cue has them.
+    pub rich: Option<Rich>,
+    /// A picture to show instead of text (PGS).
+    pub image: Option<Rc<Image>>,
+}
+
+impl Cue {
+    /// A plain text cue.
+    pub fn new(start: Timestamp, end: Timestamp, text: String) -> Self {
+        Self { start, end, text, rich: None, image: None }
+    }
+}
+
+/// A run of text with one look. Colours are `0xRRGGBBAA` (alpha 255 is opaque).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    /// The text (no line breaks).
+    pub text: String,
+    /// Bold.
+    pub bold: bool,
+    /// Italic.
+    pub italic: bool,
+    /// Underlined.
+    pub underline: bool,
+    /// Struck out.
+    pub strike: bool,
+    /// Text colour.
+    pub colour: u32,
+    /// Font size as thousandths of the picture height (36 on a 360-line script is 100).
+    pub size_permille: i32,
+}
+
+/// How an ASS cue is laid out: its lines of spans, where it goes on the picture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rich {
+    /// Lines, each a list of spans.
+    pub lines: Vec<Vec<Span>>,
+    /// Numpad alignment: 1-3 bottom, 4-6 middle, 7-9 top (left, centre, right).
+    pub align: u8,
+    /// `\pos` in script coordinates, which override the alignment's anchor.
+    pub pos: Option<(i32, i32)>,
+    /// The script's picture size, the unit of `pos` and the margins.
+    pub play_res: (i32, i32),
+    /// Left, right and vertical margins in script units.
+    pub margin_l: i32,
+    /// See `margin_l`.
+    pub margin_r: i32,
+    /// See `margin_l`.
+    pub margin_v: i32,
+    /// Stacking order: higher layers are drawn later.
+    pub layer: i32,
+    /// Outline colour of the style.
+    pub outline: u32,
+}
+
+impl Rich {
+    /// The anchor `pos` as fractions of the picture (0..1 each way), when the cue has one.
+    pub fn pos_frac(&self) -> Option<(f32, f32)> {
+        let (w, h) = (self.play_res.0.max(1) as f32, self.play_res.1.max(1) as f32);
+        self.pos.map(|(x, y)| ((x as f32 / w).clamp(0.0, 1.0), (y as f32 / h).clamp(0.0, 1.0)))
+    }
+
+    /// Vertical margin as a fraction of the picture height.
+    pub fn margin_v_frac(&self) -> f32 {
+        (self.margin_v.max(0) as f32 / self.play_res.1.max(1) as f32).min(0.45)
+    }
+}
+
+/// A bitmap subtitle (PGS): RGBA pictures at positions of a `width` x `height` picture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Image {
+    /// Size of the picture the positions refer to.
+    pub width: u32,
+    /// See `width`.
+    pub height: u32,
+    /// The objects to draw, in order.
+    pub objects: Vec<ImageObject>,
+}
+
+/// One bitmap of an [`Image`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageObject {
+    /// Left edge in the picture.
+    pub x: u32,
+    /// Top edge in the picture.
+    pub y: u32,
+    /// Width in pixels.
+    pub w: u32,
+    /// Height in pixels.
+    pub h: u32,
+    /// `w * h` RGBA pixels (straight alpha).
+    pub rgba: Vec<u8>,
 }
 
 /// Text subtitle formats we parse.
@@ -37,6 +138,8 @@ pub enum Format {
     Srt,
     /// WebVTT.
     WebVtt,
+    /// ASS / SSA.
+    Ass,
 }
 
 /// Parse `HH:MM:SS,mmm` (or `.` as the separator, or `MM:SS.mmm` as WebVTT allows) to microseconds.
@@ -161,7 +264,7 @@ pub fn parse_srt(input: &str) -> Vec<Cue> {
             if let Some((start, end)) = parse_timing(block[pos]) {
                 let text = clean_text(&block[pos + 1..].join("\n"));
                 if !text.is_empty() && end >= start {
-                    cues.push(Cue { start, end, text });
+                    cues.push(Cue::new(start, end, text));
                 }
             }
         }
@@ -198,7 +301,7 @@ pub fn parse_vtt(input: &str) -> Vec<Cue> {
             if let Some((start, end)) = parse_timing(block[pos]) {
                 let text = clean_text(&block[pos + 1..].join("\n"));
                 if !text.is_empty() && end >= start {
-                    cues.push(Cue { start, end, text });
+                    cues.push(Cue::new(start, end, text));
                 }
             }
         }
@@ -219,9 +322,21 @@ pub fn parse_vtt(input: &str) -> Vec<Cue> {
 /// Detect the format of a subtitle file's text and parse it.
 pub fn parse(input: &str) -> Vec<Cue> {
     let t = input.trim_start_matches('\u{feff}');
-    let mut cues = if t.starts_with("WEBVTT") { parse_vtt(t) } else { parse_srt(t) };
+    let mut cues = if t.starts_with("WEBVTT") {
+        parse_vtt(t)
+    } else if is_ass(t) {
+        AssScript::parse_file(t)
+    } else {
+        parse_srt(t)
+    };
     sort_cues(&mut cues);
     cues
+}
+
+/// True when the text looks like an ASS/SSA script (a `[Script Info]` or `[V4+ Styles]` section near the top).
+pub fn is_ass(text: &str) -> bool {
+    let head: String = text.chars().take(2048).collect::<String>().to_ascii_lowercase();
+    head.contains("[script info]") || head.contains("[v4+ styles]") || head.contains("[v4 styles]")
 }
 
 /// Sort by start time (stable, so cues with equal starts keep file order).
@@ -322,10 +437,25 @@ impl CueList {
             cue.text.truncate(end);
         }
         let i = self.cues.partition_point(|c| c.start <= cue.start);
-        if self.cues[..i].iter().rev().take_while(|c| c.start == cue.start).any(|c| c.text == cue.text) {
+        if self.cues[..i]
+            .iter()
+            .rev()
+            .take_while(|c| c.start == cue.start)
+            .any(|c| c.text == cue.text && c.rich == cue.rich && c.image == cue.image)
+        {
             return;
         }
         self.cues.insert(i, cue);
+    }
+
+    /// A picture subtitle (PGS) stays up until the next display set: end the pictures that are showing at `t` there.
+    pub fn clip_images(&mut self, t: Timestamp) {
+        let hi = self.cues.partition_point(|c| c.start < t);
+        for c in self.cues[..hi].iter_mut().rev().take(LOOKBACK_CUES) {
+            if c.image.is_some() && c.end > t {
+                c.end = t;
+            }
+        }
     }
 
     /// All cues.
@@ -343,13 +473,23 @@ impl CueList {
         self.cues.is_empty()
     }
 
+    /// The cues on screen at `t` (start inclusive, end exclusive) in drawing order: lower layers first, then by start.
+    pub fn cues_at(&self, t: Timestamp) -> Vec<&Cue> {
+        let hi = self.cues.partition_point(|c| c.start <= t);
+        let mut v: Vec<&Cue> =
+            self.cues[..hi].iter().rev().take(LOOKBACK_CUES).filter(|c| c.end > t).collect();
+        v.reverse();
+        v.sort_by_key(|c| c.rich.as_ref().map_or(0, |r| r.layer));
+        v
+    }
+
     /// The text on screen at `t` (start inclusive, end exclusive). With overlapping cues the texts are joined,
     /// earliest first.
     pub fn text_at(&self, t: Timestamp) -> Option<String> {
         let hi = self.cues.partition_point(|c| c.start <= t);
         let mut lines: Vec<&str> = Vec::new();
         // Cues are sorted by start; look back over a bounded window for ones that are still active.
-        for c in self.cues[..hi].iter().rev().take(16) {
+        for c in self.cues[..hi].iter().rev().take(LOOKBACK_CUES) {
             if c.end > t {
                 lines.push(&c.text);
             }
@@ -372,7 +512,7 @@ mod tests {
         let src = "\u{feff}1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\nworld\r\n\r\n2\r\n00:01:00,000 --> 00:01:01,000\r\nBye\r\n";
         let cues = parse_srt(src);
         assert_eq!(cues.len(), 2);
-        assert_eq!(cues[0], Cue { start: 1_000_000, end: 2_500_000, text: "Hello\nworld".into() });
+        assert_eq!(cues[0], Cue::new(1_000_000, 2_500_000, "Hello\nworld".into()));
         assert_eq!(cues[1].start, 60_000_000);
     }
 
@@ -422,7 +562,7 @@ mod tests {
         let src = "\u{feff}WEBVTT - a title\nKind: captions\n\nSTYLE\n::cue { color: red }\n\nNOTE this is\na comment\n\nREGION\nid:r1\n\nintro\n00:01.000 --> 00:02.500 align:start position:10% line:0\n<v Roger>Hello <c.loud>there</c></v>\n<00:01.500>again\n\n00:00:03.000 --> 00:00:04.000\nSecond &amp; last\n\n";
         let c = parse_vtt(src);
         assert_eq!(c.len(), 2);
-        assert_eq!(c[0], Cue { start: 1_000_000, end: 2_500_000, text: "Hello there\nagain".into() });
+        assert_eq!(c[0], Cue::new(1_000_000, 2_500_000, "Hello there\nagain".into()));
         assert_eq!(c[1].text, "Second & last");
     }
 
@@ -468,7 +608,7 @@ mod tests {
     fn cue_list_ignores_duplicates_and_keeps_order() {
         let mut l = CueList::new();
         for (s, e, t) in [(3, 4, "c"), (1, 2, "a"), (3, 4, "c"), (2, 3, "b")] {
-            l.insert(Cue { start: s * 1_000_000, end: e * 1_000_000, text: t.to_string() });
+            l.insert(Cue::new(s * 1_000_000, e * 1_000_000, t.to_string()));
         }
         let t: Vec<&str> = l.cues().iter().map(|c| c.text.as_str()).collect();
         assert_eq!(t, ["a", "b", "c"]);
