@@ -2,12 +2,13 @@
 use super::cabac_syntax::Cabac;
 use super::entropy::{Cat, Cavlc, Entropy};
 use super::mbinfo::*;
-use super::picture::Picture;
+use super::picture::{Motion, MotionSlot};
 use crate::bitstream::BitReader;
 use crate::error::{Error, Result};
 use crate::params::{Pps, SliceHeader, SliceType, Sps};
 use crate::transform::{self as tr, LevelScale, ZIGZAG_4X4, ZIGZAG_8X8};
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 /// Classified `mb_type`.
@@ -41,10 +42,13 @@ pub struct SliceDecoder<'a> {
     pub(crate) pps: &'a Pps,
     pub(crate) hdr: &'a SliceHeader,
     pub(crate) ls: &'a LevelScale,
-    pub(crate) cur: &'a mut Picture,
+    /// The motion data of the picture being parsed.
+    pub(crate) cur: &'a mut Motion,
     pub(crate) mbs: &'a mut [MbInfo],
-    /// The decoded picture buffer the reference lists point into.
-    pub(crate) dpb: &'a [Picture],
+    /// Where the motion of `RefPicList1[0]` (the co-located picture of direct prediction) appears, and the motion once
+    /// it has been waited for.
+    pub(crate) col_slot: Option<Arc<MotionSlot>>,
+    pub(crate) col: Option<Arc<Motion>>,
     /// `RefPicList0` and `RefPicList1`.
     pub(crate) refs: [Vec<RefInfo>; 2],
     /// `PicOrderCnt` of the current picture.
@@ -94,16 +98,17 @@ impl<'a> SliceDecoder<'a> {
         pps: &'a Pps,
         hdr: &'a SliceHeader,
         ls: &'a LevelScale,
-        cur: &'a mut Picture,
+        cur: &'a mut Motion,
         mbs: &'a mut [MbInfo],
-        dpb: &'a [Picture],
+        col_slot: Option<Arc<MotionSlot>>,
         refs: [Vec<RefInfo>; 2],
         cur_poc: i32,
         slice_num: u16,
         store: &'a mut Store,
     ) -> Self {
         Self {
-            dpb,
+            col_slot,
+            col: None,
             refs,
             cur_poc,
             sps,
@@ -470,12 +475,25 @@ impl<'a> SliceDecoder<'a> {
                 let mut lv8 = [0i32; 64];
                 let mut total = 0usize;
                 if E::IS_CABAC {
-                    total = ent.residual_block(self, Cat::Luma8x8, i8x8, 64, &mut lv8)?;
+                    let (mut sp, mut sv) = ([0u8; 64], [0i32; 64]);
+                    total = ent.residual_sparse(self, Cat::Luma8x8, i8x8, 64, &mut sp, &mut sv)?;
                     let (bx, by) = ((i8x8 & 1) * 2, (i8x8 >> 1) * 2);
                     let cnt = total.min(255) as u8;
                     for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
                         self.mbs[addr].nz[(by + dy) * 4 + bx + dx] = cnt;
                     }
+                    if total > 0 {
+                        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                            self.mbs[addr].nzmask |= 1 << ((by + dy) * 4 + bx + dx);
+                        }
+                        self.blk_nz |= 1 << (i8x8 + 24);
+                        let base = i8x8 * 64;
+                        for j in 0..total {
+                            let p = ZIGZAG_8X8[sp[j] as usize] as usize;
+                            self.coef[base + p] = tr::dequant_8x8(sv[j], self.ls.l8[l8][qp_rem][p], qp_per);
+                        }
+                    }
+                    continue;
                 } else {
                     for i4 in 0..4 {
                         let (bx, by) = blk_xy(i8x8 * 4 + i4);
@@ -507,17 +525,16 @@ impl<'a> SliceDecoder<'a> {
                     let (bx, by) = blk_xy(i8x8 * 4 + i4);
                     let r = by * 4 + bx;
                     let (cat, max, start) = if i16 { (Cat::LumaAc16, 15, 1) } else { (Cat::Luma4x4, 16, 0) };
-                    let n = ent.residual_block(self, cat, r, max, &mut lv)?;
+                    let (mut sp, mut sv) = ([0u8; 64], [0i32; 64]);
+                    let n = ent.residual_sparse(self, cat, r, max, &mut sp, &mut sv)?;
                     self.mbs[addr].nz[r] = n as u8;
                     if n > 0 {
                         self.mbs[addr].nzmask |= 1 << r;
                         self.blk_nz |= 1 << r;
-                        for k in 0..max {
-                            if lv[k] != 0 {
-                                let pos = ZIGZAG_4X4[k + start] as usize;
-                                self.coef[r * 16 + pos] =
-                                    tr::dequant_4x4(lv[k], self.ls.l4[l4][qp_rem][pos], qp_per);
-                            }
+                        for j in 0..n {
+                            let pos = ZIGZAG_4X4[sp[j] as usize + start] as usize;
+                            self.coef[r * 16 + pos] =
+                                tr::dequant_4x4(sv[j], self.ls.l4[l4][qp_rem][pos], qp_per);
                         }
                     }
                 }
@@ -549,16 +566,16 @@ impl<'a> SliceDecoder<'a> {
                     let (per, rem) = ((qpc / 6) as u32, (qpc % 6) as usize);
                     let list = l4 + 1 + comp;
                     for blk in 0..4 {
-                        let n = ent.residual_block(self, Cat::ChromaAc, comp * 4 + blk, 15, &mut lv)?;
+                        let (mut sp, mut sv) = ([0u8; 64], [0i32; 64]);
+                        let n =
+                            ent.residual_sparse(self, Cat::ChromaAc, comp * 4 + blk, 15, &mut sp, &mut sv)?;
                         self.mbs[addr].nz[16 + comp * 4 + blk] = n as u8;
                         if n > 0 {
                             self.blk_nz |= 1 << (16 + comp * 4 + blk);
-                            for k in 0..15 {
-                                if lv[k] != 0 {
-                                    let pos = ZIGZAG_4X4[k + 1] as usize;
-                                    self.coef[COEF_CB + comp * 64 + blk * 16 + pos] =
-                                        tr::dequant_4x4(lv[k], self.ls.l4[list][rem][pos], per);
-                                }
+                            for j in 0..n {
+                                let pos = ZIGZAG_4X4[sp[j] as usize + 1] as usize;
+                                self.coef[COEF_CB + comp * 64 + blk * 16 + pos] =
+                                    tr::dequant_4x4(sv[j], self.ls.l4[list][rem][pos], per);
                             }
                         }
                     }

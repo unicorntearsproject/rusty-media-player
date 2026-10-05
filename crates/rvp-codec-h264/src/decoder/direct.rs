@@ -1,5 +1,5 @@
 //! Direct prediction for B macroblocks (8.4.1.2): spatial and temporal, for progressive frames.
-use super::picture::Picture;
+use super::picture::Motion;
 use super::slice::SliceDecoder;
 use crate::error::{Error, Result};
 
@@ -17,7 +17,7 @@ fn min_positive(x: i32, y: i32) -> i32 {
 }
 
 /// The co-located block (8.4.1.2.1 for frame pictures) at 4x4 grid position `(gx, gy)` of `col`.
-fn col_motion(col: &Picture, gx: usize, gy: usize) -> Col {
+fn col_motion(col: &Motion, gx: usize, gy: usize) -> Col {
     let i8 = (gy >> 1) * (col.mbw * 2) + (gx >> 1);
     let i4 = gy * (col.mbw * 4) + gx;
     for l in 0..2 {
@@ -39,14 +39,18 @@ impl SliceDecoder<'_> {
         if self.refs[0].is_empty() || self.refs[1].is_empty() {
             return Err(Error::Invalid("direct prediction without reference lists"));
         }
-        let col = &self.dpb[self.refs[1][0].dpb_idx];
+        if self.col.is_none() {
+            // The first use waits for the parsing of the co-located picture (it may be running on another thread).
+            self.col = Some(self.col_slot.as_ref().ok_or(Error::Invalid("no co-located picture"))?.wait());
+        }
+        let col = self.col.clone().ok_or(Error::Invalid("no co-located picture"))?;
         if col.mbw != self.mbw || col.mbh != self.mbh {
             return Err(Error::Invalid("co-located picture has a different size"));
         }
         if self.hdr.direct_spatial_mv_pred {
-            self.direct_spatial(mask, col);
+            self.direct_spatial(mask, &col);
         } else {
-            self.direct_temporal(mask, col);
+            self.direct_temporal(mask, &col);
         }
         Ok(())
     }
@@ -69,7 +73,7 @@ impl SliceDecoder<'_> {
         })
     }
 
-    fn direct_spatial(&mut self, mask: u8, col: &Picture) {
+    fn direct_spatial(&mut self, mask: u8, col: &Motion) {
         let mut ref_idx = [-1i32; 2];
         for (list, r) in ref_idx.iter_mut().enumerate() {
             let a = self.nb_motion(list, -1, 0, 0);
@@ -115,7 +119,7 @@ impl SliceDecoder<'_> {
         }
     }
 
-    fn direct_temporal(&mut self, mask: u8, col: &Picture) {
+    fn direct_temporal(&mut self, mask: u8, col: &Motion) {
         let poc1 = self.refs[1][0].poc;
         for q in 0..4 {
             if mask >> q & 1 == 0 {

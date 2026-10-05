@@ -1,6 +1,8 @@
 //! Decoded pictures, with the motion data later pictures need (direct prediction, deblocking).
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use rvp_core::par::SpinLock;
 
 /// Reference marking of a stored picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,12 +18,67 @@ pub enum RefState {
 /// The motion data of a picture (what direct prediction, motion compensation and deblocking read).
 #[derive(Clone)]
 pub struct Motion {
+    /// Width in macroblocks.
+    pub mbw: usize,
+    /// Height in macroblocks.
+    pub mbh: usize,
     /// Motion vectors per 4x4 block, both lists, in a `4*mbw` wide grid.
     pub mv: [Vec<[i16; 2]>; 2],
     /// Reference indices per 8x8 block (`-1`: list unused), in a `2*mbw` wide grid.
     pub ref_idx: [Vec<i8>; 2],
     /// Unique id of the frame each 8x8 block referenced (`-1`: none).
     pub ref_id: [Vec<i32>; 2],
+}
+
+impl Motion {
+    /// Motion data for a picture of the given size: every block unpredicted (like an intra picture).
+    pub fn new(mbw: usize, mbh: usize) -> Self {
+        let n4 = mbw * 4 * mbh * 4;
+        let n8 = mbw * 2 * mbh * 2;
+        Self {
+            mbw,
+            mbh,
+            mv: [vec![[0; 2]; n4], vec![[0; 2]; n4]],
+            ref_idx: [vec![-1; n8], vec![-1; n8]],
+            ref_id: [vec![-1; n8], vec![-1; n8]],
+        }
+    }
+}
+
+/// Where the motion of a picture appears once its slices are parsed (possibly on another thread). Pictures that
+/// reference it for direct prediction wait for it.
+#[derive(Default)]
+pub struct MotionSlot {
+    cell: SpinLock<Option<Arc<Motion>>>,
+}
+
+impl MotionSlot {
+    /// An empty slot.
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// A slot that already holds `m`.
+    pub fn filled(m: Motion) -> Arc<Self> {
+        let s = Self::new();
+        s.set(Arc::new(m));
+        s
+    }
+
+    /// Publish the motion.
+    pub fn set(&self, m: Arc<Motion>) {
+        *self.cell.lock() = Some(m);
+    }
+
+    /// The motion, waiting for the parsing of its picture if it is not there yet.
+    pub fn wait(&self) -> Arc<Motion> {
+        loop {
+            if let Some(m) = self.cell.lock().as_ref() {
+                return m.clone();
+            }
+            rvp_core::par::relax();
+        }
+    }
 }
 
 /// A decoded picture's samples, padded to whole macroblocks. The reconstruction side owns these; the parsing side only
@@ -58,19 +115,16 @@ impl PlanePic {
     }
 }
 
-/// A frame store of the parsing side: per-block motion data and the bookkeeping of reference marking and output.
+/// A frame store of the parsing side: the bookkeeping of reference marking and output, and where the picture's motion
+/// data will be.
 #[derive(Clone)]
 pub struct Picture {
     /// Width in macroblocks.
     pub mbw: usize,
     /// Height in macroblocks.
     pub mbh: usize,
-    /// Motion vectors per 4x4 block, both lists, in a `4*mbw` wide grid.
-    pub mv: [Vec<[i16; 2]>; 2],
-    /// Reference indices per 8x8 block (`-1`: list unused), in a `2*mbw` wide grid.
-    pub ref_idx: [Vec<i8>; 2],
-    /// Unique id of the frame each 8x8 block referenced (`-1`: none).
-    pub ref_id: [Vec<i32>; 2],
+    /// The motion data, once parsed.
+    pub motion: Arc<MotionSlot>,
     /// Unique id of this frame store use.
     pub uid: i32,
     /// `PicOrderCnt` of the frame.
@@ -92,16 +146,12 @@ pub struct Picture {
 }
 
 impl Picture {
-    /// Allocate a picture of the given size in macroblocks.
+    /// A picture of the given size in macroblocks whose motion data is still to come.
     pub fn new(mbw: usize, mbh: usize) -> Self {
-        let n4 = mbw * 4 * mbh * 4;
-        let n8 = mbw * 2 * mbh * 2;
         Self {
             mbw,
             mbh,
-            mv: [vec![[0; 2]; n4], vec![[0; 2]; n4]],
-            ref_idx: [vec![-1; n8], vec![-1; n8]],
-            ref_id: [vec![-1; n8], vec![-1; n8]],
+            motion: MotionSlot::new(),
             uid: 0,
             poc: 0,
             frame_num: 0,
@@ -119,22 +169,13 @@ impl Picture {
         self.mbw == mbw && self.mbh == mbh
     }
 
-    /// Reset the bookkeeping and motion data for reuse as a new picture (samples are overwritten by decoding).
+    /// Reset the bookkeeping for reuse as a new picture.
     pub fn reset(&mut self) {
-        for l in 0..2 {
-            self.mv[l].fill([0; 2]);
-            self.ref_idx[l].fill(-1);
-            self.ref_id[l].fill(-1);
-        }
+        self.motion = MotionSlot::new();
         self.ref_state = RefState::Unused;
         self.needed_for_output = false;
         self.non_existing = false;
         self.long_term_idx = 0;
-    }
-
-    /// A copy of the motion data, for the reconstruction side.
-    pub fn motion(&self) -> Motion {
-        Motion { mv: self.mv.clone(), ref_idx: self.ref_idx.clone(), ref_id: self.ref_id.clone() }
     }
 
     /// True if the picture is marked as a reference (short or long term).

@@ -377,9 +377,24 @@ impl Entropy for Cabac<'_> {
         max: usize,
         out: &mut [i32],
     ) -> Result<usize> {
-        for v in out[..max].iter_mut() {
-            *v = 0;
+        out[..max].fill(0);
+        let (mut pos, mut val) = ([0u8; 64], [0i32; 64]);
+        let n = self.residual_sparse(d, cat, idx, max, &mut pos, &mut val)?;
+        for k in 0..n {
+            out[pos[k] as usize] = val[k];
         }
+        Ok(n)
+    }
+
+    fn residual_sparse(
+        &mut self,
+        d: &SliceDecoder<'_>,
+        cat: Cat,
+        idx: usize,
+        max: usize,
+        pos: &mut [u8; 64],
+        val: &mut [i32; 64],
+    ) -> Result<usize> {
         let cur_intra = d.mbs[d.mb_addr].flags & F_INTRA != 0;
         let cat_n = match cat {
             Cat::LumaDc16 => 0,
@@ -478,7 +493,8 @@ impl Entropy for Cabac<'_> {
                 gt1 += 1;
             }
             let level = if dec.bypass() != 0 { -(abs as i32) } else { abs as i32 };
-            out[sig_pos[k] as usize] = level;
+            pos[k] = sig_pos[k];
+            val[k] = level;
         }
         self.dec = dec;
         if self.dec.overrun() {

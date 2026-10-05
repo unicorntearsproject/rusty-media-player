@@ -13,14 +13,14 @@ pub use scaling::{ScalingMatrices, ScalingSyntax};
 pub use slice::{DecRefPicMarking, Mmco, PredWeightTable, RefListMod, SliceHeader, SliceType, WeightEntry};
 pub use sps::{Crop, Sps, Vui};
 
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 /// The sets of active-able parameter sets received so far, by id.
 #[derive(Debug, Default, Clone)]
 pub struct ParamSets {
-    sps: Vec<Option<Rc<Sps>>>,
-    pps: Vec<Option<Rc<Pps>>>,
+    sps: Vec<Option<Arc<Sps>>>,
+    pps: Vec<Option<Arc<Pps>>>,
 }
 
 impl ParamSets {
@@ -35,7 +35,7 @@ impl ParamSets {
         if self.sps.len() <= id {
             self.sps.resize(id + 1, None);
         }
-        self.sps[id] = Some(Rc::new(sps));
+        self.sps[id] = Some(Arc::new(sps));
     }
 
     /// Store (or replace) a PPS.
@@ -44,16 +44,16 @@ impl ParamSets {
         if self.pps.len() <= id {
             self.pps.resize(id + 1, None);
         }
-        self.pps[id] = Some(Rc::new(pps));
+        self.pps[id] = Some(Arc::new(pps));
     }
 
     /// Look up an SPS.
-    pub fn sps(&self, id: u32) -> Option<&Rc<Sps>> {
+    pub fn sps(&self, id: u32) -> Option<&Arc<Sps>> {
         self.sps.get(id as usize)?.as_ref()
     }
 
     /// Look up a PPS.
-    pub fn pps(&self, id: u32) -> Option<&Rc<Pps>> {
+    pub fn pps(&self, id: u32) -> Option<&Arc<Pps>> {
         self.pps.get(id as usize)?.as_ref()
     }
 }

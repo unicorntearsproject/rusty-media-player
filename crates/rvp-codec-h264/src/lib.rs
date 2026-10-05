@@ -55,14 +55,16 @@ use rvp_core::{
 
 /// Create an H.264 decoder for a video stream (`info.codec == "h264"`, `info.extra_data` an avcC record).
 pub fn h264_decoder(info: &StreamInfo) -> rvp_core::Result<Box<dyn VideoDecoder>> {
-    h264_decoder_with(info, None)
+    h264_decoder_with(info, None, None)
 }
 
-/// Like [`h264_decoder`], reconstructing pictures with `exec` (see [`decoder::recon::ReconExecutor`]) so that parsing
-/// and reconstruction overlap on two threads.
+/// Like [`h264_decoder`], reconstructing pictures with `exec` (see [`decoder::recon::ReconExecutor`]) and parsing them
+/// with `runner` (see [`decoder::parse::ParseRunner`]), so that pictures are parsed in parallel and parsing overlaps
+/// reconstruction. A runner needs an executor.
 pub fn h264_decoder_with(
     info: &StreamInfo,
     exec: Option<Box<dyn decoder::recon::ReconExecutor>>,
+    runner: Option<Box<dyn decoder::parse::ParseRunner>>,
 ) -> rvp_core::Result<Box<dyn VideoDecoder>> {
     if info.kind != StreamKind::Video || info.codec != "h264" {
         return Err(rvp_core::Error::Unsupported(alloc::format!("not an H.264 stream: {}", info.codec)));
@@ -70,6 +72,9 @@ pub fn h264_decoder_with(
     let mut dec = decoder::Decoder::new();
     if let Some(e) = exec {
         dec.set_recon_executor(e);
+        if let Some(r) = runner {
+            dec.set_parse_runner(r);
+        }
     }
     if !info.extra_data.is_empty() {
         dec.set_avcc(&info.extra_data)?;

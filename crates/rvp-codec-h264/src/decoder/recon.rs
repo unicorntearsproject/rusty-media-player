@@ -10,6 +10,7 @@ use super::deblock::{self, SliceFilter};
 use super::inter::{self, PSTRIDE, Weights};
 use super::intra::{self, AV_LEFT, AV_TOP, AV_TOPLEFT};
 use super::mbinfo::*;
+use super::parse::JobSlot;
 use super::picture::{Motion, PlanePic};
 use super::slice::RefInfo;
 use crate::error::Result;
@@ -17,7 +18,9 @@ use crate::params::PredWeightTable;
 use crate::transform as tr;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
+use rvp_core::par::SpinLock;
 
 /// What the reconstruction of a slice's macroblocks needs to know about the slice.
 pub struct SliceRecon {
@@ -40,8 +43,10 @@ pub struct PicJob {
     pub(crate) uid: i32,
     pub(crate) mbw: usize,
     pub(crate) mbh: usize,
+    /// True if the decoder was reset while this picture was being parsed: there is nothing to reconstruct.
+    pub(crate) cancelled: bool,
     pub(crate) mbs: Vec<MbInfo>,
-    pub(crate) motion: Motion,
+    pub(crate) motion: Arc<Motion>,
     pub(crate) slices: Vec<SliceRecon>,
     /// Scaled coefficients of the blocks flagged in `MbInfo::blk_nz`, in macroblock order.
     pub(crate) coefs: Vec<i16>,
@@ -64,8 +69,9 @@ pub struct OutputInfo {
 
 /// A message from the parsing side to the reconstruction side. All of them are processed in the order sent.
 pub enum ReconEvent {
-    /// Reconstruct and deblock a picture, then keep it as a reference candidate under its `uid`.
-    Picture(Box<PicJob>),
+    /// Reconstruct and deblock a picture (once its parsing has finished), then keep it as a reference candidate under
+    /// its `uid`.
+    Picture(Arc<JobSlot>),
     /// A "non-existing" frame of a `frame_num` gap: a copy of the picture `template` (grey if `None`).
     Gap {
         /// Ids of the new pictures.
@@ -115,7 +121,12 @@ impl Reconstructor {
     /// Process one event; finished output frames are appended to `out`.
     pub fn handle(&mut self, ev: ReconEvent, out: &mut VecDeque<Frame>) {
         match ev {
-            ReconEvent::Picture(job) => self.picture(*job),
+            ReconEvent::Picture(slot) => {
+                let job = slot.wait();
+                if !job.cancelled {
+                    self.picture(*job);
+                }
+            }
             ReconEvent::Gap { uids, mbw, mbh, template } => {
                 let planes =
                     template.and_then(|t| self.dpb.iter().find(|q| q.uid == t)).map(|t| t.planes.clone());
@@ -167,57 +178,97 @@ impl Reconstructor {
     fn picture(&mut self, mut job: PicJob) {
         let mut pic = self.alloc(job.mbw, job.mbh);
         pic.uid = job.uid;
-        let mut coef = self.coef.take().unwrap_or_else(|| Box::new([0; 384]));
+        let (mbw, mbh) = (job.mbw, job.mbh);
+        let strides = pic.strides;
+        // Phase A: inter macroblocks, in bands of macroblock rows on the pool. They read only reference pictures and write
+        // only their own samples, so the bands are independent.
+        let threads = rvp_core::par::threads();
+        let band_rows = if threads > 1 && mbw * mbh >= 1024 { mbh.div_ceil(threads * 2).max(2) } else { mbh };
         {
-            let mbw = job.mbw;
-            let mut cur_slice = 0u16;
-            let mut mr: Option<MbRecon<'_>> = None;
-            // The slice of each macroblock, read before `mr` borrows the macroblock array.
-            let slice_ids: Vec<u16> = job.mbs.iter().map(|m| m.slice).collect();
-            for (addr, &s) in slice_ids.iter().enumerate() {
-                if s == 0 {
-                    continue;
+            let [p0, p1, p2] = &mut pic.planes;
+            let dpb = &self.dpb;
+            let (slices, motion, coefs, pcm) = (&job.slices, &*job.motion, &job.coefs[..], &job.pcm[..]);
+            type Band<'p> = ([&'p mut [u8]; 3], &'p mut [MbInfo]);
+            let bands: Vec<SpinLock<Option<Band<'_>>>> = p0
+                .chunks_mut(16 * strides[0] * band_rows)
+                .zip(p1.chunks_mut(8 * strides[1] * band_rows))
+                .zip(p2.chunks_mut(8 * strides[2] * band_rows))
+                .zip(job.mbs.chunks_mut(mbw * band_rows))
+                .map(|(((a, b), c), m)| SpinLock::new(Some(([a, b, c], m))))
+                .collect();
+            rvp_core::par::for_each(bands.len(), &|i| {
+                let Some((planes, mbs)) = bands[i].lock().take() else { return };
+                let Some(first) = slices.first() else { return };
+                let mut coef = Box::new([0i32; 384]);
+                let first_mb = i * band_rows * mbw;
+                let r0 = i * band_rows;
+                // The slice and flags of each macroblock, read before the reconstructor borrows the band's array.
+                let ids: Vec<(u16, u16)> = mbs.iter().map(|m| (m.slice, m.flags)).collect();
+                let mut mr = MbRecon::new(
+                    planes,
+                    strides,
+                    [r0 * 16, r0 * 8, r0 * 8],
+                    mbs,
+                    first_mb,
+                    motion,
+                    dpb,
+                    first,
+                    coefs,
+                    pcm,
+                    mbw,
+                    mbh,
+                    &mut coef,
+                );
+                let mut cur_slice = 1u16;
+                for (k, &(s, flags)) in ids.iter().enumerate() {
+                    if s == 0 || flags & F_INTRA != 0 {
+                        continue;
+                    }
+                    if s != cur_slice {
+                        cur_slice = s;
+                        mr.set_slice(&slices[s as usize - 1]);
+                    }
+                    let _ = mr.recon_mb(first_mb + k);
                 }
-                if s != cur_slice || mr.is_none() {
-                    cur_slice = s;
-                    // Resolve the reference lists against the pictures held here.
-                    let sl = &job.slices[s as usize - 1];
-                    let resolve = |r: &RefInfo| {
-                        let idx = self.dpb.iter().position(|p| p.uid == r.uid).unwrap_or(0);
-                        RefInfo { dpb_idx: idx, ..*r }
-                    };
-                    let refs =
-                        [sl.refs[0].iter().map(resolve).collect(), sl.refs[1].iter().map(resolve).collect()];
-                    drop(mr.take());
-                    mr = Some(MbRecon {
-                        pic: &mut pic,
-                        motion: &job.motion,
-                        mbs: &mut job.mbs,
-                        dpb: &self.dpb,
-                        refs,
-                        slice: sl,
-                        coefs: &job.coefs,
-                        pcm: &job.pcm,
-                        mbw,
-                        mbh: job.mbh,
-                        coef: &mut coef,
-                        blk_nz: 0,
-                        mb_x: 0,
-                        mb_y: 0,
-                        mb_addr: 0,
-                        na: None,
-                        nb: None,
-                        nc: None,
-                        nd: None,
-                    });
-                }
-                if let Some(m) = mr.as_mut() {
+            });
+        }
+        // Phase B: intra and PCM macroblocks in raster order (they read their neighbours' samples).
+        {
+            let ids: Vec<(u16, u16)> = job.mbs.iter().map(|m| (m.slice, m.flags)).collect();
+            if !job.slices.is_empty() && ids.iter().any(|&(s, f)| s != 0 && f & F_INTRA != 0) {
+                let mut coef = self.coef.take().unwrap_or_else(|| Box::new([0; 384]));
+                let [p0, p1, p2] = &mut pic.planes;
+                let mut mr = MbRecon::new(
+                    [&mut p0[..], &mut p1[..], &mut p2[..]],
+                    strides,
+                    [0; 3],
+                    &mut job.mbs,
+                    0,
+                    &job.motion,
+                    &self.dpb,
+                    &job.slices[0],
+                    &job.coefs,
+                    &job.pcm,
+                    mbw,
+                    mbh,
+                    &mut coef,
+                );
+                let mut cur_slice = 1u16;
+                for (addr, &(s, flags)) in ids.iter().enumerate() {
+                    if s == 0 || flags & F_INTRA == 0 {
+                        continue;
+                    }
+                    if s != cur_slice {
+                        cur_slice = s;
+                        mr.set_slice(&job.slices[s as usize - 1]);
+                    }
                     // A macroblock whose prediction mode is impossible for its neighbours is left as it is.
-                    let _ = m.recon_mb(addr);
+                    let _ = mr.recon_mb(addr);
                 }
+                drop(mr);
+                self.coef = Some(coef);
             }
         }
-        self.coef = Some(coef);
         // Conceal macroblocks no slice covered.
         if job.mbs.iter().any(|m| m.slice == 0) {
             let src = job.conceal_src.and_then(|u| self.dpb.iter().find(|p| p.uid == u));
@@ -280,11 +331,16 @@ fn make_frame(pic: &PlanePic, o: &OutputInfo) -> Frame {
     }
 }
 
-/// Reconstructs the macroblocks of one slice of a picture.
+/// Reconstructs macroblocks of one slice of a picture, into a band of rows of the picture (or all of it).
 pub(crate) struct MbRecon<'a> {
-    pic: &'a mut PlanePic,
+    /// The samples of the band: Y, Cb and Cr from picture line `row0[c]` on.
+    planes: [&'a mut [u8]; 3],
+    strides: [usize; 3],
+    row0: [usize; 3],
     motion: &'a Motion,
+    /// The macroblock infos of the band; `mb_off` is the address of the first.
     mbs: &'a mut [MbInfo],
+    mb_off: usize,
     /// The pictures `refs` index into.
     dpb: &'a [PlanePic],
     refs: [Vec<RefInfo>; 2],
@@ -310,11 +366,66 @@ pub(crate) struct MbRecon<'a> {
 
 const COEF_CB: usize = 256;
 
-impl MbRecon<'_> {
+impl<'a> MbRecon<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        planes: [&'a mut [u8]; 3],
+        strides: [usize; 3],
+        row0: [usize; 3],
+        mbs: &'a mut [MbInfo],
+        mb_off: usize,
+        motion: &'a Motion,
+        dpb: &'a [PlanePic],
+        slice: &'a SliceRecon,
+        coefs: &'a [i16],
+        pcm: &'a [u8],
+        mbw: usize,
+        mbh: usize,
+        coef: &'a mut [i32; 384],
+    ) -> Self {
+        let refs = Self::resolve(dpb, slice);
+        Self {
+            planes,
+            strides,
+            row0,
+            motion,
+            mbs,
+            mb_off,
+            dpb,
+            refs,
+            slice,
+            coefs,
+            pcm,
+            mbw,
+            mbh,
+            coef,
+            blk_nz: 0,
+            mb_x: 0,
+            mb_y: 0,
+            mb_addr: 0,
+            na: None,
+            nb: None,
+            nc: None,
+            nd: None,
+        }
+    }
+
+    /// The reference lists of `slice` name pictures by id; find them in `dpb`.
+    fn resolve(dpb: &[PlanePic], slice: &SliceRecon) -> [Vec<RefInfo>; 2] {
+        let r = |r: &RefInfo| RefInfo { dpb_idx: dpb.iter().position(|p| p.uid == r.uid).unwrap_or(0), ..*r };
+        [slice.refs[0].iter().map(r).collect(), slice.refs[1].iter().map(r).collect()]
+    }
+
+    /// Continue with the macroblocks of another slice.
+    fn set_slice(&mut self, slice: &'a SliceRecon) {
+        self.refs = Self::resolve(self.dpb, slice);
+        self.slice = slice;
+    }
+
     #[inline]
     fn intra_ok(&self, n: Option<usize>) -> bool {
         match n {
-            Some(a) => !self.slice.constrained_intra || self.mbs[a].is_intra(),
+            Some(a) => !self.slice.constrained_intra || self.mbs[a - self.mb_off].is_intra(),
             None => false,
         }
     }
@@ -324,28 +435,29 @@ impl MbRecon<'_> {
         self.mb_addr = addr;
         self.mb_x = addr % self.mbw;
         self.mb_y = addr / self.mbw;
+        let m = self.mbs[addr - self.mb_off];
+        if m.flags & F_INTRA == 0 {
+            // Inter macroblocks need no neighbours.
+            self.load_coefs(&m);
+            self.mc_mb()?;
+            self.add_inter_residual(m.flags & F_T8X8 != 0);
+            return Ok(());
+        }
         let (x, y, w) = (self.mb_x, self.mb_y, self.mbw);
-        let s = self.mbs[addr].slice;
-        let ok = |mbs: &[MbInfo], a: usize| mbs[a].slice == s;
+        let s = m.slice;
+        let ok = |mbs: &[MbInfo], a: usize| mbs[a - self.mb_off].slice == s;
         self.na = (x > 0 && ok(self.mbs, addr - 1)).then(|| addr - 1);
         self.nb = (y > 0 && ok(self.mbs, addr - w)).then(|| addr - w);
         self.nc = (y > 0 && x + 1 < w && ok(self.mbs, addr - w + 1)).then(|| addr - w + 1);
         self.nd = (y > 0 && x > 0 && ok(self.mbs, addr - w - 1)).then(|| addr - w - 1);
-        let m = self.mbs[addr];
         if m.flags & F_PCM != 0 {
             return self.recon_pcm(m.coef_off as usize);
         }
         self.load_coefs(&m);
-        let t8 = m.flags & F_T8X8 != 0;
-        if m.flags & F_INTRA == 0 {
-            self.mc_mb()?;
-            self.add_inter_residual(t8);
-            return Ok(());
-        }
         if m.flags & F_I16 != 0 {
             self.recon_intra16(m.i16_mode)?;
         } else {
-            self.recon_intra_nxn(t8)?;
+            self.recon_intra_nxn(m.flags & F_T8X8 != 0)?;
         }
         self.recon_chroma_intra(m.chroma_mode)
     }
@@ -375,17 +487,17 @@ impl MbRecon<'_> {
     fn recon_pcm(&mut self, off: usize) -> Result<()> {
         let buf = &self.pcm[off..off + 384];
         let (mx, my) = (self.mb_x, self.mb_y);
-        let ys = self.pic.strides[0];
+        let ys = self.strides[0];
         for y in 0..16 {
             let o = (my * 16 + y) * ys + mx * 16;
-            self.pic.planes[0][o..o + 16].copy_from_slice(&buf[y * 16..y * 16 + 16]);
+            self.planes[0][o..o + 16].copy_from_slice(&buf[y * 16..y * 16 + 16]);
         }
         for c in 0..2 {
-            let cs = self.pic.strides[1 + c];
+            let cs = self.strides[1 + c];
             for y in 0..8 {
                 let o = (my * 8 + y) * cs + mx * 8;
                 let s = 256 + c * 64 + y * 8;
-                self.pic.planes[1 + c][o..o + 8].copy_from_slice(&buf[s..s + 8]);
+                self.planes[1 + c][o..o + 8].copy_from_slice(&buf[s..s + 8]);
             }
         }
         Ok(())
@@ -414,7 +526,7 @@ impl MbRecon<'_> {
     /// Motion-compensate the whole macroblock into the current picture.
     pub(crate) fn mc_mb(&mut self) -> Result<()> {
         if self.uniform(0, 0, 4, 4) {
-            self.mbs[self.mb_addr].flags |= F_UNIFORM;
+            self.mbs[self.mb_addr - self.mb_off].flags |= F_UNIFORM;
             self.mc_block(0, 0, 4, 4);
             return Ok(());
         }
@@ -501,7 +613,7 @@ impl MbRecon<'_> {
         // Luma.
         let wt = self.weights(0, r);
         let direct = single.filter(|_| wt.is_none());
-        let stride = self.pic.strides[0];
+        let stride = self.strides[0];
         for l in 0..2 {
             if r[l] < 0 {
                 continue;
@@ -511,7 +623,7 @@ impl MbRecon<'_> {
             let (mx, my) = (x + (mv[0] as i32 >> 2), y + (mv[1] as i32 >> 2));
             let (fx, fy) = ((mv[0] & 3) as usize, (mv[1] & 3) as usize);
             if direct.is_some() {
-                let dst = &mut self.pic.planes[0][y as usize * stride + x as usize..];
+                let dst = &mut self.planes[0][(y as usize - self.row0[0]) * stride + x as usize..];
                 inter::mc_luma(&rp.planes[0], rp.strides[0], pw, ph, mx, my, fx, fy, w, h, dst, stride);
             } else {
                 inter::mc_luma(
@@ -531,7 +643,7 @@ impl MbRecon<'_> {
             }
         }
         if direct.is_none() {
-            let dst = &mut self.pic.planes[0][y as usize * stride + x as usize..];
+            let dst = &mut self.planes[0][(y as usize - self.row0[0]) * stride + x as usize..];
             let (p0, p1) = (
                 if r[0] >= 0 { Some(&pred[0][..]) } else { None },
                 if r[1] >= 0 { Some(&pred[1][..]) } else { None },
@@ -544,7 +656,7 @@ impl MbRecon<'_> {
         for comp in 1..3 {
             let wt = self.weights(comp, r);
             let direct = single.filter(|_| wt.is_none());
-            let stride = self.pic.strides[comp];
+            let stride = self.strides[comp];
             for l in 0..2 {
                 if r[l] < 0 {
                     continue;
@@ -554,7 +666,8 @@ impl MbRecon<'_> {
                 let (mx, my) = (cx + (mv[0] as i32 >> 3), cy + (mv[1] as i32 >> 3));
                 let (fx, fy) = ((mv[0] & 7) as i32, (mv[1] & 7) as i32);
                 if direct.is_some() {
-                    let dst = &mut self.pic.planes[comp][cy as usize * stride + cx as usize..];
+                    let dst =
+                        &mut self.planes[comp][(cy as usize - self.row0[comp]) * stride + cx as usize..];
                     inter::mc_chroma(
                         &rp.planes[comp],
                         rp.strides[comp],
@@ -587,7 +700,7 @@ impl MbRecon<'_> {
                 }
             }
             if direct.is_none() {
-                let dst = &mut self.pic.planes[comp][cy as usize * stride + cx as usize..];
+                let dst = &mut self.planes[comp][(cy as usize - self.row0[comp]) * stride + cx as usize..];
                 let (p0, p1) = (
                     if r[0] >= 0 { Some(&pred[0][..]) } else { None },
                     if r[1] >= 0 { Some(&pred[1][..]) } else { None },
@@ -620,9 +733,9 @@ impl MbRecon<'_> {
         if self.blk_nz & (1 << r) == 0 {
             return;
         }
-        let stride = self.pic.strides[0];
+        let stride = self.strides[0];
         let c = &mut self.coef[r * 16..r * 16 + 16];
-        let dst = &mut self.pic.planes[0][y * stride + x..];
+        let dst = &mut self.planes[0][(y - self.row0[0]) * stride + x..];
         if c[1..].iter().all(|&v| v == 0) {
             tr::add_dc_4x4(c[0], dst, stride);
             c[0] = 0;
@@ -640,18 +753,18 @@ impl MbRecon<'_> {
         if self.blk_nz & (1 << (24 + i8)) == 0 {
             return;
         }
-        let stride = self.pic.strides[0];
+        let stride = self.strides[0];
         let c = &mut self.coef[i8 * 64..i8 * 64 + 64];
         let mut b = [0i32; 64];
         b.copy_from_slice(c);
         tr::idct8x8(&mut b);
-        tr::add_residual_8x8(&b, &mut self.pic.planes[0][y * stride + x..], stride);
+        tr::add_residual_8x8(&b, &mut self.planes[0][(y - self.row0[0]) * stride + x..], stride);
         c.fill(0);
     }
 
     pub(crate) fn add_chroma_blocks(&mut self) {
         for comp in 0..2 {
-            let stride = self.pic.strides[1 + comp];
+            let stride = self.strides[1 + comp];
             for blk in 0..4 {
                 if self.blk_nz & (1 << (16 + comp * 4 + blk)) == 0 {
                     continue;
@@ -659,7 +772,7 @@ impl MbRecon<'_> {
                 let base = COEF_CB + comp * 64 + blk * 16;
                 let (x, y) = (self.mb_x * 8 + (blk & 1) * 4, self.mb_y * 8 + (blk >> 1) * 4);
                 let c = &mut self.coef[base..base + 16];
-                let dst = &mut self.pic.planes[1 + comp][y * stride + x..];
+                let dst = &mut self.planes[1 + comp][(y - self.row0[1 + comp]) * stride + x..];
                 if c[1..].iter().all(|&v| v == 0) {
                     tr::add_dc_4x4(c[0], dst, stride);
                 } else {
@@ -674,19 +787,19 @@ impl MbRecon<'_> {
     }
 
     fn recon_intra_nxn(&mut self, t8: bool) -> Result<()> {
-        let stride = self.pic.strides[0];
+        let stride = self.strides[0];
         let (mx, my) = (self.mb_x * 16, self.mb_y * 16);
         if t8 {
             for i8 in 0..4 {
                 let (bx, by) = ((i8 & 1) * 2, (i8 >> 1) * 2);
                 let (x, y) = (mx + bx * 4, my + by * 4);
-                let mode = self.mbs[self.mb_addr].ipm[by * 4 + bx] as u8;
+                let mode = self.mbs[self.mb_addr - self.mb_off].ipm[by * 4 + bx] as u8;
                 let (mut top, mut left, tl, avail) = self.gather_8x8(bx, by, x, y);
                 let (ft, fl, ftl);
                 (ft, fl, ftl) = intra::filter_8x8_refs(&top, &left, tl, avail);
                 top = ft;
                 left = fl;
-                let dst = &mut self.pic.planes[0][y * stride + x..];
+                let dst = &mut self.planes[0][(y - self.row0[0]) * stride + x..];
                 intra::predict_nxn::<8>(dst, stride, mode, &top, &left, ftl, avail)?;
                 self.add_luma_block8(i8, x, y);
             }
@@ -694,9 +807,9 @@ impl MbRecon<'_> {
             for blk in 0..16 {
                 let (bx, by) = blk_xy(blk);
                 let (x, y) = (mx + bx * 4, my + by * 4);
-                let mode = self.mbs[self.mb_addr].ipm[by * 4 + bx] as u8;
+                let mode = self.mbs[self.mb_addr - self.mb_off].ipm[by * 4 + bx] as u8;
                 let (top, left, tl, avail) = self.gather_4x4(bx, by, x, y);
-                let dst = &mut self.pic.planes[0][y * stride + x..];
+                let dst = &mut self.planes[0][(y - self.row0[0]) * stride + x..];
                 intra::predict_nxn::<4>(dst, stride, mode, &top, &left, tl, avail)?;
                 self.add_luma_block(by * 4 + bx, x, y);
             }
@@ -706,8 +819,8 @@ impl MbRecon<'_> {
 
     /// Neighbouring samples and availability for the 4x4 block at `(bx, by)`, picture position `(x, y)`.
     fn gather_4x4(&self, bx: usize, by: usize, x: usize, y: usize) -> ([u8; 8], [u8; 4], u8, u8) {
-        let stride = self.pic.strides[0];
-        let p = &self.pic.planes[0];
+        let stride = self.strides[0];
+        let p = &self.planes[0];
         let left_ok = bx > 0 || self.intra_ok(self.na);
         let top_ok = by > 0 || self.intra_ok(self.nb);
         let tl_ok = match (bx > 0, by > 0) {
@@ -752,8 +865,8 @@ impl MbRecon<'_> {
     }
 
     fn gather_8x8(&self, bx: usize, by: usize, x: usize, y: usize) -> ([u8; 16], [u8; 8], u8, u8) {
-        let stride = self.pic.strides[0];
-        let p = &self.pic.planes[0];
+        let stride = self.strides[0];
+        let p = &self.planes[0];
         let left_ok = bx > 0 || self.intra_ok(self.na);
         let top_ok = by > 0 || self.intra_ok(self.nb);
         let tl_ok = match (bx > 0, by > 0) {
@@ -798,7 +911,7 @@ impl MbRecon<'_> {
     }
 
     fn recon_intra16(&mut self, mode: u8) -> Result<()> {
-        let stride = self.pic.strides[0];
+        let stride = self.strides[0];
         let (mx, my) = (self.mb_x * 16, self.mb_y * 16);
         let top_ok = self.intra_ok(self.nb);
         let left_ok = self.intra_ok(self.na);
@@ -808,7 +921,7 @@ impl MbRecon<'_> {
         let mut tl = 128;
         let mut avail = 0;
         {
-            let p = &self.pic.planes[0];
+            let p = &self.planes[0];
             if top_ok {
                 avail |= AV_TOP;
                 top.copy_from_slice(&p[(my - 1) * stride + mx..(my - 1) * stride + mx + 16]);
@@ -824,15 +937,7 @@ impl MbRecon<'_> {
                 tl = p[(my - 1) * stride + mx - 1];
             }
         }
-        intra::predict_16x16(
-            &mut self.pic.planes[0][my * stride + mx..],
-            stride,
-            mode,
-            &top,
-            &left,
-            tl,
-            avail,
-        )?;
+        intra::predict_16x16(&mut self.planes[0][my * stride + mx..], stride, mode, &top, &left, tl, avail)?;
         for r in 0..16 {
             self.add_luma_block(r, mx + (r & 3) * 4, my + (r >> 2) * 4);
         }
@@ -845,13 +950,13 @@ impl MbRecon<'_> {
         let tl_ok = self.intra_ok(self.nd);
         let (mx, my) = (self.mb_x * 8, self.mb_y * 8);
         for comp in 0..2 {
-            let stride = self.pic.strides[1 + comp];
+            let stride = self.strides[1 + comp];
             let mut top = [128u8; 8];
             let mut left = [128u8; 8];
             let mut tl = 128;
             let mut avail = 0;
             {
-                let p = &self.pic.planes[1 + comp];
+                let p = &self.planes[1 + comp];
                 if top_ok {
                     avail |= AV_TOP;
                     top.copy_from_slice(&p[(my - 1) * stride + mx..(my - 1) * stride + mx + 8]);
@@ -868,7 +973,7 @@ impl MbRecon<'_> {
                 }
             }
             intra::predict_chroma(
-                &mut self.pic.planes[1 + comp][my * stride + mx..],
+                &mut self.planes[1 + comp][my * stride + mx..],
                 stride,
                 mode,
                 &top,

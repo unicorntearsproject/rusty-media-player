@@ -16,6 +16,7 @@ mod inter_simd;
 pub mod intra;
 pub mod mbinfo;
 mod mvpred;
+pub mod parse;
 pub mod picture;
 pub mod poc;
 pub mod recon;
@@ -27,15 +28,13 @@ use crate::params::{DecRefPicMarking, ParamSets, Pps, SliceHeader, SliceType, Sp
 use crate::transform::LevelScale;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
-use alloc::rc::Rc;
-use alloc::vec;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use deblock::SliceFilter;
-use mbinfo::MbInfo;
-use picture::{Picture, RefState};
+use parse::{JobSlot, ParseJob, SliceWork, StatsCell};
+use picture::{Motion, MotionSlot, Picture, RefState};
 use poc::{PocResult, PocState};
-use recon::{OutputInfo, PicJob, ReconEvent, ReconExecutor, Reconstructor, SliceRecon};
-use slice::{SliceDecoder, Store};
+use recon::{OutputInfo, ReconEvent, ReconExecutor, Reconstructor, SliceRecon};
 
 /// Largest picture accepted by default, in macroblocks (level 5.1: 4096x2304). Bounds memory for hostile streams.
 pub const DEFAULT_MAX_MBS: usize = 36_864;
@@ -82,10 +81,13 @@ pub struct Stats {
 
 struct CurPic {
     pic: Picture,
-    sps: Rc<Sps>,
+    sps: Arc<Sps>,
     hdr: SliceHeader,
     poc: PocResult,
-    slices: Vec<SliceRecon>,
+    /// The slices read so far; they are parsed when the picture is complete.
+    slices: Vec<SliceWork>,
+    /// A slice starting at macroblock 0 has been seen.
+    saw_first_mb: bool,
     marking: Option<DecRefPicMarking>,
     pts: i64,
 }
@@ -94,23 +96,23 @@ struct CurPic {
 pub struct Decoder {
     sets: ParamSets,
     length_size: usize,
-    sps: Option<Rc<Sps>>,
+    sps: Option<Arc<Sps>>,
     dpb: Vec<Picture>,
-    pool: Vec<Picture>,
     cur: Option<CurPic>,
-    mbs: Vec<MbInfo>,
     out: VecDeque<Frame>,
     poc: PocState,
     prev_ref_frame_num: u32,
     max_long_term_idx: i32,
     next_uid: i32,
     decode_counter: u64,
-    scale: Option<(Rc<Sps>, Rc<Pps>, LevelScale)>,
+    scale: Option<(Arc<Sps>, Arc<Pps>, Arc<LevelScale>)>,
     scratch: Vec<u8>,
-    stats: Stats,
+    stats: Arc<StatsCell>,
     max_mbs: usize,
-    /// Scaled coefficients and PCM samples of the picture being parsed.
-    store: Store,
+    /// Counts resets (seeks): parsing jobs of an earlier count are abandoned.
+    epoch: Arc<core::sync::atomic::AtomicU64>,
+    /// Parses pictures on other threads, if the host provided a runner; otherwise each picture is parsed inline.
+    runner: Option<Box<dyn parse::ParseRunner>>,
     /// Reconstruction when it runs inline (no executor).
     recon: Reconstructor,
     /// Reconstruction on another thread, if the host provided one.
@@ -148,9 +150,7 @@ impl Decoder {
             length_size: 4,
             sps: None,
             dpb: Vec::new(),
-            pool: Vec::new(),
             cur: None,
-            mbs: Vec::new(),
             out: VecDeque::new(),
             poc: PocState::default(),
             prev_ref_frame_num: 0,
@@ -159,9 +159,10 @@ impl Decoder {
             decode_counter: 0,
             scale: None,
             scratch: Vec::new(),
-            stats: Stats::default(),
+            stats: Arc::new(StatsCell::default()),
             max_mbs: DEFAULT_MAX_MBS,
-            store: Store::default(),
+            epoch: Arc::new(core::sync::atomic::AtomicU64::new(0)),
+            runner: None,
             recon: Reconstructor::new(),
             exec: None,
         }
@@ -183,6 +184,13 @@ impl Decoder {
         self.exec = Some(exec);
     }
 
+    /// Parse pictures with `runner` (typically on worker threads) instead of inline, so that several pictures are parsed
+    /// at once. Needs a [`ReconExecutor`] as well (reconstruction waits for the parsing of its picture). Must be set
+    /// before the first picture.
+    pub fn set_parse_runner(&mut self, runner: Box<dyn parse::ParseRunner>) {
+        self.runner = Some(runner);
+    }
+
     /// Reconstruction events still queued or running (always 0 without an executor).
     pub fn pending(&self) -> usize {
         self.exec.as_ref().map_or(0, |e| e.pending())
@@ -198,7 +206,13 @@ impl Decoder {
 
     /// Diagnostic counters.
     pub fn stats(&self) -> Stats {
-        self.stats
+        use core::sync::atomic::Ordering::Relaxed;
+        Stats {
+            pictures: self.stats.pictures.load(Relaxed),
+            slices: self.stats.slices.load(Relaxed),
+            errors: self.stats.errors.load(Relaxed),
+            concealed_mbs: self.stats.concealed_mbs.load(Relaxed),
+        }
     }
 
     /// Load parameter sets and the NAL length size from an `avcC` record.
@@ -259,8 +273,9 @@ impl Decoder {
     /// Forget all pictures and state (after a seek), keeping the parameter sets.
     pub fn reset(&mut self) {
         self.cur = None;
-        let old = core::mem::take(&mut self.dpb);
-        self.pool.extend(old);
+        self.dpb.clear();
+        // Pictures still being parsed belong to the old position.
+        self.epoch.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
         self.emit(ReconEvent::Reset);
         if let Some(e) = &mut self.exec {
             // Frames the reconstruction side finished meanwhile belong to the old position.
@@ -297,12 +312,12 @@ impl Decoder {
                 Ok(())
             }
             NalUnitType::Slice | NalUnitType::IdrSlice => {
-                let mut buf = core::mem::take(&mut self.scratch);
+                // The slice's bytes go on to the parsing of the picture, so the buffer is not reused.
+                let mut buf = Vec::with_capacity(payload.len());
                 nal::unescape(payload, &mut buf);
-                let r = self.decode_slice(hdr, &buf, pts);
-                self.scratch = buf;
+                let r = self.decode_slice(hdr, buf, pts);
                 if r.is_err() {
-                    self.stats.errors += 1;
+                    self.stats.errors.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 }
                 r
             }
@@ -316,8 +331,8 @@ impl Decoder {
 
     // ---------------------------------------------------------------------------------------------------
 
-    fn decode_slice(&mut self, nal: NalHeader, rbsp: &[u8], pts: i64) -> Result<()> {
-        let (hdr, sps, pps) = SliceHeader::parse(rbsp, nal, &self.sets)?;
+    fn decode_slice(&mut self, nal: NalHeader, rbsp: Vec<u8>, pts: i64) -> Result<()> {
+        let (hdr, sps, pps) = SliceHeader::parse(&rbsp, nal, &self.sets)?;
         // Frame pictures of a stream that merely allows interlace (frame_mbs_only_flag 0 without MBAFF) decode like
         // progressive ones; field pictures and macroblock-adaptive frame/field pairs are not supported.
         if hdr.field_pic || sps.mb_adaptive_frame_field {
@@ -344,7 +359,7 @@ impl Decoder {
         if let Some(cur) = &self.cur {
             // 7.4.1.2.4 can miss a new picture (for example POC type 2 after a picture with MMCO 5 that has the same
             // frame_num). A slice that restarts at macroblock 0 when that macroblock is already decoded starts a new one.
-            let restarts = hdr.first_mb_in_slice == 0 && self.mbs.first().is_some_and(|m| m.slice != 0);
+            let restarts = hdr.first_mb_in_slice == 0 && cur.saw_first_mb;
             if is_new_picture(&cur.hdr, &hdr, &cur.sps) || restarts {
                 self.finish_picture()?;
             }
@@ -354,19 +369,23 @@ impl Decoder {
         }
         let cur_poc = self.cur.as_ref().map(|c| c.pic.poc).ok_or(Error::Invalid("no current picture"))?;
         let refs = self.make_ref_lists(&hdr, &sps, cur_poc);
-        let Some(cur) = self.cur.as_mut() else { return Err(Error::Invalid("no current picture")) };
         // Level scale tables for this (SPS, PPS) pair.
         let stale = match &self.scale {
-            Some((s, p, _)) => !(Rc::ptr_eq(s, &sps) && Rc::ptr_eq(p, &pps)),
+            Some((s, p, _)) => !(Arc::ptr_eq(s, &sps) && Arc::ptr_eq(p, &pps)),
             None => true,
         };
         if stale {
             let m = crate::params::ScalingMatrices::from_pps(sps.scaling.as_ref(), pps.scaling.as_ref());
-            self.scale = Some((sps.clone(), pps.clone(), LevelScale::new(&m)));
+            self.scale = Some((sps.clone(), pps.clone(), Arc::new(LevelScale::new(&m))));
         }
-        let ls = &self.scale.as_ref().map(|s| &s.2).ok_or(Error::Invalid("no scale tables"))?;
-        let slice_num = cur.slices.len() as u16 + 1;
-        cur.slices.push(SliceRecon {
+        let ls = self.scale.as_ref().map(|s| s.2.clone()).ok_or(Error::Invalid("no scale tables"))?;
+        // Direct prediction in a B slice reads the motion of RefPicList1[0].
+        let col = (hdr.slice_type == SliceType::B)
+            .then(|| refs[1].first().map(|r| self.dpb[r.dpb_idx].motion.clone()))
+            .flatten();
+        let Some(cur) = self.cur.as_mut() else { return Err(Error::Invalid("no current picture")) };
+        cur.saw_first_mb |= hdr.first_mb_in_slice == 0;
+        let recon = SliceRecon {
             refs: refs.clone(),
             cur_poc,
             weight_mode: match hdr.slice_type {
@@ -381,31 +400,9 @@ impl Decoder {
                 offset_a: (hdr.slice_alpha_c0_offset_div2 * 2) as i8,
                 offset_b: (hdr.slice_beta_offset_div2 * 2) as i8,
             },
-        });
-        let mut sd = SliceDecoder::new(
-            &sps,
-            &pps,
-            &hdr,
-            ls,
-            &mut cur.pic,
-            &mut self.mbs,
-            &self.dpb,
-            refs,
-            cur_poc,
-            slice_num,
-            &mut self.store,
-        );
-        let r = if pps.cabac {
-            sd.decode_cabac(rbsp, hdr.data_bit_pos.div_ceil(8))
-        } else {
-            let mut br = crate::bitstream::BitReader::new(rbsp);
-            br.skip(hdr.data_bit_pos as u32);
-            sd.decode_cavlc(br)
         };
-        if r.is_ok() {
-            self.stats.slices += 1;
-        }
-        r
+        cur.slices.push(SliceWork { rbsp, hdr, sps, pps, ls, refs, cur_poc, col, recon });
+        Ok(())
     }
 
     /// Reference lists for a slice, with missing entries concealed by an existing picture (or a grey one).
@@ -423,6 +420,7 @@ impl Decoder {
             i
         } else {
             let mut p = Picture::new(sps.width_mbs(), sps.height_mbs());
+            p.motion = MotionSlot::filled(Motion::new(sps.width_mbs(), sps.height_mbs()));
             p.uid = self.next_uid;
             self.next_uid = self.next_uid.wrapping_add(1).max(1);
             self.emit(ReconEvent::Gap {
@@ -451,25 +449,12 @@ impl Decoder {
         out
     }
 
-    fn alloc_picture(&mut self, mbw: usize, mbh: usize) -> Picture {
-        while let Some(mut p) = self.pool.pop() {
-            if p.fits(mbw, mbh) {
-                p.reset();
-                return p;
-            }
-        }
-        Picture::new(mbw, mbh)
-    }
-
     fn release(&mut self, p: Picture) {
         self.emit(ReconEvent::Free(p.uid));
-        if self.pool.len() < 4 {
-            self.pool.push(p);
-        }
     }
 
     /// Make `sps` the active sequence parameter set, flushing if the picture format changed.
-    fn activate(&mut self, sps: &Rc<Sps>) {
+    fn activate(&mut self, sps: &Arc<Sps>) {
         let same = match &self.sps {
             Some(a) => **a == **sps,
             None => false,
@@ -485,11 +470,8 @@ impl Decoder {
             };
             if size_changed {
                 while self.bump() {}
-                let old = core::mem::take(&mut self.dpb);
-                self.pool.clear();
-                drop(old);
+                self.dpb.clear();
                 self.emit(ReconEvent::Reset);
-                self.mbs = vec![MbInfo::EMPTY; sps.width_mbs() * sps.height_mbs()];
                 self.poc = PocState::default();
                 self.prev_ref_frame_num = 0;
                 self.max_long_term_idx = -1;
@@ -498,12 +480,9 @@ impl Decoder {
         self.sps = Some(sps.clone());
     }
 
-    fn start_picture(&mut self, hdr: &SliceHeader, sps: &Rc<Sps>, pts: i64) -> Result<()> {
+    fn start_picture(&mut self, hdr: &SliceHeader, sps: &Arc<Sps>, pts: i64) -> Result<()> {
         self.activate(sps);
         let (mbw, mbh) = (sps.width_mbs(), sps.height_mbs());
-        if self.mbs.len() != mbw * mbh {
-            self.mbs = vec![MbInfo::EMPTY; mbw * mbh];
-        }
         let max_frame_num = 1u32 << sps.log2_max_frame_num;
         // Gaps in frame_num: insert "non-existing" frames (also used to conceal lost pictures).
         if !hdr.idr
@@ -513,7 +492,7 @@ impl Decoder {
             self.fill_frame_num_gap(sps, hdr.frame_num, max_frame_num);
         }
         let poc = self.poc.compute(sps, hdr);
-        let mut pic = self.alloc_picture(mbw, mbh);
+        let mut pic = Picture::new(mbw, mbh);
         pic.uid = self.next_uid;
         self.next_uid = self.next_uid.wrapping_add(1).max(1);
         pic.poc = poc.poc;
@@ -521,22 +500,20 @@ impl Decoder {
         pic.pts = pts;
         self.decode_counter += 1;
         pic.decode_order = self.decode_counter;
-        for m in self.mbs.iter_mut() {
-            *m = MbInfo::EMPTY;
-        }
         self.cur = Some(CurPic {
             pic,
             sps: sps.clone(),
             hdr: hdr.clone(),
             poc,
             slices: Vec::new(),
+            saw_first_mb: false,
             marking: hdr.dec_ref_pic_marking.clone(),
             pts,
         });
         Ok(())
     }
 
-    fn fill_frame_num_gap(&mut self, sps: &Rc<Sps>, frame_num: u32, max_frame_num: u32) {
+    fn fill_frame_num_gap(&mut self, sps: &Arc<Sps>, frame_num: u32, max_frame_num: u32) {
         let (mbw, mbh) = (sps.width_mbs(), sps.height_mbs());
         let count = (frame_num + max_frame_num - self.prev_ref_frame_num - 1) % max_frame_num;
         let count = count.min(sps.max_num_ref_frames.max(1));
@@ -554,7 +531,8 @@ impl Decoder {
         self.emit(ReconEvent::Gap { uids: uids.clone(), mbw, mbh, template });
         for k in 0..count {
             let fnum = (start + k) % max_frame_num;
-            let mut pic = self.alloc_picture(mbw, mbh);
+            let mut pic = Picture::new(mbw, mbh);
+            pic.motion = MotionSlot::filled(Motion::new(mbw, mbh));
             pic.uid = uids[k as usize];
             pic.frame_num = fnum;
             pic.non_existing = true;
@@ -593,31 +571,36 @@ impl Decoder {
     pub fn finish_picture(&mut self) -> Result<()> {
         let Some(mut cur) = self.cur.take() else { return Ok(()) };
         let sps = cur.sps.clone();
-        // Macroblocks no slice covered are concealed by the reconstruction side, from the newest picture we hold.
-        let missing = self.mbs.iter().filter(|m| m.slice == 0).count();
-        let mut conceal_src = None;
-        if missing > 0 {
-            self.stats.concealed_mbs += missing as u64;
-            conceal_src = self
-                .dpb
-                .iter()
-                .filter(|p| p.is_ref() || p.needed_for_output)
-                .max_by_key(|p| p.decode_order)
-                .map(|p| p.uid);
-        }
-        let job = PicJob {
+        // Macroblocks no slice covers are concealed by the reconstruction side, from the newest picture we hold.
+        let conceal_src = self
+            .dpb
+            .iter()
+            .filter(|p| p.is_ref() || p.needed_for_output)
+            .max_by_key(|p| p.decode_order)
+            .map(|p| p.uid);
+        let slot = JobSlot::new();
+        let job = ParseJob {
             uid: cur.pic.uid,
             mbw: sps.width_mbs(),
             mbh: sps.height_mbs(),
-            mbs: self.mbs.clone(),
-            motion: cur.pic.motion(),
             slices: core::mem::take(&mut cur.slices),
-            coefs: core::mem::take(&mut self.store.coefs),
-            pcm: core::mem::take(&mut self.store.pcm),
             conceal_src,
+            motion_slot: cur.pic.motion.clone(),
+            out: slot.clone(),
+            stats: self.stats.clone(),
+            epoch: self.epoch.clone(),
+            my_epoch: self.epoch.load(core::sync::atomic::Ordering::Acquire),
         };
-        self.emit(ReconEvent::Picture(Box::new(job)));
-        self.stats.pictures += 1;
+        // Parsed on another thread if there is a runner; the reconstruction side waits for the result.
+        let mut parse_err: Option<Error> = None;
+        match &mut self.runner {
+            Some(r) => r.spawn(Box::new(move || {
+                let _ = job.run();
+            })),
+            None => parse_err = job.run().err(),
+        }
+        self.emit(ReconEvent::Picture(slot));
+        self.stats.pictures.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
         let h = &cur.hdr;
         let max_frame_num = 1u32 << sps.log2_max_frame_num;
@@ -679,7 +662,7 @@ impl Decoder {
                 self.emit(ev);
                 pic.needed_for_output = false;
                 self.release(pic);
-                return Ok(());
+                return parse_err.map_or(Ok(()), Err);
             }
         }
         while self.dpb.len() >= dpb_size {
@@ -694,7 +677,7 @@ impl Decoder {
                 break;
             }
         }
-        Ok(())
+        parse_err.map_or(Ok(()), Err)
     }
 
     /// Output the waiting picture with the smallest POC. Returns false if none is waiting.

@@ -2,7 +2,7 @@
 use super::{ParamSets, Pps, Sps};
 use crate::bitstream::{BitReader, BitWriter, NalHeader, NalUnitType};
 use crate::error::{Error, Result};
-use alloc::rc::Rc;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 /// Slice type (`slice_type % 5`).
@@ -237,7 +237,7 @@ impl SliceHeader {
 
     /// Parse a slice header from the RBSP of a slice NAL unit (after the NAL header byte). Returns the header
     /// and the parameter sets it refers to.
-    pub fn parse(rbsp: &[u8], nal: NalHeader, sets: &ParamSets) -> Result<(Self, Rc<Sps>, Rc<Pps>)> {
+    pub fn parse(rbsp: &[u8], nal: NalHeader, sets: &ParamSets) -> Result<(Self, Arc<Sps>, Arc<Pps>)> {
         let mut r = BitReader::new(rbsp);
         let idr = nal.unit_type == NalUnitType::IdrSlice;
         let first_mb_in_slice = r.read_ue()?;

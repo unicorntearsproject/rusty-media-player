@@ -1,6 +1,7 @@
 //! H.264 with the reconstruction on a thread of its own: while it reconstructs and deblocks picture N, the decoder
 //! thread already parses picture N + 1.
 use rvp_codec_h264::decoder::Frame;
+use rvp_codec_h264::decoder::parse::ParseRunner;
 use rvp_codec_h264::decoder::recon::{ReconEvent, ReconExecutor, Reconstructor};
 use rvp_core::par::SpinLock;
 use rvp_core::{StreamInfo, VideoDecoder};
@@ -9,6 +10,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::Thread;
 use std::time::Duration;
+
+/// What waiting threads do between looks at what they wait for: give the processor away briefly.
+fn relax() {
+    std::thread::park_timeout(Duration::from_micros(60));
+}
+
+fn install_relax() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| rvp_core::par::set_relax(relax));
+}
 
 /// Pictures that may wait for reconstruction before the parsing side is made to wait.
 const MAX_PICTURES_QUEUED: usize = 3;
@@ -34,6 +45,7 @@ pub struct ThreadedRecon {
 impl ThreadedRecon {
     /// Start the reconstruction thread.
     pub fn new() -> Self {
+        install_relax();
         let sh = Arc::new(Shared::default());
         let worker = sh.clone();
         crate::spawn(move || run(worker));
@@ -113,8 +125,88 @@ impl Drop for ThreadedRecon {
     }
 }
 
-/// An H.264 decoder with its reconstruction on a second thread. Build it on the thread that will drive it (a
+type Task = Box<dyn FnOnce() + Send + 'static>;
+
+struct ParseShared {
+    queue: SpinLock<VecDeque<Task>>,
+    /// Tasks queued or running.
+    active: AtomicUsize,
+    stop: AtomicBool,
+    threads: SpinLock<Vec<Thread>>,
+}
+
+/// Parses pictures on a few threads. Tasks start in the order they are submitted, which is what keeps a picture's wait
+/// for the motion of an earlier one from ever deadlocking.
+pub struct ParseWorkers {
+    sh: Arc<ParseShared>,
+    limit: usize,
+}
+
+impl ParseWorkers {
+    /// Start `n` parse threads.
+    pub fn new(n: usize) -> Self {
+        install_relax();
+        let sh = Arc::new(ParseShared {
+            queue: SpinLock::new(VecDeque::new()),
+            active: AtomicUsize::new(0),
+            stop: AtomicBool::new(false),
+            threads: SpinLock::new(Vec::new()),
+        });
+        for _ in 0..n.max(1) {
+            let w = sh.clone();
+            crate::spawn(move || {
+                w.threads.lock().push(std::thread::current());
+                while !w.stop.load(Ordering::Acquire) {
+                    let task = w.queue.lock().pop_front();
+                    match task {
+                        Some(t) => {
+                            t();
+                            w.active.fetch_sub(1, Ordering::AcqRel);
+                        }
+                        None => std::thread::park(),
+                    }
+                }
+            });
+        }
+        Self { sh, limit: n.max(1) + 1 }
+    }
+}
+
+impl ParseRunner for ParseWorkers {
+    fn spawn(&mut self, job: Task) {
+        // Do not run far ahead: every unfinished picture holds its slice data and macroblock arrays.
+        while self.sh.active.load(Ordering::Acquire) >= self.limit {
+            std::thread::park_timeout(Duration::from_micros(200));
+        }
+        self.sh.active.fetch_add(1, Ordering::AcqRel);
+        self.sh.queue.lock().push_back(job);
+        for t in self.sh.threads.lock().iter() {
+            t.unpark();
+        }
+    }
+}
+
+impl Drop for ParseWorkers {
+    fn drop(&mut self) {
+        self.sh.stop.store(true, Ordering::Release);
+        for t in self.sh.threads.lock().iter() {
+            t.unpark();
+        }
+    }
+}
+
+/// An H.264 decoder with its reconstruction on a second thread, and pictures parsed on `parse_threads` threads. Build it on the thread that will drive it (a
 /// [`crate::ThreadedVideoDecoder`] worker, or a native thread that may wait).
 pub fn h264_pipelined(info: &StreamInfo) -> rvp_core::Result<Box<dyn VideoDecoder>> {
-    rvp_codec_h264::h264_decoder_with(info, Some(Box::new(ThreadedRecon::new())))
+    h264_pipelined_with(info, 2)
+}
+
+/// [`h264_pipelined`] with `parse_threads` threads parsing pictures in parallel (0: parse on the decoder thread).
+pub fn h264_pipelined_with(
+    info: &StreamInfo,
+    parse_threads: usize,
+) -> rvp_core::Result<Box<dyn VideoDecoder>> {
+    let runner: Option<Box<dyn ParseRunner>> =
+        (parse_threads > 0).then(|| Box::new(ParseWorkers::new(parse_threads)) as Box<dyn ParseRunner>);
+    rvp_codec_h264::h264_decoder_with(info, Some(Box::new(ThreadedRecon::new())), runner)
 }

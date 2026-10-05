@@ -2,6 +2,7 @@
 use super::deblock_tables::{ALPHA, BETA, TC0};
 use super::mbinfo::{F_INTRA, F_T8X8, F_UNIFORM, MbInfo};
 use super::picture::{Motion, PlanePic};
+use rvp_core::par::SpinLock;
 
 /// Per-slice deblocking parameters.
 #[derive(Clone, Copy, Debug, Default)]
@@ -234,15 +235,37 @@ impl Bs<'_> {
     }
 }
 
-/// Filter a whole decoded picture in macroblock order.
+/// Filter a whole decoded picture. The three planes are independent, so they are filtered at the same time when a
+/// pool is available.
 pub(crate) fn deblock_picture(pic: &mut PlanePic, motion: &Motion, mbs: &[MbInfo], slices: &[SliceFilter]) {
     if slices.iter().all(|s| s.disable_idc == 1) {
         return;
     }
     let (mbw, mbh) = (pic.mbw, pic.mbh);
-    let (w4, w8) = (mbw * 4, mbw * 2);
-    let mut planes = core::mem::take(&mut pic.planes);
     let strides = pic.strides;
+    let [p0, p1, p2] = &mut pic.planes;
+    let jobs =
+        [SpinLock::new(Some((0usize, p0))), SpinLock::new(Some((1, p1))), SpinLock::new(Some((2, p2)))];
+    rvp_core::par::for_each(3, &|i| {
+        if let Some((which, plane)) = jobs[i].lock().take() {
+            deblock_one(which, plane, strides[which], mbw, mbh, motion, mbs, slices);
+        }
+    });
+}
+
+/// Filter one plane (`which`: 0 luma, 1 Cb, 2 Cr) in macroblock order.
+#[allow(clippy::too_many_arguments)]
+fn deblock_one(
+    which: usize,
+    plane: &mut [u8],
+    stride: usize,
+    mbw: usize,
+    mbh: usize,
+    motion: &Motion,
+    mbs: &[MbInfo],
+    slices: &[SliceFilter],
+) {
+    let (w4, w8) = (mbw * 4, mbw * 2);
     {
         let b = Bs { motion, mbs, w4, w8 };
         for addr in 0..mbw * mbh {
@@ -314,55 +337,56 @@ pub(crate) fn deblock_picture(pic: &mut PlanePic, motion: &Motion, mbs: &[MbInfo
                 }
             }
             // Luma.
-            let stride = strides[0];
-            let base = my * 16 * stride + mx * 16;
-            let qp_of = |m: &MbInfo| m.qp as i32;
-            for e in 0..4 {
-                let pq = if e == 0 { left.map(|a| qp_of(&mbs[a])) } else { Some(qp_of(q)) };
-                if let Some(pqp) = pq {
-                    if bs_v[e].iter().any(|&v| v != 0) {
-                        let qpav = (pqp + qp_of(q) + 1) >> 1;
-                        let ia = clip3(0, 51, qpav + sf.offset_a as i32) as usize;
-                        let ib = clip3(0, 51, qpav + sf.offset_b as i32) as usize;
-                        filter_luma(
-                            &mut planes[0],
-                            base + e * 4,
-                            1,
-                            stride,
-                            &bs_v[e],
-                            4,
-                            ALPHA[ia] as i32,
-                            BETA[ib] as i32,
-                            ia,
-                        );
+            if which == 0 {
+                let base = my * 16 * stride + mx * 16;
+                let qp_of = |m: &MbInfo| m.qp as i32;
+                for e in 0..4 {
+                    let pq = if e == 0 { left.map(|a| qp_of(&mbs[a])) } else { Some(qp_of(q)) };
+                    if let Some(pqp) = pq {
+                        if bs_v[e].iter().any(|&v| v != 0) {
+                            let qpav = (pqp + qp_of(q) + 1) >> 1;
+                            let ia = clip3(0, 51, qpav + sf.offset_a as i32) as usize;
+                            let ib = clip3(0, 51, qpav + sf.offset_b as i32) as usize;
+                            filter_luma(
+                                &mut *plane,
+                                base + e * 4,
+                                1,
+                                stride,
+                                &bs_v[e],
+                                4,
+                                ALPHA[ia] as i32,
+                                BETA[ib] as i32,
+                                ia,
+                            );
+                        }
                     }
                 }
-            }
-            for e in 0..4 {
-                let pq = if e == 0 { top.map(|a| qp_of(&mbs[a])) } else { Some(qp_of(q)) };
-                if let Some(pqp) = pq {
-                    if bs_h[e].iter().any(|&v| v != 0) {
-                        let qpav = (pqp + qp_of(q) + 1) >> 1;
-                        let ia = clip3(0, 51, qpav + sf.offset_a as i32) as usize;
-                        let ib = clip3(0, 51, qpav + sf.offset_b as i32) as usize;
-                        // Horizontal edge: lines run along x, samples across the edge are `stride` apart.
-                        filter_luma(
-                            &mut planes[0],
-                            base + e * 4 * stride,
-                            stride,
-                            1,
-                            &bs_h[e],
-                            4,
-                            ALPHA[ia] as i32,
-                            BETA[ib] as i32,
-                            ia,
-                        );
+                for e in 0..4 {
+                    let pq = if e == 0 { top.map(|a| qp_of(&mbs[a])) } else { Some(qp_of(q)) };
+                    if let Some(pqp) = pq {
+                        if bs_h[e].iter().any(|&v| v != 0) {
+                            let qpav = (pqp + qp_of(q) + 1) >> 1;
+                            let ia = clip3(0, 51, qpav + sf.offset_a as i32) as usize;
+                            let ib = clip3(0, 51, qpav + sf.offset_b as i32) as usize;
+                            // Horizontal edge: lines run along x, samples across the edge are `stride` apart.
+                            filter_luma(
+                                &mut *plane,
+                                base + e * 4 * stride,
+                                stride,
+                                1,
+                                &bs_h[e],
+                                4,
+                                ALPHA[ia] as i32,
+                                BETA[ib] as i32,
+                                ia,
+                            );
+                        }
                     }
                 }
             }
             // Chroma: edges 0 and 2 of the luma grid map to chroma edges 0 and 4.
-            for c in 0..2 {
-                let stride = strides[1 + c];
+            if which != 0 {
+                let c = which - 1;
                 let base = my * 8 * stride + mx * 8;
                 for e in [0usize, 2] {
                     let pq = if e == 0 { left.map(|a| mbs[a].qpc[c] as i32) } else { Some(q.qpc[c] as i32) };
@@ -373,7 +397,7 @@ pub(crate) fn deblock_picture(pic: &mut PlanePic, motion: &Motion, mbs: &[MbInfo
                             let ib = clip3(0, 51, qpav + sf.offset_b as i32) as usize;
                             // 8 chroma rows, bS per 2 rows.
                             filter_chroma(
-                                &mut planes[1 + c],
+                                &mut *plane,
                                 base + e * 2,
                                 1,
                                 stride,
@@ -394,7 +418,7 @@ pub(crate) fn deblock_picture(pic: &mut PlanePic, motion: &Motion, mbs: &[MbInfo
                             let ia = clip3(0, 51, qpav + sf.offset_a as i32) as usize;
                             let ib = clip3(0, 51, qpav + sf.offset_b as i32) as usize;
                             filter_chroma(
-                                &mut planes[1 + c],
+                                &mut *plane,
                                 base + e * 2 * stride,
                                 stride,
                                 1,
@@ -410,5 +434,4 @@ pub(crate) fn deblock_picture(pic: &mut PlanePic, motion: &Motion, mbs: &[MbInfo
             }
         }
     }
-    pic.planes = planes;
 }

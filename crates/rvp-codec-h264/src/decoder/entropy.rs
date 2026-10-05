@@ -66,6 +66,30 @@ pub trait Entropy {
         max: usize,
         out: &mut [i32],
     ) -> Result<usize>;
+    /// [`residual_block`](Entropy::residual_block) in sparse form: the scan positions of the non-zero coefficients go to
+    /// `pos` and their levels to `val`; returns how many there are. The default goes through the dense form.
+    fn residual_sparse(
+        &mut self,
+        d: &SliceDecoder<'_>,
+        cat: Cat,
+        idx: usize,
+        max: usize,
+        pos: &mut [u8; 64],
+        val: &mut [i32; 64],
+    ) -> Result<usize> {
+        let mut lv = [0i32; 64];
+        let n = self.residual_block(d, cat, idx, max, &mut lv)?;
+        let mut m = 0;
+        for (k, &v) in lv[..max].iter().enumerate() {
+            if v != 0 {
+                pos[m] = k as u8;
+                val[m] = v;
+                m += 1;
+            }
+        }
+        debug_assert_eq!(m, n);
+        Ok(m)
+    }
     /// The 384 PCM sample bytes of an I_PCM macroblock; the entropy decoder resynchronises afterwards.
     fn pcm_samples(&mut self, out: &mut [u8; 384]) -> Result<()>;
 }

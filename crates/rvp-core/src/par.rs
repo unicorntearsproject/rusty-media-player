@@ -11,7 +11,7 @@
 use alloc::vec::Vec;
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// A thread pool the kernels can run tasks on.
 pub trait Parallel: Send + Sync {
@@ -62,6 +62,23 @@ pub fn for_each(n: usize, f: &(dyn Fn(usize) + Sync)) {
     match pool() {
         Some(p) if n > 1 && p.threads() > 1 => p.run(n, f),
         _ => (0..n).for_each(f),
+    }
+}
+
+static RELAX: AtomicUsize = AtomicUsize::new(0);
+
+/// Install what [`relax`] does (a host that has threads makes it give the processor away briefly). Never put the thread
+/// to sleep for long: it is called in wait loops that expect the awaited thread to finish soon.
+pub fn set_relax(f: fn()) {
+    RELAX.store(f as usize, Ordering::Release);
+}
+
+/// Called while waiting for another thread in a loop: spins, or does whatever the host installed.
+pub fn relax() {
+    match RELAX.load(Ordering::Acquire) {
+        0 => core::hint::spin_loop(),
+        // SAFETY: the value was stored by `set_relax` from a valid `fn()`.
+        p => unsafe { core::mem::transmute::<usize, fn()>(p)() },
     }
 }
 
