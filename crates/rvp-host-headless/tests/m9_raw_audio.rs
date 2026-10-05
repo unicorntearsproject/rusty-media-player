@@ -29,10 +29,23 @@ fn fixture(name: &str) -> String {
     dir().join("audio").join(name).to_string_lossy().into_owned()
 }
 
-/// ffmpeg's decode as interleaved stereo `f32` at 48 kHz (the rate the player outputs at).
+/// ffmpeg's decode as interleaved stereo `f32` at 48 kHz (the rate the player outputs at). A chained file's reference is
+/// its two links decoded on their own, one after the other (ffmpeg decodes the whole chain, but pads the join).
 fn reference(name: &str) -> Vec<f32> {
+    if let Some(ext) = name.strip_prefix("chained.") {
+        let mut v = reference(&format!("chain_a.{ext}"));
+        v.extend(reference(&format!("chain_b.{ext}")));
+        return v;
+    }
     // A mono file is copied to both channels, at full level (ffmpeg's own upmix lowers it by 3 dB).
-    let upmix = if name.contains("mono") { "pan=stereo|c0=c0|c1=c0" } else { "anull" };
+    // More than two channels: the mix scaled so that nothing can clip, as the player does.
+    let upmix = if name.contains("mono") {
+        "pan=stereo|c0=c0|c1=c0"
+    } else if name.contains("surround") {
+        "aresample=out_chlayout=stereo:rematrix_maxval=1.0"
+    } else {
+        "anull"
+    };
     let out = Command::new("ffmpeg")
         .args([
             "-v",
@@ -86,6 +99,19 @@ fn every_raw_format_plays_like_ffmpeg_decodes_it() {
         ("tonef32.wav", 0, -90.0),
         ("tone8_mono.wav", 0, -90.0),
         ("tone.aac", 2_100, -100.0),
+        // MPEG audio layer II (MPEG 1 stereo; MPEG 2 mono at 24 kHz, which the player resamples).
+        ("tone.mp2", 1_200, -90.0),
+        ("tone_lsf_mono.mp2", 1_200, 0.0),
+        // Chained Ogg: two complete streams one after the other.
+        ("chained.ogg", 2_100, -90.0),
+        ("chained.opus", 2_100, -70.0),
+        ("chained.oga", 0, -90.0),
+        // Five and seven channels mixed down (centre and surrounds at -3 dB, LFE dropped, scaled so it cannot clip: ffmpeg's rematrix_maxval=1).
+        ("surround51.flac", 0, -80.0),
+        ("surround51.wav", 0, -80.0),
+        ("surround51_24.wav", 0, -80.0),
+        ("surround71.flac", 0, -80.0),
+        ("surround71_f32.wav", 0, -80.0),
     ];
     for (name, slack, max_err) in cases {
         let r = play_file(&fixture(name), &PlayOptions::default()).unwrap();
@@ -127,5 +153,28 @@ fn every_raw_format_plays_like_ffmpeg_decodes_it() {
         }
         eprintln!("{name}: error {best:.1} dBFS");
         assert!(best < max_err, "{name}: error {best:.1} dBFS against ffmpeg");
+    }
+}
+
+/// A seek into the second link of a chained file plays that link from the right place with its own decoder state.
+#[test]
+fn seeking_into_the_second_link_of_a_chained_ogg() {
+    if skip() {
+        return;
+    }
+    for name in ["chained.ogg", "chained.opus", "chained.oga"] {
+        let want = reference(name);
+        let opts = PlayOptions { seeks: vec![(200_000, 2_000_000)], ..Default::default() };
+        let r = play_file(&fixture(name), &opts).unwrap();
+        assert_eq!(r.state, SessionState::Ended, "{name}: {:?}", r.error);
+        // The last 0.5 s of what was played is the last 0.5 s of the file.
+        let n = 24_000 * 2;
+        let tail = &r.audio[r.audio.len() - n..];
+        let err = rms_db(tail.iter().zip(&want[want.len() - n..]).map(|(a, b)| a - b));
+        assert!(err < -60.0, "{name}: the tail after the seek differs by {err:.1} dBFS");
+        // And what came after the seek began at 2.0 s: 0.7 s of audio are left from there.
+        let after =
+            r.audio_trace.iter().rev().take_while(|e| e.pts >= 1_900_000).map(|e| e.frames).sum::<usize>();
+        assert!(after.abs_diff(33_600) < 4_800, "{name}: {after} frames after the seek");
     }
 }

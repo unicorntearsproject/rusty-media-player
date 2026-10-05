@@ -1,4 +1,4 @@
-//! Self-delimiting audio frames in a raw file: MPEG audio layer III (`.mp3`) and ADTS AAC (`.aac`). Both are a run of
+//! Self-delimiting audio frames in a raw file: MPEG audio layers I to III (`.mp1`, `.mp2`, `.mp3`) and ADTS AAC (`.aac`). Both are a run of
 //! frames that each start with a sync pattern and carry their own length, so one engine serves both: find a frame, check
 //! that another follows it, hand it out, and keep a sparse index of frame positions for exact seeks.
 use crate::Demuxer;
@@ -280,13 +280,17 @@ pub(crate) fn audio_stream(
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// MPEG audio layer III
+// MPEG audio layers I, II and III
 
-/// Layer III frame headers (MPEG 1, 2 and 2.5).
+/// MPEG audio frame headers (MPEG 1, 2 and 2.5, layers I to III). The name stays from when it was only layer III.
 pub(crate) struct Mpeg3;
 
-const MP3_BR_V1: [u32; 15] = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
-const MP3_BR_V2: [u32; 15] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+/// Bit rates (kbit/s) by header index 0..=15: MPEG 1 layers I, II, III; MPEG 2 and 2.5 layer I, and layers II and III.
+const BR_V1_L1: [u32; 15] = [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448];
+const BR_V1_L2: [u32; 15] = [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384];
+const BR_V1_L3: [u32; 15] = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+const BR_V2_L1: [u32; 15] = [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256];
+const BR_V2_L23: [u32; 15] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
 
 impl Mpeg3 {
     pub(crate) fn rate(h: &[u8]) -> u32 {
@@ -304,9 +308,30 @@ impl Mpeg3 {
         if h[3] >> 6 == 3 { 1 } else { 2 }
     }
 
+    /// 1, 2 or 3 (the header stores it inverted).
+    pub(crate) fn layer(h: &[u8]) -> u8 {
+        4 - ((h[1] >> 1) & 3)
+    }
+
     pub(crate) fn bitrate(h: &[u8]) -> u32 {
-        let i = (h[2] >> 4) as usize;
-        1000 * if (h[1] >> 3) & 3 == 3 { MP3_BR_V1[i.min(14)] } else { MP3_BR_V2[i.min(14)] }
+        let i = ((h[2] >> 4) as usize).min(14);
+        let v1 = (h[1] >> 3) & 3 == 3;
+        1000 * match (v1, Self::layer(h)) {
+            (true, 1) => BR_V1_L1[i],
+            (true, 2) => BR_V1_L2[i],
+            (true, _) => BR_V1_L3[i],
+            (false, 1) => BR_V2_L1[i],
+            (false, _) => BR_V2_L23[i],
+        }
+    }
+
+    /// The codec name for the layer of this header.
+    pub(crate) fn codec(h: &[u8]) -> &'static str {
+        match Self::layer(h) {
+            1 => "mp1",
+            2 => "mp2",
+            _ => "mp3",
+        }
     }
 }
 
@@ -318,21 +343,27 @@ impl FrameFormat for Mpeg3 {
             return None;
         }
         let ver = (h[1] >> 3) & 3; // 0 = 2.5, 1 reserved, 2 = 2, 3 = 1
-        let layer = (h[1] >> 1) & 3; // 1 = III
+        let layer_bits = (h[1] >> 1) & 3; // 3 = I, 2 = II, 1 = III, 0 reserved
         let (br, sr) = (h[2] >> 4, (h[2] >> 2) & 3);
-        if ver == 1 || layer != 1 || br == 0 || br == 15 || sr == 3 {
+        if ver == 1 || layer_bits == 0 || br == 0 || br == 15 || sr == 3 {
             return None;
         }
+        let layer = Self::layer(h);
         let pad = ((h[2] >> 1) & 1) as u32;
         let v1 = ver == 3;
         let rate = Self::rate(h);
-        let len = (if v1 { 144 } else { 72 }) * Self::bitrate(h) / rate + pad;
+        let (len, samples) = match layer {
+            // Layer I counts in 4-byte slots.
+            1 => ((12 * Self::bitrate(h) / rate + pad) * 4, 384),
+            2 => (144 * Self::bitrate(h) / rate + pad, 1152),
+            _ => ((if v1 { 144 } else { 72 }) * Self::bitrate(h) / rate + pad, if v1 { 1152 } else { 576 }),
+        };
         let mono = h[3] >> 6 == 3;
         Some(FrameHdr {
             len: len as usize,
-            samples: if v1 { 1152 } else { 576 },
+            samples,
             strip: 0,
-            key: (ver as u32) << 8 | sr as u32 | (mono as u32) << 4,
+            key: (layer as u32) << 12 | (ver as u32) << 8 | sr as u32 | (mono as u32) << 4,
         })
     }
 }
@@ -402,7 +433,7 @@ fn parse_xing(frame: &[u8]) -> Option<XingInfo> {
     Some(info)
 }
 
-/// Layer III in a raw `.mp3` file: ID3v2/ID3v1 tags, Xing/Info/LAME header (frame count, gapless trimming), exact seeks.
+/// MPEG audio in a raw `.mp3` (or `.mp2`, `.mp1`) file: ID3v2/ID3v1 tags, Xing/Info/LAME header (frame count, gapless trimming), exact seeks.
 ///
 /// The encoder delay and the decoder delay (529 samples) become a negative first timestamp, which the player trims by
 /// dropping audio before time zero; the padding at the end becomes `discard_end_us` on the last frames.
@@ -429,7 +460,9 @@ impl<S: Source> Mp3Demuxer<S> {
         let (mut f, hdr, pos) = Framed::<S, Mpeg3>::find(rd, start, end).await?;
         let head = f.bytes_at(pos, hdr.len.min(2048)).await?.to_vec();
         let (rate, channels) = (Mpeg3::rate(&head), Mpeg3::channels(&head));
-        let xing = parse_xing(&head);
+        let codec = Mpeg3::codec(&head);
+        // The Xing/Info header and its gapless fields are a layer III thing.
+        let xing = if codec == "mp3" { parse_xing(&head) } else { None };
         let audio_start = if xing.is_some() { pos + hdr.len as u64 } else { pos };
         f.configure(rate, audio_start);
         let spf = f.spf() as u64;
@@ -451,7 +484,7 @@ impl<S: Source> Mp3Demuxer<S> {
         }
         let duration = duration_hint.or_else(|| f.duration_us(Some(Mpeg3::bitrate(&head) as u64)));
         let c = Common {
-            streams: alloc::vec![audio_stream("mp3", rate, channels, Vec::new(), duration)],
+            streams: alloc::vec![audio_stream(codec, rate, channels, Vec::new(), duration)],
             meta,
             duration,
         };

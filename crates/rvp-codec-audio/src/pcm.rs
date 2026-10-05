@@ -1,4 +1,4 @@
-//! Uncompressed audio (WAV): 8-bit unsigned, 16/24/32-bit signed and 32/64-bit float, little endian, mono or stereo.
+//! Uncompressed audio (WAV): 8-bit unsigned, 16/24/32-bit signed and 32/64-bit float, little endian, one to eight channels.
 use rvp_core::{AudioBuffer, AudioDecoder, AudioParams, Error, Packet, Result, StreamInfo};
 use std::collections::VecDeque;
 
@@ -45,7 +45,7 @@ pub(crate) struct PcmDec {
 impl PcmDec {
     pub(crate) fn new(info: &StreamInfo) -> Result<Self> {
         let a = info.audio.ok_or_else(|| Error::Invalid("PCM stream without audio parameters".into()))?;
-        if a.channels == 0 || a.channels > 2 || a.sample_rate == 0 {
+        if a.channels == 0 || a.channels > 8 || a.sample_rate == 0 {
             return Err(Error::Unsupported(format!("PCM with {} channels", a.channels)));
         }
         let fmt = match info.codec.as_str() {
@@ -142,7 +142,15 @@ mod tests {
     }
 
     #[test]
-    fn more_than_two_channels_are_refused() {
-        assert!(dec("pcm_s16le", 6).is_err());
+    fn up_to_eight_channels_are_decoded_interleaved() {
+        // Two frames of 5.1, 16-bit.
+        let data: Vec<u8> = (1i16..=12).flat_map(|v| (v * 1000).to_le_bytes()).collect();
+        let s = run("pcm_s16le", 6, data);
+        assert_eq!(s.len(), 12);
+        assert_eq!(s[0], 1000.0 / 32768.0);
+        assert_eq!(s[11], 12000.0 / 32768.0);
+        assert!(dec("pcm_s16le", 8).is_ok());
+        assert!(dec("pcm_s16le", 9).is_err());
+        assert!(dec("pcm_s16le", 0).is_err());
     }
 }

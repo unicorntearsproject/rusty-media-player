@@ -17,5 +17,5 @@ symphonia-core = "0.6"
 symphonia-codec-aac = "0.6"
 symphonia-codec-vorbis = "0.6"
 symphonia-bundle-flac = "0.6"
-symphonia-bundle-mp3 = { version = "0.6", default-features = false, features = ["mp3"] }
+symphonia-bundle-mp3 = { version = "0.6", default-features = false, features = ["mp1", "mp2", "mp3"] }
 ropus = "0.12"

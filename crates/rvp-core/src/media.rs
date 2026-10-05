@@ -31,6 +31,10 @@ pub enum AudioCodec {
     Aac,
     /// MP3.
     Mp3,
+    /// MPEG audio layer II.
+    Mp2,
+    /// MPEG audio layer I.
+    Mp1,
     /// FLAC.
     Flac,
     /// Opus.

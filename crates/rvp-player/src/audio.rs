@@ -333,8 +333,10 @@ impl AudioOut {
     }
 }
 
-/// Mix interleaved `inch` channels to `outch` (1 or 2). Standard film channel order is assumed for more than
-/// two channels: FL FR FC LFE BL BR SL SR (LFE is dropped).
+/// Mix interleaved `inch` channels to `outch` (1 or 2). The standard film channel order is assumed for more than
+/// two channels: FL FR FC LFE BL BR SL SR (LFE is dropped). The stereo mix is the usual ITU-style one (centre and
+/// surrounds at -3 dB, a back centre at -6 dB) scaled so its largest row sums to one, which
+/// is what ffmpeg's `aresample=rematrix_maxval=1.0` does: loud multichannel passages cannot clip.
 pub fn mix(samples: &[f32], inch: usize, outch: usize) -> Vec<f32> {
     if inch == outch {
         return samples.to_vec();
@@ -348,10 +350,29 @@ pub fn mix(samples: &[f32], inch: usize, outch: usize) -> Vec<f32> {
         3 => alloc::vec![(1.0, 0.0), (0.0, 1.0), (0.707, 0.707)],
         4 => alloc::vec![(1.0, 0.0), (0.0, 1.0), (0.707, 0.0), (0.0, 0.707)],
         5 => alloc::vec![(1.0, 0.0), (0.0, 1.0), (0.707, 0.707), (0.707, 0.0), (0.0, 0.707)],
+        6 => alloc::vec![(1.0, 0.0), (0.0, 1.0), (0.707, 0.707), (0.0, 0.0), (0.707, 0.0), (0.0, 0.707)],
+        // 6.1 (FL FR FC LFE BC SL SR): the back centre goes to both sides.
+        7 => alloc::vec![
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (0.707, 0.707),
+            (0.0, 0.0),
+            (0.5, 0.5),
+            (0.707, 0.0),
+            (0.0, 0.707)
+        ],
+        // 7.1 (FL FR FC LFE BL BR SL SR): back and side surrounds, each at -3 dB.
         _ => {
-            let mut w =
-                alloc::vec![(1.0, 0.0), (0.0, 1.0), (0.707, 0.707), (0.0, 0.0), (0.707, 0.0), (0.0, 0.707)];
-            w.extend([(0.707, 0.0), (0.0, 0.707)]);
+            let mut w = alloc::vec![
+                (1.0, 0.0),
+                (0.0, 1.0),
+                (0.707, 0.707),
+                (0.0, 0.0),
+                (0.707, 0.0),
+                (0.0, 0.707),
+                (0.707, 0.0),
+                (0.0, 0.707)
+            ];
             w.resize(inch, (0.0, 0.0));
             w
         }

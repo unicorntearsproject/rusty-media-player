@@ -1931,6 +1931,7 @@ dependencies = [
  "rvp-host",
  "rvp-library",
  "rvp-player",
+ "rvp-subs",
  "rvp-ui",
  "serde_json",
 ]
