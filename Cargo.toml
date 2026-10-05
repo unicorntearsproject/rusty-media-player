@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["third_party/rav1d"]
 members = [
     "crates/theme",
     "crates/rvp-core",
@@ -15,6 +16,7 @@ members = [
     "crates/rvp-host-headless",
     "crates/rvp-host-web",
     "crates/rvp-host-rb",
+    "crates/rvp-wasm-smoke",
     "xtask",
 ]
 
@@ -34,6 +36,7 @@ unsafe_op_in_unsafe_fn = "deny"
 rvp-core = { path = "crates/rvp-core" }
 rvp-host = { path = "crates/rvp-host" }
 rvp-codec-audio = { path = "crates/rvp-codec-audio" }
+rvp-codec-av1 = { path = "crates/rvp-codec-av1" }
 rvp-demux = { path = "crates/rvp-demux" }
 rvp-player = { path = "crates/rvp-player" }
 theme = { path = "crates/theme" }
@@ -43,3 +46,16 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+
+# Third-party codecs (rav1d, opus-decoder, symphonia) are far too slow unoptimised and dominate test time;
+# our own crates stay at opt-level 0 for debuggability. rav1d's debug assertions track every disjoint borrow
+# at runtime and make decoding about 15x slower, so they are off for dependencies.
+[profile.dev.package."*"]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+[profile.test.package."*"]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false

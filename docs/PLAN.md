@@ -191,7 +191,8 @@ rate, playlist). The same API is exposed to JS by `rvp-host-web` for page integr
 | Crate | Version | License | no_std | wasm32 | Verdict |
 | --- | --- | --- | --- | --- | --- |
 | `symphonia` (+ `-codec-aac`, `-bundle-mp3`, `-bundle-flac`, `-codec-vorbis`, `-core`) | 0.6.1 | MPL-2.0 | no (std) | builds | **Use** as unmodified dep for AAC/MP3/FLAC/Vorbis decode. MPL-2.0 is file-level copyleft: fine unmodified; keep notice in `THIRD_PARTY_LICENSES.md`. Its demuxers are only used as test oracles. |
-| `opus-decoder` | 0.1.1 | MIT OR Apache-2.0 | no | builds | **Use** for Opus (pure Rust, "RFC 8251 conformant, no unsafe"). Very new: vet against opus-tools test vectors in M3. Fallback: `ropus` 0.12 (BSD-3-Clause, port of libopus, std), then `audiopus_sys` is **rejected** (C code, bad for wasm). |
+| `opus-decoder` | 0.1.1 | MIT OR Apache-2.0 | no | builds | **Rejected in M3**: its CELT inverse MDCT uses an O(N^2) DFT with a `sin_cos` per term (`celt/kiss_fft.rs`), so decoding 6 s of audio cost 5 s of CPU even optimised. |
+| `ropus` | 0.12.18 | BSD-3-Clause | no | builds | **Used for Opus** (bit-exact port of libopus, float output via `decode_float`; runs ~100x faster). `audiopus_sys` stays **rejected** (C code, bad for wasm). |
 | `nanomp3` | 0.2.0 | MIT OR Apache-2.0 | **yes** (`alloc`) | n/a | Alternative MP3 decoder if we want a `no_std` audio path. |
 | `lewton` / `claxon` | 0.10.2 / 0.4.3 | MIT OR Apache-2.0 / Apache-2.0 | no | builds | Alternatives for Vorbis / FLAC. |
 | `rubato` | 5.0.1 | MIT OR Apache-2.0 | no (alloc-heavy, std) | expected | Resampler (device rate vs stream rate). Verify at M3; else a small own linear/sinc resampler. |
@@ -309,12 +310,24 @@ MP3 +47 against ffmpeg), all under one codec frame. AAC is LC only with at most 
 limit). Verified: FLAC bit-exact; AAC -159 dBFS, Vorbis -164, Opus -101, MP3 -150 RMS error versus ffmpeg;
 seek to 4.0 s resumes at 4.0 s with no gap over 20 ms (`crates/rvp-host-headless/tests/audio.rs`).
 
-**M4 AV1 and the video path.** Patch rav1d for wasm32 (R1), `rvp-codec-av1`, YUV (4:2:0 8/10-bit) ->
+**M4 AV1 and the video path.** *(done 2026-10-05; see the notes below)* Patch rav1d for wasm32 (R1), `rvp-codec-av1`, YUV (4:2:0 8/10-bit) ->
 RGBA conversion with colour matrix/range, `VideoQueue`, present/drop/hold policy, first full A/V sync in
 headless. *Done when:* `cargo check -p rvp-codec-av1 --target wasm32-unknown-unknown` passes; decoding
 the AV1 fixture matches `ffmpeg -f framemd5` frame-for-frame (decoded planes bit-exact); end-to-end headless
 play of an AV1+Opus WebM with virtual time reports audio/video drift < 1 frame (max |video_pts - clock| <= 1/fps)
 over 60 s, with an injected 200 ms decode stall causing frame drops and recovery, not a freeze.
+
+*M4 notes:* rav1d needed only a ~20-line `libc` shim to build for wasm32 (the 38 compile errors were all missing
+`libc` items); it is vendored in `third_party/rav1d` and runs in Node at the same output as native
+(`cargo xtask wasm-smoke`, 8-bit and 10-bit). It runs single threaded and without assembly. AV1 4:2:2/4:4:4 is rejected
+and monochrome is expanded to grey chroma. Verified: decoded planes bit-exact against ffmpeg for 8-bit (150 frames)
+and 10-bit (50 frames); a 60 s AV1+Opus file at 13 ms ticks shows 1500 of 1500 frames presented, max |clock - pts|
+12 ms (one frame is 40 ms) and max on-screen age 52 ms; with a 200 ms stall injected into one decode, 4 frames
+are dropped, drift stays at most 10 ms, the picture freezes for 210 ms and then steps frame by frame again, and
+audio is untouched (`crates/rvp-host-headless/tests/video.rs`). `VideoDecoder` gained `drain()`;
+`CodecFactory` supplies decoders; unsupported streams (for example H.264 until M6) are skipped with a warning and
+the file still plays its audio. Dev and test builds compile third-party crates at `opt-level = 3` without
+debug assertions (rav1d's checked mode is 15x slower).
 
 **M5 Browser host and UI shell.** `rvp-host-web`, `xtask web/serve`, `theme`-driven `rvp-ui` (transport,
 seek bar, volume, context menu, drag-and-drop/open dialog, fullscreen), bundled fonts, keyboard/pointer model
@@ -373,7 +386,7 @@ audio and file APIs.
 
 | # | Risk | Plan |
 | --- | --- | --- |
-| R1 | `rav1d` 1.1.0 does not compile on `wasm32-unknown-unknown` (libc imports). | Patch (small, 38 errors); vendor under `third_party/` with its BSD-2 notice; upstream a PR. If it proves deeper (threads, `asm` assumptions), fall back to an AV1 path via WebCodecs in the browser host only and defer an in-core AV1 decoder. |
+| R1 | `rav1d` 1.1.0 does not compile on `wasm32-unknown-unknown` (libc imports). | **Resolved in M4**: a private `libc` shim module (see `third_party/rav1d/PATCHES.md`) was the only change needed. The vendored copy decodes bit-exact in Node (`cargo xtask wasm-smoke`). Upstreaming the shim is still worthwhile. |
 | R2 | Real-time 1080p in single-threaded wasm for H.264/AV1/VP9. | Budgeted ticks, frame skipping, SIMD128 (M9), optional workers; lower-resolution graceful degrade; honest "performance mode" in UI. |
 | R3 | Rusty Bucket's `wasmi` is an interpreter: video will not be realtime there. | M10; native codec service or a JIT/AOT runtime; tracked in `../rust-os/PLAN.md` (note added by this project). |
 | R4 | Bit-exact H.264 is long, detail-heavy work. | Stages with ffmpeg oracles; `rusty_h264-decoder` as a second oracle; tiny fixtures per feature. |

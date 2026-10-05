@@ -8,18 +8,21 @@ use crate::audio::{AudioOut, TraceEntry};
 use crate::exec::Executor;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use rvp_core::task::yield_now;
 use rvp_core::{
     AudioBuffer, AudioParams, ClockSource, CodecFactory, Error, MasterClock, Packet, StreamInfo, StreamKind,
-    Timestamp,
+    Timestamp, VideoFrame,
 };
 use rvp_demux::{Demuxer, open};
-use rvp_host::{AudioSink, Host, Source};
+use rvp_host::{AudioSink, Host, Source, VideoSink};
 
 /// Packets buffered between the demuxer and a decoder.
 const MAX_PACKETS: usize = 128;
+/// Decoded video frames kept ready for presentation.
+const MAX_VIDEO_FRAMES: usize = 6;
 /// Decoded audio kept ahead of the output stage, microseconds.
 const AUDIO_AHEAD_US: i64 = 500_000;
 /// Audio we want queued (pending + sink) before starting playback, microseconds.
@@ -58,6 +61,13 @@ struct Shared {
     duration_us: Option<Timestamp>,
     error: Option<Error>,
     sel_audio: Option<StreamInfo>,
+    sel_video: Option<StreamInfo>,
+    warnings: Vec<String>,
+    video_in: VecDeque<Packet>,
+    video_dec: VecDeque<VideoFrame>,
+    video_done: bool,
+    /// Frames before this stream time are skipped after a seek (all but the last one at or before it).
+    video_floor: Timestamp,
     audio_in: VecDeque<Packet>,
     audio_dec: VecDeque<AudioBuffer>,
     audio_dec_us: i64,
@@ -92,6 +102,7 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
         s.streams = d.streams().to_vec();
         s.duration_us = d.duration_us();
         s.sel_audio = s.streams.iter().find(|i| i.kind == StreamKind::Audio).cloned();
+        s.sel_video = s.streams.iter().find(|i| i.kind == StreamKind::Video).cloned();
         s.opened = true;
         s.progress += 1;
     }
@@ -103,8 +114,11 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
             s.audio_in.clear();
             s.audio_dec.clear();
             s.audio_dec_us = 0;
+            s.video_in.clear();
+            s.video_dec.clear();
             s.demux_done = false;
             s.audio_done = false;
+            s.video_done = false;
             match res {
                 Ok(l) => s.landed = Some(l),
                 Err(e) => s.error = Some(e),
@@ -115,7 +129,7 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
         }
         let blocked = {
             let s = sh.borrow();
-            s.demux_done || s.audio_in.len() >= MAX_PACKETS
+            s.demux_done || s.audio_in.len() >= MAX_PACKETS || s.video_in.len() >= MAX_PACKETS
         };
         if blocked {
             yield_now().await;
@@ -130,6 +144,8 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
                     Ok(Some(p)) => {
                         if s.sel_audio.as_ref().is_some_and(|a| a.id == p.stream_id) {
                             s.audio_in.push_back(p);
+                        } else if s.sel_video.as_ref().is_some_and(|v| v.id == p.stream_id) {
+                            s.video_in.push_back(p);
                         }
                         s.progress += 1;
                     }
@@ -155,7 +171,7 @@ async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
         other => {
             let mut s = sh.borrow_mut();
             if let Some(Err(e)) = other {
-                s.error = Some(e);
+                s.warnings.push(alloc::format!("audio disabled: {e}"));
             }
             s.sel_audio = None;
             s.audio_done = true;
@@ -195,6 +211,97 @@ async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
     }
 }
 
+async fn video_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
+    while !sh.borrow().opened {
+        yield_now().await;
+    }
+    let info = sh.borrow().sel_video.clone();
+    let mut dec = match info.as_ref().map(|i| codecs.video(i)) {
+        Some(Ok(d)) => d,
+        other => {
+            let mut s = sh.borrow_mut();
+            if let Some(Err(e)) = other {
+                s.warnings.push(alloc::format!("video disabled: {e}"));
+            }
+            s.sel_video = None;
+            s.video_done = true;
+            return;
+        }
+    };
+    let mut epoch = sh.borrow().generation;
+    let mut drained = false;
+    loop {
+        let (packet, drain_now) = {
+            let mut s = sh.borrow_mut();
+            if s.generation != epoch {
+                epoch = s.generation;
+                dec.flush();
+                drained = false;
+            }
+            // After a seek keep only the last frame at or before the target (the one to show) and later ones.
+            while s.video_dec.len() >= 2 && s.video_dec[1].pts <= s.video_floor {
+                s.video_dec.pop_front();
+            }
+            if s.video_dec.len() >= MAX_VIDEO_FRAMES {
+                (None, false)
+            } else {
+                let p = s.video_in.pop_front();
+                let drain_now = p.is_none() && s.demux_done && !s.seeking && !drained;
+                (p, drain_now)
+            }
+        };
+        if let Some(p) = packet {
+            let ok = dec.send_packet(&p).is_ok();
+            let mut s = sh.borrow_mut();
+            if ok {
+                while let Ok(Some(f)) = dec.receive_frame() {
+                    s.video_dec.push_back(f);
+                }
+            } else {
+                s.warnings.push(alloc::format!("video packet at {} us failed to decode", p.pts));
+            }
+            s.progress += 1;
+        } else if drain_now {
+            let _ = dec.drain();
+            let mut s = sh.borrow_mut();
+            while let Ok(Some(f)) = dec.receive_frame() {
+                s.video_dec.push_back(f);
+            }
+            drained = true;
+            s.progress += 1;
+        }
+        {
+            let mut s = sh.borrow_mut();
+            if drained && s.video_in.is_empty() && s.demux_done && !s.seeking {
+                s.video_done = true;
+            }
+        }
+        yield_now().await;
+    }
+}
+
+/// Counters describing how video presentation is going.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VideoStats {
+    /// Frames handed to the video sink.
+    pub presented: u64,
+    /// Frames skipped because a later frame was already due (late).
+    pub dropped: u64,
+    /// Largest `|clock - frame pts|` at the moment a frame was presented, microseconds.
+    pub max_drift_us: i64,
+    /// Largest time an old frame stayed on screen while playing (clock minus the last presented pts).
+    pub max_staleness_us: i64,
+}
+
+/// One recorded presentation (see [`Session::enable_video_trace`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoTraceEntry {
+    /// Clock position when presented.
+    pub clock_us: Timestamp,
+    /// Frame pts.
+    pub pts: Timestamp,
+}
+
 /// One opened media item and its playback machinery.
 pub struct Session {
     exec: Executor,
@@ -210,6 +317,10 @@ pub struct Session {
     ended: bool,
     trace: bool,
     seek_target: Option<Timestamp>,
+    stats: VideoStats,
+    video_trace: Option<Vec<VideoTraceEntry>>,
+    shown_preview: bool,
+    last_presented: Option<Timestamp>,
 }
 
 impl Session {
@@ -218,7 +329,8 @@ impl Session {
         let sh: Sh = Rc::default();
         let mut exec = Executor::new();
         exec.spawn(demux_task(source, sh.clone()));
-        exec.spawn(audio_task(sh.clone(), codecs));
+        exec.spawn(audio_task(sh.clone(), codecs.clone()));
+        exec.spawn(video_task(sh.clone(), codecs));
         Self {
             exec,
             sh,
@@ -233,6 +345,10 @@ impl Session {
             ended: false,
             trace: false,
             seek_target: None,
+            stats: VideoStats::default(),
+            video_trace: None,
+            shown_preview: false,
+            last_presented: None,
         }
     }
 
@@ -247,6 +363,26 @@ impl Session {
     /// Audio chunks recorded so far (see [`Session::enable_audio_trace`]).
     pub fn audio_trace(&self) -> &[TraceEntry] {
         self.audio.as_ref().map_or(&[], |a| a.trace())
+    }
+
+    /// Record every presented video frame (tests).
+    pub fn enable_video_trace(&mut self) {
+        self.video_trace = Some(Vec::new());
+    }
+
+    /// Presented frames recorded so far.
+    pub fn video_trace(&self) -> &[VideoTraceEntry] {
+        self.video_trace.as_deref().unwrap_or(&[])
+    }
+
+    /// Video presentation counters.
+    pub fn video_stats(&self) -> &VideoStats {
+        &self.stats
+    }
+
+    /// Non-fatal problems (a stream whose codec is unsupported, packets that failed to decode).
+    pub fn warnings(&self) -> Vec<String> {
+        self.sh.borrow().warnings.clone()
     }
 
     /// Current state.
@@ -326,6 +462,10 @@ impl Session {
         s.audio_dec.clear();
         s.audio_dec_us = 0;
         s.audio_done = false;
+        s.video_in.clear();
+        s.video_dec.clear();
+        s.video_done = false;
+        s.video_floor = target;
         s.demux_done = false;
         s.seek = Some(demux_target);
         s.seeking = true;
@@ -339,6 +479,8 @@ impl Session {
         self.clock.seek(target, 0);
         self.clock.pause(0);
         self.seek_target = Some(target);
+        self.shown_preview = false;
+        self.last_presented = None;
     }
 }
 
@@ -417,6 +559,11 @@ impl Session {
                 }
                 None => true,
             };
+            let ready = ready && {
+                let s = self.sh.borrow();
+                let floor = self.seek_target.unwrap_or(0);
+                s.sel_video.is_none() || s.video_done || s.video_dec.iter().any(|f| f.pts >= floor)
+            };
             if ready {
                 let start = match &self.audio {
                     Some(out) => out.heard_pts(&*host.audio()).or(self.seek_target),
@@ -442,7 +589,10 @@ impl Session {
             }
         }
 
-        // 6. End of stream.
+        // 6. Video: show the frame that is due, dropping any that are already late.
+        self.present_video(host, now);
+
+        // 7. End of stream.
         if self.running {
             let s = self.sh.borrow();
             let audio_drained = match &self.audio {
@@ -454,8 +604,9 @@ impl Session {
                 }
                 None => s.demux_done,
             };
+            let video_drained = s.sel_video.is_none() || (s.video_done && s.video_dec.is_empty());
             drop(s);
-            if audio_drained {
+            if audio_drained && video_drained {
                 self.running = false;
                 self.ended = true;
                 self.clock.pause(now);
@@ -464,6 +615,54 @@ impl Session {
         }
 
         host.clock().request_wake(now + TICK_US);
+    }
+}
+
+impl Session {
+    /// Present at most one video frame: the latest one that is due at the current clock position.
+    ///
+    /// While running, every frame whose time has come is "due"; all but the newest are counted as dropped
+    /// (they would have been on screen for less than a tick). While paused, one preview frame is shown per
+    /// seek: the last frame at or before the position, once the following frame (or end of stream) proves
+    /// no better candidate is coming.
+    fn present_video<H: Host>(&mut self, host: &mut H, now: Timestamp) {
+        let pos = self.clock.now_stream(now);
+        let mut s = self.sh.borrow_mut();
+        if s.sel_video.is_none() || !s.opened || s.seeking {
+            return;
+        }
+        let mut candidate: Option<VideoFrame> = None;
+        let mut dropped = 0u64;
+        if self.running || !self.shown_preview {
+            let may_show = self.running || s.video_dec.iter().any(|f| f.pts > pos) || s.video_done;
+            if may_show {
+                while s.video_dec.front().is_some_and(|f| f.pts <= pos) {
+                    if candidate.is_some() {
+                        dropped += 1;
+                    }
+                    candidate = s.video_dec.pop_front();
+                }
+            }
+        }
+        drop(s);
+        // How long the previous frame has been on screen (measured before it is replaced).
+        if self.running {
+            if let Some(last) = self.last_presented {
+                self.stats.max_staleness_us = self.stats.max_staleness_us.max(pos - last);
+            }
+        }
+        self.stats.dropped += dropped;
+        if let Some(f) = candidate {
+            host.video().present(&f);
+            self.stats.presented += 1;
+            let drift = (pos - f.pts).abs();
+            self.stats.max_drift_us = self.stats.max_drift_us.max(drift);
+            if let Some(t) = &mut self.video_trace {
+                t.push(VideoTraceEntry { clock_us: pos, pts: f.pts });
+            }
+            self.last_presented = Some(f.pts);
+            self.shown_preview = true;
+        }
     }
 }
 

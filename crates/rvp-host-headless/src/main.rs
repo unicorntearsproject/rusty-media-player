@@ -57,12 +57,18 @@ fn main() -> ExitCode {
         }
     };
     println!(
-        "state={:?} virtual_time={:.3}s duration={} audio_frames={}",
+        "state={:?} virtual_time={:.3}s duration={} audio_frames={} video_frames={} dropped={} max_drift_ms={:.1}",
         report.state,
         report.virtual_us as f64 / 1e6,
         report.duration_us.map_or("?".into(), |d| format!("{:.3}s", d as f64 / 1e6)),
-        report.audio.len() / 2
+        report.audio.len() / 2,
+        report.video_stats.presented,
+        report.video_stats.dropped,
+        report.video_stats.max_drift_us as f64 / 1000.0
     );
+    for w in &report.warnings {
+        eprintln!("warning: {w}");
+    }
     if let Some(e) = &report.error {
         eprintln!("error: {e}");
     }

@@ -10,6 +10,7 @@ extern crate std;
 
 pub mod clock;
 pub mod codec;
+pub mod color;
 pub mod error;
 pub mod media;
 pub mod resample;

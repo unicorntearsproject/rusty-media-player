@@ -9,6 +9,7 @@ const USAGE: &str = "usage: cargo xtask <command>
                    (--sync first refreshes the CSS snapshot from the design system;
                    set UT_DESIGN_SYSTEM to override its path)
   check            cargo check for the host, and for wasm32 / no_std targets where applicable
+  wasm-smoke       decode AV1 fixtures inside WebAssembly (Node) and compare with the native decoder
   fixtures [dir]   generate ffmpeg test media into target/fixtures (tools/gen-fixtures.sh)
   web | serve | licenses   not implemented yet (see docs/PLAN.md)";
 
@@ -18,6 +19,7 @@ fn main() -> ExitCode {
         Some("theme") => theme::run(args.iter().any(|a| a == "--sync")),
         Some("check") => check(),
         Some("fixtures") => fixtures(&args[1..]),
+        Some("wasm-smoke") => wasm_smoke(),
         Some(cmd @ ("web" | "serve" | "licenses")) => Err(format!("`{cmd}` is not implemented yet")),
         _ => {
             eprintln!("{USAGE}");
@@ -37,6 +39,37 @@ fn fixtures(extra: &[String]) -> Result<(), String> {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/gen-fixtures.sh");
     let status = Command::new("bash").arg(script).args(extra).status().map_err(|e| e.to_string())?;
     status.success().then_some(()).ok_or_else(|| "fixture generation failed".to_string())
+}
+
+/// Build the smoke module for wasm32, run it in Node on AV1 fixtures, and require the same frame count and hash
+/// as the native build.
+fn wasm_smoke() -> Result<(), String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    cargo(&["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "rvp-wasm-smoke"])?;
+    let wasm = root.join("target/wasm32-unknown-unknown/release/rvp_wasm_smoke.wasm");
+    for name in ["av1_opus.webm", "av1_10bit.webm"] {
+        let file = root.join("target/fixtures").join(name);
+        if !file.exists() {
+            fixtures(&[])?;
+        }
+        let run = |cmd: &mut Command| -> Result<String, String> {
+            let out = cmd.output().map_err(|e| e.to_string())?;
+            if !out.status.success() {
+                return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+            }
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        };
+        let native = run(Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+            .args(["run", "-q", "--release", "-p", "rvp-wasm-smoke", "--example", "native_hash", "--"])
+            .arg(&file))?;
+        let wasm_out =
+            run(Command::new("node").arg(root.join("tools/wasm-smoke.mjs")).arg(&wasm).arg(&file))?;
+        println!("{name}: native `{native}`, wasm `{wasm_out}`");
+        if native != wasm_out {
+            return Err(format!("{name}: wasm and native decoders disagree"));
+        }
+    }
+    Ok(())
 }
 
 fn cargo(args: &[&str]) -> Result<(), String> {

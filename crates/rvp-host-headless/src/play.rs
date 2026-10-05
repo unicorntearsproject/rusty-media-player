@@ -1,12 +1,51 @@
 //! Run a [`Session`] to completion in virtual time: the engine behind `rvp-headless play`.
-use crate::{FileSource, HeadlessHost};
-use rvp_core::{AudioDecoder, CodecFactory, Error, Result, StreamInfo, Timestamp, VideoDecoder};
-use rvp_player::{Session, SessionState, TraceEntry};
+use crate::{FileSource, HeadlessHost, VirtualClock};
+use rvp_core::{
+    AudioDecoder, CodecFactory, Error, Packet, Result, StreamInfo, Timestamp, VideoDecoder, VideoFrame,
+};
+use rvp_player::{Session, SessionState, TraceEntry, VideoStats, VideoTraceEntry};
 use std::path::Path;
 use std::rc::Rc;
 
-/// Codecs linked into this build.
-pub struct DefaultCodecs;
+/// Codecs linked into this build (AAC/MP3/FLAC/Vorbis/Opus audio, AV1 video).
+#[derive(Default)]
+pub struct DefaultCodecs {
+    /// Test hook: make the Nth video packet take this much virtual time to decode (`(n, microseconds)`).
+    pub stall: Option<(usize, Timestamp)>,
+    /// The virtual clock the stall advances.
+    pub clock: Option<Rc<VirtualClock>>,
+}
+
+/// Wraps a decoder and advances the virtual clock inside one `send_packet`, as a slow decode would.
+struct StallDecoder {
+    inner: Box<dyn VideoDecoder>,
+    clock: Rc<VirtualClock>,
+    count: usize,
+    at: usize,
+    us: Timestamp,
+}
+
+impl VideoDecoder for StallDecoder {
+    fn send_packet(&mut self, p: &Packet) -> Result<()> {
+        self.count += 1;
+        if self.count == self.at {
+            self.clock.advance(self.us);
+        }
+        self.inner.send_packet(p)
+    }
+
+    fn receive_frame(&mut self) -> Result<Option<VideoFrame>> {
+        self.inner.receive_frame()
+    }
+
+    fn flush(&mut self) {
+        self.inner.flush()
+    }
+
+    fn drain(&mut self) -> Result<()> {
+        self.inner.drain()
+    }
+}
 
 impl CodecFactory for DefaultCodecs {
     fn audio(&self, info: &StreamInfo) -> Result<Box<dyn AudioDecoder>> {
@@ -14,7 +53,16 @@ impl CodecFactory for DefaultCodecs {
     }
 
     fn video(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
-        Err(Error::Unsupported(format!("video codec `{}`", info.codec)))
+        let dec = match info.codec.as_str() {
+            "av1" => rvp_codec_av1::av1_decoder(info)?,
+            other => return Err(Error::Unsupported(format!("video codec `{other}`"))),
+        };
+        match (self.stall, &self.clock) {
+            (Some((at, us)), Some(clock)) => {
+                Ok(Box::new(StallDecoder { inner: dec, clock: clock.clone(), count: 0, at, us }))
+            }
+            _ => Ok(dec),
+        }
     }
 }
 
@@ -25,6 +73,10 @@ pub struct PlayOptions {
     pub seeks: Vec<(Timestamp, Timestamp)>,
     /// Stop after this much virtual time (default: generous bound from the duration).
     pub max_virtual_us: Option<Timestamp>,
+    /// Make the Nth video packet take this long to decode (virtual microseconds): `(n, us)`.
+    pub video_stall: Option<(usize, Timestamp)>,
+    /// Virtual time between ticks (default 10 ms). Use an awkward value to test unaligned presentation.
+    pub tick_us: Option<Timestamp>,
 }
 
 /// Result of a run.
@@ -34,6 +86,14 @@ pub struct PlayReport {
     pub audio: Vec<f32>,
     /// Audio chunks as pushed to the sink pipeline.
     pub audio_trace: Vec<TraceEntry>,
+    /// `(pts, hash)` of every frame the video sink received.
+    pub video_frames: Vec<(Timestamp, u64)>,
+    /// Video presentation counters.
+    pub video_stats: VideoStats,
+    /// Every presentation: clock position and frame pts.
+    pub video_trace: Vec<VideoTraceEntry>,
+    /// Non-fatal problems.
+    pub warnings: Vec<String>,
     /// Virtual time that elapsed.
     pub virtual_us: Timestamp,
     /// Final state.
@@ -49,8 +109,10 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
     let mut host = HeadlessHost::new();
     host.audio.capture = Some(Vec::new());
     let clock = host.virtual_clock();
-    let mut session = Session::new(FileSource::open(path)?, Rc::new(DefaultCodecs));
+    let codecs = DefaultCodecs { stall: opts.video_stall, clock: Some(clock.clone()) };
+    let mut session = Session::new(FileSource::open(path)?, Rc::new(codecs));
     session.enable_audio_trace();
+    session.enable_video_trace();
     session.play();
     let mut seeks = opts.seeks.iter().copied().peekable();
     let mut max_us = opts.max_virtual_us;
@@ -75,12 +137,16 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
                 seeks.next();
             }
         }
-        clock.advance(10_000);
+        clock.advance(opts.tick_us.unwrap_or(10_000));
     }
     let now = rvp_host::HostClock::now_us(&*clock);
     Ok(PlayReport {
         audio: host.audio.capture.take().unwrap_or_default(),
         audio_trace: session.audio_trace().to_vec(),
+        video_frames: std::mem::take(&mut host.video.frames),
+        video_stats: session.video_stats().clone(),
+        video_trace: session.video_trace().to_vec(),
+        warnings: session.warnings(),
         virtual_us: now,
         state: session.state(),
         duration_us: session.duration_us(),

@@ -1,0 +1,34 @@
+# Vendored from rav1d 1.1.0 (BSD-2-Clause), patched to build for wasm32-unknown-unknown.
+# See PATCHES.md. Not part of the rusty-video-player workspace (root Cargo.toml `exclude`).
+[workspace]
+
+[package]
+name = "rav1d"
+authors = ["Rav1d Developers", "Prossimo"]
+version = "1.1.0"
+edition = "2021"
+rust-version = "1.79"
+description = "Rust port of the dav1d AV1 decoder (patched for wasm32)"
+license = "BSD-2-Clause"
+repository = "https://github.com/memorysafety/rav1d"
+publish = false
+
+[lib]
+path = "lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+assert_matches = "1.5.0"
+atomig = { version = "0.4.0", features = ["derive"] }
+bitflags = "2.4.0"
+cfg-if = "1.0.0"
+parking_lot = "0.12.2"
+paste = "1.0.14"
+strum = { version = "0.26", features = ["derive"] }
+to_method = "1.1.0"
+zerocopy = { version = "0.7.32", features = ["derive"] }
+
+[features]
+default = ["bitdepth_8", "bitdepth_16"]
+bitdepth_8 = []
+bitdepth_16 = []

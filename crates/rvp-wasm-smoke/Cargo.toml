@@ -1,0 +1,21 @@
+[package]
+name = "rvp-wasm-smoke"
+description = "wasm32 runtime smoke test: demux + decode an AV1 WebM inside WebAssembly (run by cargo xtask wasm-smoke)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true
+rvp-demux.workspace = true
+rvp-host = { workspace = true }
+rvp-codec-av1.workspace = true

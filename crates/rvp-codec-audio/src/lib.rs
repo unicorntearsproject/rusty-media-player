@@ -1,5 +1,5 @@
 //! Audio decoders behind [`rvp_core::AudioDecoder`]: AAC-LC, MP3, FLAC and Vorbis through the unmodified
-//! `symphonia` codec crates (MPL-2.0), and Opus through `opus-decoder` (MIT OR Apache-2.0).
+//! `symphonia` codec crates (MPL-2.0), and Opus through `ropus` (BSD-3-Clause).
 //!
 //! Output is always interleaved `f32`. Limits: AAC is LC only (no SBR/HE-AAC, at most 2 channels, a symphonia
 //! limit); Opus is channel-mapping family 0 (mono or stereo).

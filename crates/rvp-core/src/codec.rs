@@ -10,6 +10,10 @@ pub trait VideoDecoder {
     fn receive_frame(&mut self) -> Result<Option<VideoFrame>>;
     /// Drop all internal state (seek, stream change).
     fn flush(&mut self);
+    /// End of stream: make any frames the decoder is holding back available to `receive_frame`.
+    fn drain(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// An audio decoder.

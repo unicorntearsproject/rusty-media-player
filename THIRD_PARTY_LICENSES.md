@@ -10,7 +10,8 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 | --- | --- | --- |
 | `wasm-bindgen` (`rvp-host-web`, wasm32 only) | MIT OR Apache-2.0 | |
 | `symphonia-core`, `-codec-aac`, `-codec-vorbis`, `-bundle-flac`, `-bundle-mp3`, plus its `-common`, `-metadata` 0.6.1 | MPL-2.0 | Used unmodified from crates.io. The license text and a pointer to the upstream source (https://github.com/pdeljanov/Symphonia) must accompany binary distributions. |
-| `opus-decoder` 0.1.1 | MIT OR Apache-2.0 | |
+| `ropus` 0.12 (Opus decoder, port of libopus) and its dependency `wide` | BSD-3-Clause; MIT OR Zlib OR Apache-2.0 | Keep the copyright notice and conditions in binary distributions. |
+| `rav1d` 1.1.0, vendored and patched in `third_party/rav1d` (see its `PATCHES.md`) | BSD-2-Clause (`third_party/rav1d/COPYING`) | Keep the copyright notice and conditions; patches are recorded. Its dependencies (`atomig`, `parking_lot`, `paste`, `strum`, `zerocopy`, `assert_matches`, `bitflags`, `cfg-if`, `to_method`) are MIT/Apache-2.0 (`zerocopy`: BSD-2-Clause OR Apache-2.0 OR MIT), except `to_method` which is CC0-1.0 (public-domain dedication). |
 | `libm` 0.2 (`rvp-core`, `no_std` sin/cos for the resampler) | MIT | |
 | Transitive crates of the above (`bitflags`, `bytemuck`, `lazy_static`, `log`, `num-complex`, `num-traits`, `once_cell`, `smallvec`, `thiserror`, `autocfg`, `cfg-if`, ...) | MIT, Apache-2.0, Zlib, or `MIT OR Apache-2.0` | Checked with `cargo metadata` on 2026-10-05: nothing outside MIT/Apache-2.0/Zlib/MPL-2.0/Unlicense/Unicode-3.0. |
 | `serde_json` (dev-dependency of `rvp-demux`, tests only) | MIT OR Apache-2.0 | |
@@ -20,7 +21,6 @@ commit that adds, removes, or upgrades a dependency. Versions and licenses were 
 
 | Component | License | Obligation |
 | --- | --- | --- |
-| `rav1d` 1.1.x (patched for wasm32, vendored under `third_party/rav1d`) | BSD-2-Clause | Keep the copyright notice and conditions with source and binary distributions; record the patch. |
 | `rusty_vp9` 0.1.x or `vp9dec` 0.1.x | Apache-2.0 / MIT | Whichever is adopted in M7. |
 | `fontdue` 0.9.x | MIT OR Apache-2.0 OR Zlib | |
 | `hashbrown`, `libm`, `spin`, `bitflags`, `thiserror` | MIT or MIT OR Apache-2.0 | As needed. |

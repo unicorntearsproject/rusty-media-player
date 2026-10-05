@@ -26,10 +26,17 @@ ff "${vsrc[@]}" "${asrc[@]}" -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -g 1
    -c:a libvorbis -b:a 64k -ac 2 -shortest "$out/vp9_vorbis.webm"
 ff "${vsrc[@]}" "${asrc[@]}" "${h264[@]}" -c:a flac -ac 2 -shortest "$out/h264_flac.mkv"
 
+# 10-bit AV1 (video only, 2 s).
+ff -f lavfi -i "testsrc2=size=320x240:rate=25:duration=2" -c:v libsvtav1 -preset 10 -g 12 -pix_fmt yuv420p10le \
+   -svtav1-params log=0 "$out/av1_10bit.webm"
+# One minute of AV1+Opus for the A/V sync soak test.
+ff -f lavfi -i "testsrc2=size=320x240:rate=25:duration=60" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=60" \
+   -c:v libsvtav1 -preset 12 -g 50 -pix_fmt yuv420p -svtav1-params log=0 -c:a libopus -b:a 64k -ac 2 -shortest "$out/av1_opus_60s.webm"
 # Audio-only MP3 in Matroska.
 ff "${asrc[@]}" -c:a libmp3lame -b:a 128k -ac 2 "$out/mp3.mkv"
 
 for f in "$out"/*.mp4 "$out"/*.webm "$out"/*.mkv; do
+  [[ "$f" == *60s* ]] && continue # the soak file needs no packet dump
   ffprobe -v error -show_format -show_streams -show_packets -of json "$f" > "$f.probe.json"
 done
 touch "$out/.done"
