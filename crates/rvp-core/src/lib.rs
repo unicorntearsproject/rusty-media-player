@@ -13,6 +13,7 @@ pub mod codec;
 pub mod error;
 pub mod media;
 pub mod ring;
+pub mod task;
 pub mod time;
 
 pub use clock::{ClockSource, MasterClock};

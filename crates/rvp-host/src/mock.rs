@@ -4,7 +4,8 @@ use alloc::collections::VecDeque;
 use core::cell::Cell;
 use rvp_core::Timestamp;
 
-/// A clock that only moves when the test says so.
+/// A clock that only moves when the test says so. Wake requests are remembered (earliest wins) so a
+/// driver can jump virtual time straight to the next deadline.
 #[derive(Debug, Default)]
 pub struct FakeClock {
     now: Cell<Timestamp>,
@@ -19,12 +20,26 @@ impl FakeClock {
 
     /// Advance by `us` microseconds.
     pub fn advance(&self, us: Timestamp) {
-        self.now.set(self.now.get() + us);
+        self.set_now(self.now.get() + us);
     }
 
-    /// The most recent wake request, if any.
+    /// Jump to the earliest pending wake request (if any, and in the future). Returns the new time.
+    pub fn advance_to_wake(&self) -> Option<Timestamp> {
+        let t = self.wake.get()?;
+        self.set_now(t.max(self.now.get()));
+        Some(self.now.get())
+    }
+
+    /// The earliest pending wake request, if any.
     pub fn requested_wake(&self) -> Option<Timestamp> {
         self.wake.get()
+    }
+
+    fn set_now(&self, t: Timestamp) {
+        self.now.set(t);
+        if self.wake.get().is_some_and(|w| w <= t) {
+            self.wake.set(None);
+        }
     }
 }
 
@@ -34,7 +49,9 @@ impl HostClock for FakeClock {
     }
 
     fn request_wake(&self, at_us: Timestamp) {
-        self.wake.set(Some(at_us));
+        if at_us > self.now.get() {
+            self.wake.set(Some(self.wake.get().map_or(at_us, |w| w.min(at_us))));
+        }
     }
 }
 
@@ -58,7 +75,11 @@ mod tests {
         assert_eq!(c.now_us(), 0);
         c.advance(1500);
         c.request_wake(4000);
-        assert_eq!((c.now_us(), c.requested_wake()), (1500, Some(4000)));
+        c.request_wake(3000);
+        c.request_wake(100); // in the past: ignored
+        assert_eq!((c.now_us(), c.requested_wake()), (1500, Some(3000)));
+        assert_eq!(c.advance_to_wake(), Some(3000));
+        assert_eq!(c.requested_wake(), None);
     }
 
     #[test]

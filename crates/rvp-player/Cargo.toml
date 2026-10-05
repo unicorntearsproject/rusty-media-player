@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 rvp-core.workspace = true
+rvp-host.workspace = true
 rvp-codec-audio = { workspace = true, optional = true }
 rvp-codec-h264 = { workspace = true, optional = true }
 rvp-codec-av1 = { workspace = true, optional = true }

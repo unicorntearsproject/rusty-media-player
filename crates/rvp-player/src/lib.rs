@@ -6,6 +6,8 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod exec;
+
 use alloc::collections::VecDeque;
 use rvp_core::Timestamp;
 

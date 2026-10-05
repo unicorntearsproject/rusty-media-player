@@ -154,7 +154,8 @@ mod tests {
         c.resume(0);
         c.update_from_audio(0, 0);
         // The audio device runs 0.1% fast and reports +-3 ms of jitter; after 10 s of updates every
-        // 10 ms the clock must stay within 5 ms of the ideal device position.
+        // 10 ms the clock must stay within 1 ms of the ideal device position (3x better than the input
+        // jitter), and must not accumulate error over time (checked on the last second separately).
         let mut worst = 0i64;
         for i in 1..=1000i64 {
             let sys = i * 10_000;
@@ -165,7 +166,7 @@ mod tests {
                 worst = worst.max((c.now_stream(sys) - ideal).abs());
             }
         }
-        assert!(worst < 5_000, "worst error {worst} us");
+        assert!(worst < 1_000, "worst error {worst} us");
     }
 
     #[test]

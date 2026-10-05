@@ -1,6 +1,349 @@
-//! Native headless host for tests: a virtual-time clock, scripted input, and (from M3/M4) a file
-//! `Source`, a WAV/null audio sink and a frame-hashing video sink.
-pub use rvp_host::mock::{FakeClock, ScriptedInput};
+//! Native headless host for tests: a virtual-time clock, scripted input, a file `Source`, a null audio
+//! sink that drains in virtual time, a frame-hashing video sink and an in-memory surface/storage.
+//!
+//! Nothing here touches wall-clock time: a two-hour movie can run in seconds and give identical output.
+pub use rvp_host::mock::{FakeClock as VirtualClock, ScriptedInput};
+
+use rvp_core::{AudioParams, Timestamp, VideoFrame};
+use rvp_host::{
+    AudioSink, Host, HostClock, HostError, InputEvents, OpenRequest, Rect, Source, Storage, Surface,
+    VideoSink,
+};
+use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
+use std::rc::Rc;
 
 /// Version string shown by the CLI.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// A [`Source`] over a native file.
+pub struct FileSource {
+    file: std::fs::File,
+    len: u64,
+    name: String,
+}
+
+impl FileSource {
+    /// Open `path`.
+    pub fn open(path: &str) -> Result<Self, HostError> {
+        let file = std::fs::File::open(path).map_err(|e| HostError(format!("{path}: {e}")))?;
+        let len = file.metadata().map_err(|e| HostError(e.to_string()))?.len();
+        let name =
+            std::path::Path::new(path).file_name().map_or(path.to_string(), |n| n.to_string_lossy().into());
+        Ok(Self { file, len, name })
+    }
+}
+
+impl Source for FileSource {
+    async fn size(&self) -> Option<u64> {
+        Some(self.len)
+    }
+
+    async fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize, HostError> {
+        self.file.seek(SeekFrom::Start(offset)).map_err(|e| HostError(e.to_string()))?;
+        self.file.read(buf).map_err(|e| HostError(e.to_string()))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// Audio sink that "plays" in virtual time: queued frames drain at the sample rate while unpaused.
+pub struct NullAudio {
+    clock: Rc<VirtualClock>,
+    params: Option<AudioParams>,
+    queued: u64,
+    written: u64,
+    paused: bool,
+    last_update: Timestamp,
+    /// Device buffer delay reported to the player.
+    pub latency_us: Timestamp,
+    /// Last volume set.
+    pub volume: f32,
+    capacity_frames: u64,
+}
+
+impl NullAudio {
+    fn new(clock: Rc<VirtualClock>) -> Self {
+        Self {
+            clock,
+            params: None,
+            queued: 0,
+            written: 0,
+            paused: true,
+            last_update: 0,
+            latency_us: 20_000,
+            volume: 1.0,
+            capacity_frames: 0,
+        }
+    }
+
+    /// Total frames accepted since `open`.
+    pub fn frames_written(&self) -> u64 {
+        self.written
+    }
+
+    fn drain(&mut self) {
+        let now = self.clock.now_us();
+        if let (false, Some(p)) = (self.paused, self.params) {
+            let played = ((now - self.last_update) as u128 * p.sample_rate as u128 / 1_000_000) as u64;
+            self.queued = self.queued.saturating_sub(played);
+        }
+        self.last_update = now;
+    }
+}
+
+impl AudioSink for NullAudio {
+    fn open(&mut self, want: AudioParams) -> Result<AudioParams, HostError> {
+        self.params = Some(want);
+        self.capacity_frames = want.sample_rate as u64; // one second of buffer
+        self.last_update = self.clock.now_us();
+        Ok(want)
+    }
+
+    fn queued_frames(&self) -> usize {
+        // Exact value as of "now" without needing `&mut`: recompute the drain.
+        match (self.paused, self.params) {
+            (false, Some(p)) => {
+                let played = ((self.clock.now_us() - self.last_update) as u128 * p.sample_rate as u128
+                    / 1_000_000) as u64;
+                self.queued.saturating_sub(played) as usize
+            }
+            _ => self.queued as usize,
+        }
+    }
+
+    fn output_latency_us(&self) -> Timestamp {
+        self.latency_us
+    }
+
+    fn write(&mut self, interleaved: &[f32]) -> usize {
+        self.drain();
+        let Some(p) = self.params else { return 0 };
+        let frames = interleaved.len() / p.channels.max(1) as usize;
+        let room = self.capacity_frames.saturating_sub(self.queued) as usize;
+        let n = frames.min(room);
+        self.queued += n as u64;
+        self.written += n as u64;
+        n
+    }
+
+    fn flush(&mut self) {
+        self.drain();
+        self.queued = 0;
+    }
+
+    fn set_paused(&mut self, paused: bool) {
+        self.drain();
+        self.paused = paused;
+    }
+
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
+    }
+}
+
+/// Video sink that records a hash and the pts of every presented frame.
+#[derive(Debug, Default)]
+pub struct HashVideo {
+    /// `(pts, FNV-1a hash of all planes)` per presented frame.
+    pub frames: Vec<(Timestamp, u64)>,
+}
+
+impl VideoSink for HashVideo {
+    fn present(&mut self, frame: &VideoFrame) {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        for plane in &frame.planes {
+            for &b in plane {
+                h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        self.frames.push((frame.pts, h));
+    }
+}
+
+/// In-memory surface.
+#[derive(Debug)]
+pub struct MemSurface {
+    /// Width, height, device pixel ratio.
+    pub size: (u32, u32, f32),
+    /// Last uploaded framebuffer.
+    pub rgba: Vec<u8>,
+    /// Fullscreen flag.
+    pub fullscreen: bool,
+}
+
+impl Surface for MemSurface {
+    fn size(&self) -> (u32, u32, f32) {
+        self.size
+    }
+
+    fn present_rgba(&mut self, rgba: &[u8], _dirty: Rect) {
+        self.rgba.clear();
+        self.rgba.extend_from_slice(rgba);
+    }
+
+    fn set_fullscreen(&mut self, on: bool) {
+        self.fullscreen = on;
+    }
+}
+
+/// In-memory key-value storage.
+#[derive(Debug, Default)]
+pub struct MemStorage(pub HashMap<String, Vec<u8>>);
+
+impl Storage for MemStorage {
+    async fn load(&mut self, key: &str) -> Option<Vec<u8>> {
+        self.0.get(key).cloned()
+    }
+
+    async fn store(&mut self, key: &str, value: &[u8]) {
+        self.0.insert(key.to_string(), value.to_vec());
+    }
+}
+
+/// The headless [`Host`].
+pub struct HeadlessHost {
+    clock: Rc<VirtualClock>,
+    /// Audio sink.
+    pub audio: NullAudio,
+    /// Video sink.
+    pub video: HashVideo,
+    /// UI surface.
+    pub surface: MemSurface,
+    /// Scripted input.
+    pub input: ScriptedInput,
+    /// Storage.
+    pub storage: MemStorage,
+}
+
+impl Default for HeadlessHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HeadlessHost {
+    /// A host at virtual time 0 with a 1280x720 surface.
+    pub fn new() -> Self {
+        let clock = Rc::new(VirtualClock::new());
+        Self {
+            audio: NullAudio::new(clock.clone()),
+            clock,
+            video: HashVideo::default(),
+            surface: MemSurface { size: (1280, 720, 1.0), rgba: Vec::new(), fullscreen: false },
+            input: ScriptedInput::default(),
+            storage: MemStorage::default(),
+        }
+    }
+
+    /// Shared handle to the virtual clock (to advance time from a test driver).
+    pub fn virtual_clock(&self) -> Rc<VirtualClock> {
+        self.clock.clone()
+    }
+}
+
+impl Host for HeadlessHost {
+    type Source = FileSource;
+    type Audio = NullAudio;
+    type Video = HashVideo;
+    type Store = MemStorage;
+
+    fn clock(&self) -> &dyn HostClock {
+        &*self.clock
+    }
+    fn audio(&mut self) -> &mut NullAudio {
+        &mut self.audio
+    }
+    fn video(&mut self) -> &mut HashVideo {
+        &mut self.video
+    }
+    fn surface(&mut self) -> &mut dyn Surface {
+        &mut self.surface
+    }
+    fn input(&mut self) -> &mut dyn InputEvents {
+        &mut self.input
+    }
+    fn storage(&mut self) -> &mut MemStorage {
+        &mut self.storage
+    }
+    async fn open(&mut self, req: OpenRequest) -> Result<FileSource, HostError> {
+        match req {
+            OpenRequest::Id(path) => FileSource::open(&path),
+            OpenRequest::Pick => Err(HostError("no file picker in the headless host".into())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rvp_core::task::block_on;
+
+    #[test]
+    fn audio_drains_in_virtual_time() {
+        let mut host = HeadlessHost::new();
+        let p = host.audio.open(AudioParams { sample_rate: 48_000, channels: 2 }).unwrap();
+        assert_eq!(p.sample_rate, 48_000);
+        host.audio.set_paused(false);
+        let accepted = host.audio.write(&vec![0.0; 2 * 24_000]); // 0.5 s
+        assert_eq!(accepted, 24_000);
+        host.virtual_clock().advance(250_000);
+        assert_eq!(host.audio.queued_frames(), 12_000);
+        host.virtual_clock().advance(1_000_000);
+        assert_eq!(host.audio.queued_frames(), 0);
+        // Pausing freezes the queue.
+        host.audio.write(&vec![0.0; 2 * 1000]);
+        host.audio.set_paused(true);
+        host.virtual_clock().advance(5_000_000);
+        assert_eq!(host.audio.queued_frames(), 1000);
+    }
+
+    #[test]
+    fn audio_write_is_bounded_by_device_buffer() {
+        let mut host = HeadlessHost::new();
+        host.audio.open(AudioParams { sample_rate: 1000, channels: 1 }).unwrap();
+        assert_eq!(host.audio.write(&vec![0.0; 5000]), 1000);
+    }
+
+    #[test]
+    fn file_source_reads_and_host_open_errors() {
+        let path = std::env::temp_dir().join(format!("rvp-headless-test-{}", std::process::id()));
+        std::fs::write(&path, b"0123456789").unwrap();
+        let mut host = HeadlessHost::new();
+        block_on(async {
+            let mut src = host.open(OpenRequest::Id(path.to_string_lossy().into())).await.unwrap();
+            assert_eq!(src.size().await, Some(10));
+            let mut buf = [0u8; 4];
+            assert_eq!(src.read_at(3, &mut buf).await.unwrap(), 4);
+            assert_eq!(&buf, b"3456");
+            assert_eq!(src.read_at(10, &mut buf).await.unwrap(), 0);
+            assert!(host.open(OpenRequest::Pick).await.is_err());
+            host.storage().store("k", b"v").await;
+            assert_eq!(host.storage().load("k").await.as_deref(), Some(&b"v"[..]));
+        });
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn video_sink_hashes_deterministically() {
+        use rvp_core::{ColorMatrix, ColorRange, PixelFormat};
+        let frame = VideoFrame {
+            width: 2,
+            height: 2,
+            format: PixelFormat::Yuv420p8,
+            matrix: ColorMatrix::Bt709,
+            range: ColorRange::Limited,
+            planes: [vec![1, 2, 3, 4], vec![5], vec![6]],
+            strides: [2, 1, 1],
+            pts: 40_000,
+        };
+        let mut a = HashVideo::default();
+        let mut b = HashVideo::default();
+        a.present(&frame);
+        b.present(&frame);
+        assert_eq!(a.frames, b.frames);
+        assert_eq!(a.frames[0].0, 40_000);
+    }
+}

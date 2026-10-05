@@ -118,6 +118,7 @@ dependencies = [
  "rvp-codec-h264",
  "rvp-codec-vp9",
  "rvp-core",
+ "rvp-host",
 ]
 
 [[package]]
