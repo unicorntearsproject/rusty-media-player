@@ -228,7 +228,7 @@ gen_m8() {
   local d="$out/m8"
   mkdir -p "$d"
   # The marker holds a version, so adding fixtures to this set regenerates it once.
-  local version=3
+  local version=4
   [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
   # Sidecar subtitle files with known timing (also the source of the embedded ones).
   cat > "$d/sub.srt" <<'SRT'
@@ -278,6 +278,54 @@ VTT
      -metadata:s:s:0 language=eng -metadata:s:s:1 language=spa "$d/subs_srt.mkv"
   ff "${v[@]}" "${a[@]}" -i "$d/sub.vtt" -map 0 -map 1 -map 2 "${h[@]}" -c:a aac -b:a 64k -c:s webvtt -metadata:s:s:0 language=eng "$d/subs_vtt.mkv"
   ff "${v[@]}" "${a[@]}" -i "$d/sub.srt" -map 0 -map 1 -map 2 "${h[@]}" -c:a aac -b:a 64k -c:s mov_text -metadata:s:s:0 language=eng "$d/subs_movtext.mp4"
+  # ASS: a script with two styles (the second is bold italic yellow, top) and events with overrides (italic, bold, colour, \an9 and
+  # \pos), as a sidecar and embedded in Matroska (S_TEXT/ASS).
+  cat > "$d/sub.ass" <<'ASS'
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 320
+PlayResY: 240
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1
+Style: Top,Arial,20,&H0000FFFF,&H000000FF,&H00000000,&H00000000,-1,-1,0,0,100,100,0,0,1,2,1,8,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello
+Dialogue: 0,0:00:03.00,0:00:04.50,Default,,0,0,0,,{\i1}World{\i0}\Ntwo lines
+Dialogue: 1,0:00:03.50,0:00:05.00,Top,,0,0,0,,{\an9\pos(300,20)\c&H00FF00&}Corner
+Dialogue: 0,0:00:05.00,0:00:05.50,Default,,0,0,0,,{\b1}Last{\b0} one, with a comma
+ASS
+  ff "${v[@]}" "${a[@]}" -i "$d/sub.ass" -map 0 -map 1 -map 2 "${h[@]}" -c:a aac -b:a 64k -c:s ass -metadata:s:s:0 language=eng "$d/subs_ass.mkv"
+  # A cue that is already on screen when a seek lands: 24 s of video with a keyframe every second; "Long cue" runs from 8 s to 24 s
+  # (further ahead than the demuxer reads while playing the first seconds), "Short" from 16 s to 17 s. Plain SRT and ASS, in Matroska.
+  cat > "$d/long.srt" <<'SRT'
+1
+00:00:08,000 --> 00:00:24,000
+Long cue
+
+2
+00:00:16,000 --> 00:00:17,000
+Short
+SRT
+  # MP4 samples cannot overlap, so its text track gets the long cue alone.
+  printf '1\n00:00:08,000 --> 00:00:24,000\nLong cue\n' > "$d/long1.srt"
+  sed -e '/^Dialogue:/d' "$d/sub.ass" > "$d/long.ass"
+  printf '%s\n' 'Dialogue: 0,0:00:08.00,0:00:24.00,Default,,0,0,0,,{\i1}Long cue' 'Dialogue: 0,0:00:16.00,0:00:17.00,Default,,0,0,0,,Short' >> "$d/long.ass"
+  local lv=(-f lavfi -i "testsrc2=size=160x120:rate=25:duration=24") la=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=24")
+  local lh=(-c:v libx264 -preset veryfast -g 25 -pix_fmt yuv420p)
+  ff "${lv[@]}" "${la[@]}" -i "$d/long.srt" -map 0 -map 1 -map 2 "${lh[@]}" -c:a aac -b:a 48k -c:s srt -metadata:s:s:0 language=eng "$d/subs_long.mkv"
+  ff "${lv[@]}" "${la[@]}" -i "$d/long.ass" -map 0 -map 1 -map 2 "${lh[@]}" -c:a aac -b:a 48k -c:s ass -metadata:s:s:0 language=eng "$d/subs_long_ass.mkv"
+  ff "${lv[@]}" "${la[@]}" -i "$d/long1.srt" -map 0 -map 1 -map 2 "${lh[@]}" -c:a aac -b:a 48k -c:s mov_text -metadata:s:s:0 language=eng "$d/subs_long.mp4"
+  # PGS bitmap subtitles (no ffmpeg encoder: tools/gen-pgs.py writes a .sup stream by hand).
+  python3 "$root/tools/gen-pgs.py" "$d/sub.sup"
+  ff "${v[@]}" "${a[@]}" -f sup -i "$d/sub.sup" -map 0 -map 1 -map 2 "${h[@]}" -c:a aac -b:a 64k -c:s copy -metadata:s:s:0 language=eng "$d/subs_pgs.mkv"
+  # A video without audio (the next item of a gapless chain that has no sound).
+  ff "${v[@]}" -t 2 "${h[@]}" -an "$d/video_only.mkv"
+  ff "${v[@]}" -t 2 "${h[@]}" -an -movflags +faststart "$d/video_only.mp4"
   # Two audio tracks: 440 Hz (English) and 880 Hz (Spanish), Opus in Matroska, with video.
   ff "${v[@]}" "${a[@]}" -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=6" -map 0 -map 1 -map 2 "${h[@]}" -c:a libopus -b:a 64k -ac 2 \
      -metadata:s:a:0 language=eng -metadata:s:a:1 language=spa "$d/two_audio.mkv"
@@ -349,7 +397,7 @@ gen_perf() {
 gen_audio() {
   local d="$out/audio"
   mkdir -p "$d"
-  local version=3
+  local version=4
   [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
   # 3.3 s at 48 kHz (the player's output rate, so no resampling gets in the way of comparing samples): not a whole number of
   # frames in any codec, so the end padding matters. A tone that changes pitch makes
@@ -380,7 +428,32 @@ gen_audio() {
   ff "${a[@]}" -c:a pcm_u8 -ac 1 "$d/tone8_mono.wav"
   # ADTS AAC.
   ff "${a[@]}" -c:a aac -b:a 96k -f adts "$d/tone.aac"
-  for f in "$d"/*.mp3 "$d"/*.flac "$d"/*.ogg "$d"/*.opus "$d"/*.oga "$d"/*.wav "$d"/*.aac; do
+  # MPEG audio layer II: MPEG 1 stereo, and MPEG 2 (LSF) mono at 24 kHz. (ffmpeg has no layer I encoder.)
+  ff "${a[@]}" -c:a mp2 -b:a 192k "$d/tone.mp2"
+  ff "${a[@]}" -c:a mp2 -b:a 64k -ac 1 -ar 24000 "$d/tone_lsf_mono.mp2"
+  # Multichannel: 5.1 and 7.1, one tone per channel (the order is FL FR FC LFE BL BR [SL SR]), as FLAC and PCM.
+  local s51=(-f lavfi -i "aevalsrc=0.3*sin(2*PI*440*t)|0.3*sin(2*PI*554*t)|0.3*sin(2*PI*660*t)|0.3*sin(2*PI*80*t)|0.3*sin(2*PI*880*t)|0.3*sin(2*PI*990*t):s=48000:d=2:c=5.1")
+  local s71=(-f lavfi -i "aevalsrc=0.2*sin(2*PI*440*t)|0.2*sin(2*PI*554*t)|0.2*sin(2*PI*660*t)|0.2*sin(2*PI*80*t)|0.2*sin(2*PI*880*t)|0.2*sin(2*PI*990*t)|0.2*sin(2*PI*1200*t)|0.2*sin(2*PI*1500*t):s=48000:d=2:c=7.1")
+  ff "${s51[@]}" -c:a flac "$d/surround51.flac"
+  ff "${s51[@]}" -c:a pcm_s16le "$d/surround51.wav"
+  ff "${s51[@]}" -c:a pcm_s24le "$d/surround51_24.wav"
+  ff "${s71[@]}" -c:a flac "$d/surround71.flac"
+  ff "${s71[@]}" -c:a pcm_f32le "$d/surround71_f32.wav"
+  ff "${s51[@]}" -c:a aac -b:a 384k "$d/aac51.m4a"
+  # AAC 5.1 next to a picture: symphonia 0.6 cannot decode it, so the video must still play (without sound) and say why.
+  ff -f lavfi -i "testsrc2=size=160x120:rate=25:duration=2" "${s51[@]}" -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -b:a 384k -shortest "$d/video_aac51.mp4"
+  # Chained Ogg: two complete streams one after the other (different tones), Vorbis and Opus.
+  local c1=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=1.5") c2=(-f lavfi -i "sine=frequency=880:sample_rate=48000:duration=1.2")
+  ff "${c1[@]}" -c:a libvorbis -q:a 4 -ac 2 "$d/chain_a.ogg"
+  ff "${c2[@]}" -c:a libvorbis -q:a 4 -ac 2 "$d/chain_b.ogg"
+  cat "$d/chain_a.ogg" "$d/chain_b.ogg" > "$d/chained.ogg"
+  ff "${c1[@]}" -c:a libopus -b:a 64k -ac 2 "$d/chain_a.opus"
+  ff "${c2[@]}" -c:a libopus -b:a 64k -ac 2 "$d/chain_b.opus"
+  cat "$d/chain_a.opus" "$d/chain_b.opus" > "$d/chained.opus"
+  ff "${c1[@]}" -c:a flac -ac 2 -f ogg "$d/chain_a.oga"
+  ff "${c2[@]}" -c:a flac -ac 2 -f ogg "$d/chain_b.oga"
+  cat "$d/chain_a.oga" "$d/chain_b.oga" > "$d/chained.oga"
+  for f in "$d"/*.mp3 "$d"/*.mp2 "$d"/*.flac "$d"/*.ogg "$d"/*.opus "$d"/*.oga "$d"/*.wav "$d"/*.aac; do
     ffprobe -v error -show_format -show_streams -show_packets -of json "$f" > "$f.probe.json"
   done
   echo "$version" > "$d/.done"
