@@ -22,6 +22,7 @@ impl CodecFactory for WebCodecs {
     fn video(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         match info.codec.as_str() {
             "av1" => rvp_codec_av1::av1_decoder(info),
+            "h264" => rvp_codec_h264::h264_decoder(info),
             other => Err(Error::Unsupported(format!("video codec `{other}`"))),
         }
     }

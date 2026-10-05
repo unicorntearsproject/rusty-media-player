@@ -353,6 +353,15 @@ impl CabacEncoder {
         }
     }
 
+    /// Re-initialise the arithmetic coder after raw data (I_PCM samples) was written with [`CabacEncoder::writer`];
+    /// the context states are kept by the caller.
+    pub fn restart(&mut self) {
+        self.low = 0;
+        self.range = 510;
+        self.first_bit = true;
+        self.outstanding = 0;
+    }
+
     /// Bytes written so far; valid for appending raw data (I_PCM) only right after `terminate(1)`.
     pub fn bit_len(&self) -> usize {
         self.out.bit_len()

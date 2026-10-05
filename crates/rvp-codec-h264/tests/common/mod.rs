@@ -1,5 +1,6 @@
 //! Shared helpers for the conformance tests: fixtures, demuxing and the ffmpeg oracle.
 #![allow(dead_code)]
+pub mod synth;
 use rvp_codec_h264::decoder::{Decoder, Frame};
 use rvp_core::StreamKind;
 use rvp_core::task::block_on;

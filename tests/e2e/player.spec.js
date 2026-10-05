@@ -11,6 +11,8 @@ const FIXTURES = process.env.RVP_FIXTURES || path.join(root, "target/fixtures");
 const LONG = path.join(FIXTURES, "av1_opus_60s.webm"); // 60 s, 320x240, 25 fps, AV1 + Opus
 const SHORT = path.join(FIXTURES, "av1_opus.webm"); // 6 s
 const GOLDEN = path.join(__dirname, "golden", "player-paused.png");
+const H264_AAC = path.join(FIXTURES, "h264_aac.mp4"); // 6 s, 320x240, x264 Main/High with B-frames + AAC
+const H264_FLAC = path.join(FIXTURES, "h264_flac.mkv"); // the same video in Matroska with FLAC
 
 const snap = (page) => page.evaluate(() => window.rvp.snapshot());
 const waitFor = (page, fn, arg, timeout) =>
@@ -130,6 +132,44 @@ test.describe("player", () => {
     expect(resumed).toBeLessThan(landed + 3);
     expect(errors).toEqual([]);
   });
+
+  for (const [name, file] of [["MP4 + AAC", H264_AAC], ["Matroska + FLAC", H264_FLAC]]) {
+    test(`H.264 (${name}): our own decoder shows a moving picture at 1x and a seek lands`, async ({ page }) => {
+      expect(fs.existsSync(file), `${file} is missing: run cargo xtask fixtures`).toBeTruthy();
+      const errors = await load(page, file);
+      const s0 = await snap(page);
+      expect(s0.has_video).toBe(true);
+      expect(s0.error).toBeFalsy();
+      const before = await picture(page);
+      expect(spread(before)).toBeGreaterThan(40);
+      await page.waitForTimeout(1200);
+      const after = await picture(page);
+      expect(diff(before, after), "the picture changes while playing").toBeGreaterThan(0.01);
+      const run = await page.evaluate(async () => {
+        const p0 = window.rvp.snapshot().position_us;
+        const t0 = performance.now();
+        await new Promise((r) => setTimeout(r, 2000));
+        return { dp: (window.rvp.snapshot().position_us - p0) / 1000, dt: performance.now() - t0 };
+      });
+      expect(run.dp / run.dt, `position moved ${run.dp.toFixed(0)} ms in ${run.dt.toFixed(0)} ms`).toBeGreaterThan(0.95);
+      expect(run.dp / run.dt).toBeLessThan(1.05);
+      // Pause, seek to the middle and make sure the frame there decodes (reference chains restart cleanly).
+      await page.keyboard.press("Space");
+      await waitState(page, "paused");
+      await waitFor(page, () => window.rvp.snapshot().controls_opacity > 0.95);
+      const held = await picture(page);
+      const s = await snap(page);
+      await page.mouse.click(s.seek.x + s.seek.w * 0.7, s.seek.y + 2);
+      await waitFor(page, (t) => Math.abs(window.rvp.snapshot().position_us / 1e6 - t) < 1, 0.7 * (s.duration_us / 1e6));
+      let moved = 0;
+      for (let i = 0; i < 50 && moved <= 0.01; i++) {
+        await page.waitForTimeout(100);
+        moved = diff(held, await picture(page));
+      }
+      expect(moved, "the picture shows the new position").toBeGreaterThan(0.01);
+      expect(errors).toEqual([]);
+    });
+  }
 
   test("keyboard: arrows, j/k/l, m, f, Home/End", async ({ page }) => {
     await load(page, LONG, { play: false });

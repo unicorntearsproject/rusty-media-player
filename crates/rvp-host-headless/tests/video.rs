@@ -60,6 +60,35 @@ fn presented_frames_are_the_frames_ffmpeg_decodes() {
     assert_eq!(got, want, "every frame the sink got is bit-exact");
 }
 
+/// H.264 (our own decoder) through the whole player: every presented frame is what ffmpeg decodes, in order, with
+/// B-frame reordering, and the audio runs to the end alongside.
+#[test]
+fn h264_frames_are_bit_exact_and_play_in_sync_with_audio() {
+    if skip() {
+        return;
+    }
+    for name in ["h264_aac.mp4", "h264_aac_faststart.mp4", "h264_flac.mkv"] {
+        let path = fixture(name);
+        let report = play_file(&path, &PlayOptions::default()).unwrap();
+        assert_eq!(report.state, SessionState::Ended, "{name}: {:?}", report.error);
+        assert!(report.warnings.is_empty(), "{name}: {:?}", report.warnings);
+        let raw = Command::new("ffmpeg")
+            .args(["-v", "error", "-i", &path, "-map", "0:v:0", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"])
+            .output()
+            .unwrap()
+            .stdout;
+        let fsz = 320 * 240 * 3 / 2;
+        let want: Vec<u64> = raw.chunks_exact(fsz).map(fnv).collect();
+        let got: Vec<u64> = report.video_frames.iter().map(|f| f.1).collect();
+        assert_eq!(report.video_stats.dropped, 0, "{name}: nothing should be late at normal speed");
+        assert_eq!(got, want, "{name}: every frame the sink got is bit-exact");
+        assert!(report.video_trace.windows(2).all(|w| w[0].pts < w[1].pts), "{name}: frames shown in order");
+        assert!(report.video_stats.max_drift_us <= FRAME_US, "{name}: drift {} us", report.video_stats.max_drift_us);
+        // Six seconds of 48 kHz audio.
+        assert!((report.audio.len() as i64 / 2 - 288_000).abs() < 4_000, "{name}: {} audio frames", report.audio.len() / 2);
+    }
+}
+
 #[test]
 fn a_minute_of_av1_stays_in_sync_with_audio() {
     if skip() {

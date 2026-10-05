@@ -17,6 +17,7 @@ rvp-host.workspace = true
 rvp-player.workspace = true
 rvp-codec-audio.workspace = true
 rvp-codec-av1.workspace = true
+rvp-codec-h264.workspace = true
 rvp-demux.workspace = true
 
 [dev-dependencies]

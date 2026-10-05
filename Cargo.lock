@@ -416,6 +416,7 @@ dependencies = [
  "rvp-app",
  "rvp-codec-audio",
  "rvp-codec-av1",
+ "rvp-codec-h264",
  "rvp-core",
  "rvp-demux",
  "rvp-host",
@@ -435,6 +436,7 @@ dependencies = [
  "rvp-app",
  "rvp-codec-audio",
  "rvp-codec-av1",
+ "rvp-codec-h264",
  "rvp-core",
  "rvp-host",
  "rvp-ui",
@@ -474,6 +476,7 @@ name = "rvp-wasm-smoke"
 version = "0.0.1"
 dependencies = [
  "rvp-codec-av1",
+ "rvp-codec-h264",
  "rvp-core",
  "rvp-demux",
  "rvp-host",

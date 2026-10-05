@@ -7,7 +7,7 @@ use rvp_player::{Session, SessionState, TraceEntry, VideoStats, VideoTraceEntry}
 use std::path::Path;
 use std::rc::Rc;
 
-/// Codecs linked into this build (AAC/MP3/FLAC/Vorbis/Opus audio, AV1 video).
+/// Codecs linked into this build (AAC/MP3/FLAC/Vorbis/Opus audio, H.264 and AV1 video).
 #[derive(Default)]
 pub struct DefaultCodecs {
     /// Test hook: make the Nth video packet take this much virtual time to decode (`(n, microseconds)`).
@@ -55,6 +55,7 @@ impl CodecFactory for DefaultCodecs {
     fn video(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
         let dec = match info.codec.as_str() {
             "av1" => rvp_codec_av1::av1_decoder(info)?,
+            "h264" => rvp_codec_h264::h264_decoder(info)?,
             other => return Err(Error::Unsupported(format!("video codec `{other}`"))),
         };
         match (self.stall, &self.clock) {

@@ -276,7 +276,10 @@ impl Decoder {
             return Ok(());
         }
         if let Some(cur) = &self.cur {
-            if is_new_picture(&cur.hdr, &hdr, &cur.sps) {
+            // 7.4.1.2.4 can miss a new picture (for example POC type 2 after a picture with MMCO 5 that has the same
+            // frame_num). A slice that restarts at macroblock 0 when that macroblock is already decoded starts a new one.
+            let restarts = hdr.first_mb_in_slice == 0 && self.mbs.first().is_some_and(|m| m.slice != 0);
+            if is_new_picture(&cur.hdr, &hdr, &cur.sps) || restarts {
                 self.finish_picture()?;
             }
         }

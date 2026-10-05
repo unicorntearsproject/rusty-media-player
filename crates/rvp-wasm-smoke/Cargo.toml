@@ -1,6 +1,6 @@
 [package]
 name = "rvp-wasm-smoke"
-description = "wasm32 runtime smoke test: demux + decode an AV1 WebM inside WebAssembly (run by cargo xtask wasm-smoke)"
+description = "wasm32 runtime smoke test and benchmark: demux + decode AV1 and H.264 files inside WebAssembly (run by cargo xtask wasm-smoke)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,3 +19,4 @@ rvp-core.workspace = true
 rvp-demux.workspace = true
 rvp-host = { workspace = true }
 rvp-codec-av1.workspace = true
+rvp-codec-h264.workspace = true

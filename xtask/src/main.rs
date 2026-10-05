@@ -10,7 +10,7 @@ const USAGE: &str = "usage: cargo xtask <command>
                    (--sync first refreshes the CSS snapshot from the design system;
                    set UT_DESIGN_SYSTEM to override its path)
   check            cargo check for the host, and for wasm32 / no_std targets where applicable
-  wasm-smoke       decode AV1 fixtures inside WebAssembly (Node) and compare with the native decoder
+  wasm-smoke       decode AV1 and H.264 fixtures inside WebAssembly (Node) and compare with the native decoder
   fixtures [dir]   generate ffmpeg test media into target/fixtures (tools/gen-fixtures.sh)
   web [--no-opt]   build the browser player into target/web (wasm32 release, wasm-bindgen, wasm-opt if installed)
   serve [--port N] [--dir D]   serve target/web (default port 8080) with the headers a wasm page likes
@@ -50,13 +50,14 @@ pub(crate) fn fixtures(extra: &[String]) -> Result<(), String> {
     status.success().then_some(()).ok_or_else(|| "fixture generation failed".to_string())
 }
 
-/// Build the smoke module for wasm32, run it in Node on AV1 fixtures, and require the same frame count and hash
-/// as the native build.
+/// Build the smoke module for wasm32, run it in Node on AV1 and H.264 fixtures, and require the same frame count
+/// and hash as the native build.
 fn wasm_smoke() -> Result<(), String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     cargo(&["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "rvp-wasm-smoke"])?;
     let wasm = root.join("target/wasm32-unknown-unknown/release/rvp_wasm_smoke.wasm");
-    for name in ["av1_opus.webm", "av1_10bit.webm"] {
+    // AV1 and H.264 (CAVLC Baseline, CABAC Main with B-frames, High with 8x8 transform and scaling matrices).
+    for name in ["av1_opus.webm", "av1_10bit.webm", "h264/i_base_cif.mp4", "h264/b_cavlc_pyramid.mp4", "h264/c_main_b.mp4", "h264/h_high_cqm_jvt.mp4"] {
         let file = root.join("target/fixtures").join(name);
         if !file.exists() {
             fixtures(&[])?;
