@@ -3,6 +3,7 @@
 - Commit & push after each substantial milestone.
 - Use at most ONE sub-agent at a time: the `coder` agent (`.claude/agents/coder.md`, Sonnet 5.5, effort high). It does all coding, docs and tests; the main session only orchestrates.
 - Be efficient: minimal reporting, no superfluous output. Ask the user only when genuinely blocked.
+- Never use `rm -rf` or other recursive deletes (user rule). Put scratch/build output in fresh `/tmp` dirs (`mktemp -d /tmp/rvp-XXXX`) and overwrite in place.
 
 ## Context
 - Goal: a VLC-derived media player in Rust, compiled to WebAssembly, as an app for Rusty Bucket (`../rust-os`, plan index: `docs/planning/README.md`).

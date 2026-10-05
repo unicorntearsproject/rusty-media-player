@@ -1,10 +1,10 @@
-//! The audio decoders (AAC, MP3, FLAC, Vorbis, Opus) on arbitrary codec configuration and packets: first byte picks the
+//! The audio decoders (AAC, MP3, FLAC, Vorbis, Opus, PCM) on arbitrary codec configuration and packets: first byte picks the
 //! codec, then a length byte and that many bytes of extra data, then (u16 little-endian length, bytes) packets.
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use rvp_core::{AudioInfo, Packet, StreamInfo, StreamKind};
 
-const CODECS: [&str; 5] = ["aac", "mp3", "flac", "vorbis", "opus"];
+const CODECS: [&str; 8] = ["aac", "mp3", "flac", "vorbis", "opus", "pcm_s16le", "pcm_s24le", "pcm_f32le"];
 
 fuzz_target!(|data: &[u8]| {
     let [codec, extra_len, rest @ ..] = data else { return };

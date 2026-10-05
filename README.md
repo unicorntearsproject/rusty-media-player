@@ -9,14 +9,16 @@ One codebase, two editions:
   the core, UI or app crates depends on [Rusty Bucket](../rust-os); it is just one more host, next to the
   browser, the desktop and the headless test host.
 
-- Containers: MP4, MKV, WebM. Video: H.264 (our own decoder), AV1, VP9. Audio: AAC, MP3, FLAC, Opus, Vorbis.
+- Containers: MP4, MKV, WebM, and raw audio files (MP3, FLAC, Ogg, WAV, AAC/ADTS, with tags and cover art). Video: H.264 (our own
+  decoder), AV1, VP9. Audio: AAC, MP3, FLAC, Opus, Vorbis, PCM.
+- 1080p30 in the browser: WebAssembly SIMD128 kernels, plus an opt-in threads build (`cargo xtask web --threads`).
 - A portable `no_std + alloc` core behind a small host trait; no threads required.
 - Playlist, gapless playback, subtitles and a host-neutral now-playing model (Media Session in the browser) are in; planned: MPRIS on
   Linux, an audio-first library view with M3U/M3U8/PLS playlists and a visualizer view, and the desktop app and packaging.
 - Its own UI, drawn with the Unicorn Tears design-system tokens (`crates/theme`).
 - Clean-room: VLC is an architecture reference only; no VLC code is used.
 
-Status: milestones 0 to 8 done.
+Status: milestones 0 to 9 done.
 
 - M0-M6: scaffold, host/clock/executor, demuxers, audio, AV1, A/V sync, the headless host, the browser host with the themed
   UI, and our own pure-Rust H.264 decoder (Baseline/Main/High, progressive 8-bit 4:2:0, bit-exact with ffmpeg).
@@ -25,8 +27,12 @@ Status: milestones 0 to 8 done.
   exact seek, frame step, A-B loop, chapters, resume positions, the now-playing model (Media Session in the browser)
   and the visualizer tap.
 
+- M9: wasm SIMD128 kernels and an opt-in worker-thread build (1080p30 H.264, VP9 and AV1 at 0% dropped frames in headless Chromium),
+  cargo-fuzz targets for the demuxers, decoders and parsers, truncated/growing/corrupt file handling, crash recovery, raw audio
+  demuxers (MP3 with gapless info, FLAC, Ogg, WAV, ADTS) with tags and art.
+
 Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Read [`docs/PLAN.md`](docs/PLAN.md)
-for the architecture and the milestone list (M9 performance, M10 audio-first view, M11 desktop app and packaging, M12 Rusty
+for the architecture and the milestone list (M10 audio-first view, M11 desktop app and packaging, M12 Rusty
 Bucket adapter), [`docs/host-api.md`](docs/host-api.md) for the host-neutral media interfaces, and [`CLAUDE.md`](CLAUDE.md)
 for project rules.
 
@@ -36,7 +42,9 @@ for project rules.
 | --- | --- |
 | `crates/rvp-core` | types, master clock, ring buffer, decoder traits |
 | `crates/rvp-host` | host trait set (source, audio, video, surface, input, storage, clock) |
-| `crates/rvp-demux` | MP4 and Matroska/WebM demuxers |
+| `crates/rvp-demux` | MP4, Matroska/WebM and raw audio (MP3, FLAC, Ogg, WAV, ADTS) demuxers, tags and cover art |
+| `crates/rvp-par` | worker pool, decoder-on-a-thread, pipelined H.264 (native threads or Web Workers) |
+| `fuzz/` | cargo-fuzz targets and seed corpora (`cargo xtask fuzz`) |
 | `crates/rvp-codec-*` | audio, H.264 (own decoder; its bitstream, parameter-set, transform, CAVLC and CABAC modules are reusable by an encoder), AV1, VP9 decoders |
 | `crates/rvp-subs`, `crates/rvp-viz` | text subtitles; audio analysis for visualizers |
 | `crates/rvp-player` | the engine: scheduler, pipeline, A/V sync, playlist |
@@ -44,7 +52,7 @@ for project rules.
 | `crates/rvp-app` | session + UI + input glue behind the host trait |
 | `crates/rvp-host-{headless,web,rb}` | hosts: native test harness, browser, Rusty Bucket (`rvp-host-desktop` arrives in M11) |
 | `web/`, `tests/e2e/` | the page (canvas, audio worklet, glue) and its Playwright tests |
-| `xtask`, `tools/` | `cargo xtask theme`, `check`, `fixtures`, `web`, `serve`, `e2e` |
+| `xtask`, `tools/` | `cargo xtask theme`, `check`, `fixtures`, `web`, `serve`, `e2e`, `perf-web`, `fuzz` |
 
 ## Build and test
 
@@ -58,7 +66,10 @@ cargo xtask theme               # regenerate crates/theme/src/tokens.rs from cra
 cargo xtask theme --sync        # first refresh the CSS snapshot from the design system
 cargo xtask web                 # build the browser player into target/web (needs wasm-bindgen-cli 0.2.129)
 cargo xtask serve [--port N]    # serve target/web, default http://127.0.0.1:8080/
-cargo xtask e2e                 # build, make fixtures, run the Playwright tests (tests/e2e)
+cargo xtask web --threads       # also build the shared-memory (worker threads) variant; needs nightly + rust-src
+cargo xtask e2e [--threads]     # build, make fixtures, run the Playwright tests (tests/e2e); --threads runs them on both builds
+cargo xtask perf-fixtures       # one-minute 1080p30 streams; then `cargo xtask perf-web [--both]` plays them in the browser
+cargo xtask fuzz [target] [secs]  # cargo-fuzz targets (nightly + cargo-fuzz)
 ```
 
 Browser player: drop a file on the page or press `O`. Keys: `Space`/`K` play, arrows seek 5 s (Shift 30 s), `J`/`L` 10 s,

@@ -183,6 +183,9 @@ impl<S: Source> OggDemuxer<S> {
             let lacing = w[27..27 + nseg].to_vec();
             let (htype, granule) =
                 (w[5], i64::from_le_bytes([w[6], w[7], w[8], w[9], w[10], w[11], w[12], w[13]]));
+            // -1 means no packet ends on the page; anything else outside a sane range (2^48 samples is nine thousand years
+            // at 48 kHz) is damage and counts as that too, which keeps every later sum in range.
+            let granule = if (0..1 << 48).contains(&granule) { granule } else { -1 };
             let serial = u32::from_le_bytes([w[14], w[15], w[16], w[17]]);
             let blen: usize = lacing.iter().map(|&l| l as usize).sum();
             let body_at = at + 27 + nseg as u64;

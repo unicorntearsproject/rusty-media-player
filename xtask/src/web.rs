@@ -13,6 +13,17 @@ pub fn out_dir() -> PathBuf {
     root().join("target/web")
 }
 
+/// Remove the files directly inside `dir` (wasm-bindgen output is flat), leaving the directory itself: no recursive delete.
+fn clear_files(dir: &Path) {
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.path().is_file() {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
 fn have(tool: &str) -> bool {
     Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success())
 }
@@ -29,7 +40,7 @@ pub fn build(no_opt: bool, threads: bool) -> Result<(), String> {
         note += &format!(", {} KiB wasm with threads", size / 1024);
     } else {
         // A stale threaded build must not be picked up by a page that was rebuilt without it.
-        let _ = std::fs::remove_dir_all(out.join("pkg-mt"));
+        clear_files(&out.join("pkg-mt"));
     }
     for entry in std::fs::read_dir(root.join("web")).map_err(|e| e.to_string())? {
         let p = entry.map_err(|e| e.to_string())?.path();
@@ -93,7 +104,7 @@ fn build_variant(
         ));
     }
     let wasm = build_dir.join("wasm32-unknown-unknown/release/rvp_host_web.wasm");
-    let _ = std::fs::remove_dir_all(pkg);
+    clear_files(pkg);
     std::fs::create_dir_all(pkg).map_err(|e| e.to_string())?;
     if !have("wasm-bindgen") {
         return Err("wasm-bindgen CLI not found: `cargo install wasm-bindgen-cli --version <the wasm-bindgen crate version in Cargo.lock>`".into());
@@ -274,4 +285,65 @@ pub fn e2e(args: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Play the 1080p30 streams of `cargo xtask perf-fixtures` in the browser and report the dropped frames.
+/// Options: `--secs N` per stream (default 60), `--only NAME` (a part of the file name), `--single` for the
+/// single-threaded baseline only, `--both` for both builds.
+pub fn perf(args: &[String]) -> Result<(), String> {
+    let root = root();
+    let e2e = root.join("tests/e2e");
+    let (mut secs, mut only) = ("60".to_string(), String::new());
+    let (mut single, mut both) = (false, false);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--secs" => secs = it.next().ok_or("--secs needs a number")?.clone(),
+            "--only" => only = it.next().ok_or("--only needs a name")?.clone(),
+            "--single" => single = true,
+            "--both" => both = true,
+            other => return Err(format!("unknown option `{other}`")),
+        }
+    }
+    build(false, true)?;
+    crate::fixture_set("perf")?;
+    if !e2e.join("node_modules").exists() {
+        let st = Command::new("npm")
+            .args(["install", "--no-audit", "--no-fund"])
+            .current_dir(&e2e)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !st.success() {
+            return Err("npm install failed".into());
+        }
+    }
+    let passes: &[(&str, &str)] = if both {
+        &[("single-threaded", "threads=0"), ("threaded", "")]
+    } else if single {
+        &[("single-threaded", "threads=0")]
+    } else {
+        &[("threaded", "")]
+    };
+    let mut failed: Vec<&str> = Vec::new();
+    for (name, query) in passes {
+        println!("+ (tests/e2e) npx playwright test perf.spec.js [{name}]");
+        let st = Command::new("npx")
+            .args(["playwright", "test", "perf.spec.js"])
+            .current_dir(&e2e)
+            .env("RVP_PERF", "1")
+            .env("RVP_PERF_SECS", &secs)
+            .env("RVP_PERF_ONLY", &only)
+            .env("RVP_PERF_QUERY", query)
+            .env("RVP_E2E_THREADS", if query.is_empty() { "1" } else { "0" })
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !st.success() {
+            failed.push(*name);
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("the real-time check failed ({})", failed.join(", ")))
+    }
 }

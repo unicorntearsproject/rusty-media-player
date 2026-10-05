@@ -342,11 +342,15 @@ impl<S: Source> Demuxer for FlacDemuxer<S> {
         let want = (target_us.max(0) as u128 * self.rate as u128 / 1_000_000) as u64;
         // The seek table gives a byte offset (relative to the first frame) of a frame at or before the sample wanted.
         let (mut lo, mut lo_sample) = (self.first, 0u64);
-        if let Some(sp) = self.seektable.iter().rfind(|p| p.sample <= want) {
-            lo = self.first + sp.offset;
-            lo_sample = sp.sample;
-        }
         let size = self.rd.refresh_size().await;
+        // (A hostile table can point anywhere: only use an entry that lies inside the file.)
+        if let Some(sp) = self.seektable.iter().rfind(|p| p.sample <= want) {
+            let at = self.first.saturating_add(sp.offset);
+            if size.is_none_or(|s| at < s) {
+                lo = at;
+                lo_sample = sp.sample;
+            }
+        }
         if self.seektable.is_empty() {
             // No table: bisect on the byte position, reading the sample number of the frame found there.
             let mut hi = size.unwrap_or(lo);

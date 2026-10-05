@@ -228,7 +228,8 @@ impl<S: Source> Demuxer for WavDemuxer<S> {
         }
         let total = self.data_len / self.block;
         let n = FRAMES_PER_PACKET.min(total - self.frame);
-        let data = self.rd.read_vec(self.data + self.frame * self.block, n * self.block).await?;
+        let data =
+            self.rd.read_vec(self.data.saturating_add(self.frame * self.block), n * self.block).await?;
         let pts = self.us(self.frame);
         let dur = self.us(self.frame + n) - pts;
         self.frame += n;

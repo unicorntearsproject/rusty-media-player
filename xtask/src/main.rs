@@ -18,6 +18,11 @@ const USAGE: &str = "usage: cargo xtask <command>
   e2e [--update-golden] [--screenshots] [--threads] [-- args]
                    build the page, make fixtures and run the Playwright suite (tests/e2e);
                    --screenshots regenerates docs/screenshots
+  perf-fixtures    make the one-minute 1080p30 streams (H.264 typical and 25 Mbit/s, VP9, AV1) in target/fixtures/perf
+  perf-web [--secs N] [--only NAME] [--single] [--both]
+                   build the page with threads and play each perf stream at 1x in the browser, reporting dropped frames
+                   (default: the threaded page, 60 s each; --single the single-threaded baseline, --both both)
+  fuzz [target|all] [secs]   run cargo-fuzz targets (fuzz/, nightly + cargo-fuzz) for `secs` each (default 600)
   licenses         not implemented yet (see docs/PLAN.md)";
 
 fn main() -> ExitCode {
@@ -32,6 +37,9 @@ fn main() -> ExitCode {
         }
         Some("serve") => web::serve(&args[1..]),
         Some("e2e") => web::e2e(&args[1..]),
+        Some("perf-fixtures") => fixtures_perf(),
+        Some("perf-web") => web::perf(&args[1..]),
+        Some("fuzz") => fuzz(&args[1..]),
         Some(cmd @ "licenses") => Err(format!("`{cmd}` is not implemented yet")),
         _ => {
             eprintln!("{USAGE}");
@@ -53,6 +61,41 @@ pub(crate) fn fixtures(extra: &[String]) -> Result<(), String> {
     status.success().then_some(()).ok_or_else(|| "fixture generation failed".to_string())
 }
 
+fn fixtures_perf() -> Result<(), String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let status = Command::new("bash")
+        .arg(root.join("tools/gen-fixtures.sh"))
+        .env("RVP_FIXTURE_SET", "perf")
+        .status()
+        .map_err(|e| e.to_string())?;
+    status.success().then_some(()).ok_or_else(|| "generating the perf fixtures failed".to_string())
+}
+
+/// Run the cargo-fuzz targets (see `fuzz/run.sh`) for a bounded time each.
+fn fuzz(args: &[String]) -> Result<(), String> {
+    const TARGETS: [&str; 9] =
+        ["demux", "h264", "h264_pipelined", "vp9", "av1", "audio", "subs", "playlist", "playlist_files"];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let which = args.first().map_or("all", String::as_str);
+    let secs = args.get(1).map_or("600", String::as_str);
+    let list: Vec<&str> = if which == "all" { TARGETS.to_vec() } else { vec![which] };
+    if !list.iter().all(|t| TARGETS.contains(t)) {
+        return Err(format!("unknown fuzz target `{which}` (one of {})", TARGETS.join(", ")));
+    }
+    for t in list {
+        println!("+ fuzz/run.sh {t} {secs}");
+        let st = Command::new("bash")
+            .arg(root.join("fuzz/run.sh"))
+            .args([t, secs])
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !st.success() {
+            return Err(format!("fuzz target `{t}` found something (see fuzz/artifacts/{t})"));
+        }
+    }
+    Ok(())
+}
+
 /// Make one fixture set (see `tools/gen-fixtures.sh`) if its marker file is missing.
 pub(crate) fn fixture_set(set: &str) -> Result<(), String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -60,7 +103,8 @@ pub(crate) fn fixture_set(set: &str) -> Result<(), String> {
         return Ok(());
     }
     let script = root.join("tools/gen-fixtures.sh");
-    let status = Command::new("bash").arg(script).env("RVP_FIXTURE_SET", set).status().map_err(|e| e.to_string())?;
+    let status =
+        Command::new("bash").arg(script).env("RVP_FIXTURE_SET", set).status().map_err(|e| e.to_string())?;
     status.success().then_some(()).ok_or_else(|| format!("generating the `{set}` fixtures failed"))
 }
 

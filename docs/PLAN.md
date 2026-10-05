@@ -1,6 +1,6 @@
 # rusty-video-player: Plan
 
-> Status: Milestones 0 to 8 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
+> Status: Milestones 0 to 9 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
 > M7 to M12). Decisions live in `CLAUDE.md`; this file is the architecture and the milestone list. Update it when
 > a decision changes.
 
@@ -54,8 +54,9 @@ Workspace layout (`crates/*`, plus `xtask`). All crates are `MIT OR Apache-2.0`.
 | --- | --- | --- |
 | `rvp-core` | `no_std + alloc` | Shared types: `Rational`, `Timestamp` (microseconds, `i64`), `StreamInfo`, `Packet`, `VideoFrame` (planar YUV, strides, colour info), `AudioBuffer`, error types, `MasterClock`, `RingBuffer`. No I/O. |
 | `rvp-host` | `no_std + alloc` | The **host trait set** (section 4): `Source`, `AudioSink`, `VideoSink`, `Surface`, `InputEvents`, `Storage`, `HostClock`, plus (M8) the host-neutral `NowPlaying` model and `VisualizerTap`, and (M10) the optional `Library` capability (directory listing). Mock implementations for tests. This is the source of truth for media interfaces; Rusty Bucket's App API follows it. |
-| `rvp-demux` | `no_std + alloc` | Our own incremental demuxers: ISO BMFF (MP4/M4A), Matroska/WebM (EBML), plus probing. Async over `Source`. |
-| `rvp-codec-audio` | std (wasm32 ok) | `AudioDecoder` impls: AAC, MP3, FLAC, Vorbis (symphonia codec crates, unmodified), Opus (`opus-decoder`). Resampler (rubato). |
+| `rvp-demux` | `no_std + alloc` | Our own incremental demuxers: ISO BMFF (MP4/M4A), Matroska/WebM (EBML), and (M9) raw audio: MP3 (ID3v1/v2, Xing/Info/LAME gapless), native FLAC, Ogg (Vorbis, Opus, FLAC), WAV (PCM, RF64), ADTS AAC; tags and cover art for all of them; plus probing. Async over `Source`. |
+| `rvp-par` | std (wasm32 with shared memory) | (M9) Worker pool behind `rvp-core::par::Parallel`, `ThreadedVideoDecoder` (a decoder on a thread of its own), the pipelined H.264 decoder (parse and reconstruction threads). Native threads, or Web Workers through a host-provided spawner. |
+| `rvp-codec-audio` | std (wasm32 ok) | `AudioDecoder` impls: AAC, MP3, FLAC, Vorbis (symphonia codec crates, unmodified), Opus (`ropus`), PCM (own, M9). Resampler (rubato). |
 | `rvp-codec-h264` | `no_std + alloc` | **Our own** H.264 decoder (M6), `forbid(unsafe_code)`. Public modules that an encoder can share (Rusty Bucket plans one): `bitstream` (NAL/AVCC/Annex B, RBSP escaping, `BitReader` and `BitWriter`, Exp-Golomb), `params` (SPS with VUI, PPS, scaling lists, slice header, pred weight table, MMCO: each has `parse` and `write`), `transform` (inverse and forward 4x4/8x8/DC transforms, quantisation, dequantisation, scans), `cavlc` (tables plus `read_residual_block` and `write_residual_block`), `cabac` (context init tables, arithmetic decoder, arithmetic encoder, binarisation offsets). The picture decoder is `decoder` (macroblock layer, intra/inter prediction, direct modes, deblocking, DPB, output order); `h264_decoder()` adapts it to `VideoDecoder`. |
 | `rvp-codec-av1` | std (wasm32 ok) | rav1d wrapper (needs a wasm32 patch, see risk R1). |
 | `rvp-codec-vp9` | std (wasm32 ok) | VP9 behind our `VideoDecoder` trait (M7): wraps `rusty_vp9` (Apache-2.0, pinned `=0.1.1`), adds the superframe pull loop, `VideoFrame` conversion with colour tags, size caps and key-frame gating. Both candidate crates are `std`-only, so this crate is not `no_std`. |
@@ -183,11 +184,14 @@ Audio is the realtime-critical path and is **not** in the tick's hands once writ
 native: the device callback). Underruns are reported through `queued_frames`/`output_latency_us` and handled
 by the clock (rebuffer, resync), not by blocking.
 
-If a codec cannot meet realtime in one thread (likely for 1080p AV1 / H.264 High in wasm), the escalation
+If a codec cannot meet realtime in one thread (1080p AV1 and the 25 Mbit/s H.264 stress stream in wasm), the escalation
 path is, in order: (a) frame skipping up to the next reference-safe frame (VLC-style "late frame" handling),
-(b) wasm SIMD128 kernels (M9), (c) **optional** worker pool: the host exposes `spawn_worker`-style
-`Parallel` capability (Web Workers sharing memory, or native threads); codecs that can use it do, and
-without it everything still works single-threaded. (c) is not required by any milestone before M9.
+(b) wasm SIMD128 kernels (M9, always on in the browser build), (c) an **optional** worker pool (M9, built with
+`cargo xtask web --threads`): the `rvp-core::par::Parallel` capability plus `rvp-par` (a pool, and a video decoder that runs on a
+thread of its own). The page uses it when it is cross-origin isolated (`cargo xtask serve` sends COOP/COEP) and falls back to
+the single-threaded build otherwise (`?threads=0` forces that); everything works without it. The browser's main thread never
+blocks: hand-over uses spin locks and `unpark`, only workers `park`, and the pool runs jobs serially on the UI thread. Only the
+main thread can create Web Workers, so a worker that wants another thread posts a message and the page spawns it.
 
 For Rusty Bucket the same applies, with one extra caveat from its plan: `wasmi` is an interpreter, so
 HD decoding will not be realtime there. M12 must either use a JIT/AOT wasm runtime or a native
@@ -251,7 +255,7 @@ rate, playlist). The same API is exposed to JS by `rvp-host-web` for page integr
 | `thiserror` | 2.0.21 | MIT OR Apache-2.0 | yes (v2, `default-features = false`) | yes | Error derive for `std` crates. |
 | `wasm-bindgen`, `web-sys`, `js-sys` | 0.2.129 / 0.3.106 / 0.3.106 | MIT OR Apache-2.0 | n/a | target | Browser host. Build with the `wasm-bindgen` CLI (no `trunk`) driven by `xtask`. |
 | `pollster` / `futures-lite` | 1.0.1 / 2.6.1 | Apache-2.0 OR MIT | n/a | yes | Native test hosts only; the player has its own hand-rolled poller. |
-| `symphonia-metadata` (and the bundle's tag readers) | 0.6.1 | MPL-2.0 | no | builds | **Use** (M10) for ID3v1/v2, Vorbis comments, MP4 `ilst` tags and embedded cover art; same unmodified-MPL stance as symphonia. `lofty` (0.25.4, MIT OR Apache-2.0) is the fallback or a writer if we ever edit tags. |
+| `symphonia-metadata` | 0.6.1 | MPL-2.0 | no | builds | **Not needed** (decided in M9): tags and cover art come from our own readers in `rvp-demux` (ID3v1, ID3v2.2 to 2.4, Vorbis comments, FLAC pictures, WAV `LIST/INFO`, MP4 `ilst`, Matroska tags), so M10's library has no tag dependency. `lofty` (0.25.4, MIT OR Apache-2.0) stays the fallback if we ever edit tags. |
 | `microfft` | 0.6.0 | MIT | **yes** | expected | Candidate for the `no_std` visualizer FFT (fixed power-of-two sizes); otherwise a small own radix-2 FFT in `rvp-viz`. `rustfft` (6.4.1, MIT OR Apache-2.0) and `realfft` (3.5.0, MIT) are std alternatives, not needed. |
 | `winit` | 0.30.13 stable (0.31 is beta) | Apache-2.0 | no | n/a | Desktop window, input, drag-drop, fullscreen (M11). Pin the 0.30 line. |
 | `softbuffer` | 0.4.8 | MIT OR Apache-2.0 | no | n/a | **Preferred desktop presenter** (M11): we already produce a finished RGBA frame, so a CPU-to-window blit is enough and avoids wgpu. |
@@ -615,20 +619,124 @@ and a tempo estimate within 2 bpm.
   track switching, frame step and loop, a three-file playlist with N/P and the menu, resume after a reload, Media Session, the visualizer tap,
   chapters).
 
-**M9 Performance and robustness.** wasm SIMD128 kernels for YUV->RGBA, deblocking, inter prediction, IDCT;
-optional worker pool (`Parallel` host capability); fuzzing the demuxers and bitstream parsers (`cargo fuzz`,
-no panics, no OOM on 1 GB claims); corrupt/truncated stream handling; memory caps. *Done when:* 1080p30 H.264
-High and VP9 play at 1x in headless **wasm** (run with Node or the Playwright browser) with < 2% dropped frames
-over 60 s; fuzz targets run 10 min each with no findings; a truncated-file test plays to the end of the
-available data and emits `Ended`/`Error` instead of panicking.
+**M9 Performance and robustness.** *(done 2026-10-05; see the notes below)* wasm SIMD128 kernels for YUV->RGBA, deblocking, inter
+prediction, loop filters; optional worker pool (`Parallel` capability, threads build); fuzzing the demuxers and bitstream parsers
+(`cargo fuzz`, no panics, no OOM on 1 GB claims); corrupt/truncated stream handling; memory caps; raw audio demuxers.
+*Done when:* 1080p30 H.264 High and VP9 play at 1x in headless **wasm** (run with Node or the Playwright browser) with < 2% dropped
+frames over 60 s; fuzz targets run 10 min each with no findings; a truncated-file test plays to the end of the available data and
+emits `Ended`/`Error` instead of panicking.
+
+- **Result against "done when".** Headless Chromium (16 threads, 1280x720 page, 60 s at 1x): H.264 typical, VP9, AV1 and H.264 at 25 Mbit/s
+  **0.00% dropped** with the threads build; with the single-threaded build H.264 typical and VP9 0.00%. Nine fuzz targets ran 10
+  minutes each without a finding (after the findings below were fixed; `demux`, which covers the newest code, was run again after each
+  finding, the last time for 15 minutes). `hardening.rs` truncates and corrupts every fixture and checks that the session ends with `Ended` or an error.
+- **Browser speed, before and after** (`cargo xtask perf-fixtures`, then `cargo xtask perf-web --both`; 1080p30, one minute each; the
+  "before" column is the build at the start of M9, single-threaded, 30 s runs; this machine runs the `powersave` governor, so
+  absolute numbers move by 10-20% with load: compare rows, not runs):
+
+  | Stream (1080p30, 60 s) | Before: dropped | Single-threaded + SIMD128: dropped | Threads build (8 workers): dropped | Session ms per tick, single / threads |
+  | --- | --- | --- | --- | --- |
+  | H.264 High, typical (about 6 Mbit/s) | 15.2% | 0.00% | 0.00% | 6.8 / 2.0 |
+  | H.264 High, 25 Mbit/s stress | 42.3% | 4.96% | 0.00% | 29.9 / 1.9 |
+  | VP9 (rusty_vp9) | 27.8% | 0.00% | 0.00% | 5.9 / 1.8 |
+  | AV1 (rav1d) | 49.7% | 9.57% | 0.00% | 10.0 / 2.2 |
+
+  The single-threaded build keeps up with typical H.264 and VP9; the 25 Mbit/s stream and AV1 need the threads build on this CPU.
+  "Session ms per tick" is the average time of the player's tick on the UI thread (the decoders run on workers in the threads build).
+- **Native, same streams** (`taskset -c 3` for one core; `cargo run --release -p rvp-codec-h264 --example bench`, `rvp-par --example
+  h264_bench`, `rvp-codec-vp9 --example vp9_bench`; `RVP_POOL` sets the pool size):
+
+  | Stream | One thread, scalar decoder | Pipelined: 1 / 2 / 4 parse threads |
+  | --- | --- | --- |
+  | H.264 typical | 10.2 ms/frame (98 fps) | 7.7 / 4.5 / 3.7 ms (131 / 223 / 272 fps) |
+  | H.264 25 Mbit/s | 29.4 ms/frame (34 fps) | 20.3 / 12.6 / 11.2 ms (49 / 80 / 89 fps) |
+  | VP9 | 7.2 ms/frame (139 fps) | n/a (one decoder thread) |
+
+  The pipelined decoder is bit-exact with the inline one (same checksum; the ffmpeg-oracle conformance, synthetic and robustness tests
+  run on both).
+- **How it was found: profile first** (`perf record` natively, the decoder's `stages` timing in `rvp-codec-h264 --example bench`, and the tick breakdown in
+  `window.rvp.snapshot().perf` in the browser). The work followed what showed up: colour conversion and scaling, H.264 inter
+  prediction and deblocking, CABAC and residual parsing, then threads for what was left.
+- **SIMD128** (`core::arch::wasm32`, behind `cfg(target_feature = "simd128")`; every kernel has a scalar twin that defines the result
+  and a `selftest` that compares them on random data *inside WebAssembly*, run in Node by `cargo xtask wasm-smoke`
+  (`tools/wasm-selftest.mjs`); the same fixtures decode to the same hashes natively, in scalar wasm and in SIMD wasm): YUV420 to RGBA
+  (`rvp-core::color`, banded on the pool), the picture scaler (`rvp-ui::gfx`, vertical-first resampler), H.264 luma six-tap and chroma
+  bilinear prediction, averaging and weighted bi-prediction, luma and chroma deblocking (normal and strong filters; vertical edges
+  by 8x8 transposes), a branch-free CABAC decision, and in the vendored `rusty_vp9` (`third_party/rusty_vp9`, `PATCHES.md`) the
+  eight-tap motion compensation and the loop-filter edge kernel. The 4x4 and 8x8 inverse transforms stayed scalar with the existing
+  DC-only shortcut: they were not a hot spot. The page needs SIMD128 anyway (every current browser has it); the plain wasm build
+  exists for the smoke test.
+- **Threads** (opt-in: `cargo xtask web --threads`, nightly with `rust-src`, `-Z build-std`, atomics, bulk memory, shared memory up to
+  2 GiB; `serve` sends COOP/COEP): `rvp-par` pool (lazy start, spin locks, `mark_ui_thread`), `ThreadedVideoDecoder` (the decoder
+  lives on a worker, results come back in an epoch-tagged outbox so a seek discards stale frames; `VideoDecoder::pending()` lets the
+  session count frames in flight), the H.264 decoder split into a **parsing side** (pictures parsed in parallel on workers; B-slice
+  direct prediction waits for the co-located picture's motion data) and a **reconstruction side** (an event stream consumed in order;
+  inter macroblocks in row bands on the pool, then intra and PCM macroblocks in order, then deblocking one plane per job), AV1 through
+  rav1d's own threads (`n_threads` from the pool, a spawn hook for Web Workers, `PATCHES.md` items 5 and 6), colour conversion and
+  scaling in bands. With no executor the H.264 decoder runs inline and is bit-exact with the threaded path. VP9 stays on one decoder
+  thread (rusty_vp9 has no frame or tile threading). The single-threaded build stays the baseline and is what `cargo xtask e2e` runs
+  first; `cargo xtask e2e --threads` runs the whole suite a second time on the threads build.
+- **Crash recovery and `catch_unwind` on wasm** (`panic = abort` there, and `rusty_vp9` relied on `catch_unwind` inside its decoder):
+  a panic cannot be caught in wasm, so the answer is to make one unlikely and to survive it. Unlikely: the VP9 fuzz target found no
+  panic in about 40k mutated streams, and frame sizes are capped (`MAX_PIXELS`, 8192x4352) before the decoder sees them. Survive: a
+  panic on the main thread or on a worker (reported to the page by the worker's rejection handler) makes the page **discard the whole
+  wasm instance** (re-import of the glue, fresh shared memory, workers terminated), build a new player, reopen the files and resume
+  at the saved position. Tests: `tests/e2e/player.spec.js` crash recovery (a panic on the main thread and one in
+  the decoder thread, both builds) via `debug_panic` and `debug_crash_decoder`.
+- **Fuzzing** (`fuzz/`, cargo-fuzz with libFuzzer and AddressSanitizer on nightly; not part of the workspace; `cargo xtask fuzz
+  [target|all] [secs]`, `fuzz/run.sh`; seeds are committed in `fuzz/corpus/<target>` (under 200 KB in all), new corpus goes to the
+  untracked `fuzz/work`). Third-party codec crates are built without overflow checks, as in release builds (profile `rustflags`,
+  because cargo-fuzz forces `-Cdebug-assertions`); our own crates keep every check.
+
+  | Target | Input | Runs in 10 min | Findings, all fixed with a regression input or test |
+  | --- | --- | --- | --- |
+  | `demux` | any bytes through `open`, every packet, seeks | 0.9M (the newest run 2.7M in 15 min) | MP4 data position overflow, a slow Matroska scan (timeout), FLAC seek-table offset overflow, Ogg granule overflow |
+  | `h264`, `h264_pipelined` | AVCC stream, inline and threaded | 92k, 33k | negative slice QP; threaded and inline disagreeing after a slice error (`parse_error`) |
+  | `vp9` | frames and superframes | 10k | none |
+  | `av1` | packets into rav1d | 16k | zero-length data aborted the process (`send_packet` now ignores empty packets); panic on a frame without headers; a leak of one `Arc` per picture (rav1d patches 7 and 8) |
+  | `audio` | codec config and packets for AAC, MP3, FLAC, Vorbis, Opus, PCM | 130-180k | none in the decoders (an overflow in symphonia's FLAC predictor appeared only because cargo-fuzz forces overflow checks: it wraps in release) |
+  | `subs` | SRT, WebVTT, MKV and MP4 subtitle payloads | 1.4M | unbounded cue counts and timestamps (caps below) |
+  | `playlist`, `playlist_files` | M3U, M3U8, PLS text | 0.5M, 1.6M | none |
+
+  Regression inputs live next to the code (`crates/*/tests/fuzz_regressions/*.bin` and `fuzz_regressions.rs`).
+- **Memory caps and limits.** MP4: 4M samples (`MAX_SAMPLES`); Matroska: 1M clusters indexed, 10k chapters, tag and chapter depth 8, 8 MiB of
+  header metadata; one read allocation at most 256 MiB; subtitles: 200k cues, 4096 bytes of text per cue, 8 MiB per subtitle file;
+  playlists: 100k entries of at most 4096 bytes; tags: art at most 16 MiB, ID3v2 tag at most 32 MiB; video: 8192x4352 pixels for AV1 and VP9
+  (`frame_size_limit`, `MAX_PIXELS`) and 36864 macroblocks for H.264 (configurable); the session holds at most 96 MiB of queued
+  packets. Positions and sizes use saturating and forward-only arithmetic so a hostile offset cannot loop or wrap.
+- **Truncated, growing and corrupt files.** Demuxers re-ask `Source::size()` when a read reaches the known end, so a file that is still
+  being written (a recording, a download) plays on as it grows (`tests/growing.rs`: a prefix, then more, gives exactly the packets of the
+  whole file). The session treats `Error::Truncated` as "wait": it retries every 250 ms for 1.5 s, then plays out what it has and ends
+  (`Ended`, with a warning). A packet that fails to decode is dropped and playback goes on. Fixed on the way: the audio clock stopped
+  advancing once the audio had been handed over, so a longer video would hang at the end of a shorter audio track.
+- **Raw audio demuxing** (done here rather than in M10; own code, `no_std`, in `rvp-demux`; `AnyDemuxer` sniffs the file, looking past
+  ID3 tags). **MP3**: ID3v2.2/2.3/2.4 (all four text encodings, unsynchronisation, extended headers, `APIC` front cover preferred),
+  ID3v1, Xing/Info/VBRI and the LAME extension (encoder delay and padding become a negative first timestamp, `-(delay + 529)` samples,
+  and `discard_end_us` on the last frames, so a gapless MP3 is sample-exact: -133 dBFS against ffmpeg); frames are found by sync and chain
+  checking, and a full walk of files up to 24 MiB gives an exact duration and a seek index. **FLAC**: STREAMINFO, seek table, Vorbis
+  comments, pictures; frames are delimited by CRC-16 plus a valid next header (CRC-8); seeks use the table or a byte bisection.
+  **Ogg**: Vorbis (block sizes read from the mode table at the end of the setup header give packet durations), Opus (TOC durations,
+  pre-skip, 80 ms pre-roll after a seek) and FLAC-in-Ogg; other multiplexed streams are skipped, a chained stream ends the file; seeks
+  bisect on page granule positions. **WAV**: RIFF and RF64, PCM 8/16/24/32 and float 32/64 (also `WAVE_FORMAT_EXTENSIBLE`), `LIST/INFO` and
+  `id3 ` tags; a truncated or open-ended data chunk is clamped to the file. **ADTS AAC**: header to AudioSpecificConfig, exact duration
+  by a walk. `rvp-codec-audio` has a PCM decoder (mono and stereo) for WAV. `Metadata` gained album artist, track and disc numbers and
+  totals, year and genre. Tests (`rvp-demux/tests/audio.rs`, set `audio` of `tools/gen-fixtures.sh`): stream parameters, durations, tags,
+  cover art and **every packet's size and time against `ffprobe -show_packets`** for 14 files; ID3v1; gapless trimming; seeks on all
+  formats; truncated and byte-flipped files; `rvp-host-headless/tests/m9_raw_audio.rs` plays each file through the whole pipeline and
+  compares the output with ffmpeg's decode (lossless formats and WAV exact, lossy within -70 to -147 dBFS, lengths within a frame);
+  `tests/e2e/m9.spec.js` plays nine of them in the browser. Not done: Layer I/II MPEG audio, APE and AIFF, ReplayGain, multi-channel
+  PCM (the output path is mono or stereo, like the other decoders), chained Ogg playback past the first stream.
+- **Deviations from the brief.** wasm IDCT SIMD was skipped (not a hot spot); no frame threading for VP9; the "before" numbers come from a
+  30 s baseline run, not 60 s; the Node-wasm timing numbers are not tabulated (Node is only used for the bit-exactness smoke tests and
+  kernel self-tests, the browser is the speed oracle).
 
 **M10 The audio-first view.** Makes RVP a music player as well as a video player; all of it lives in host-neutral
 crates and `rvp-ui`, so every edition gets it.
 - **Library:** scan and index (`rvp-library`) a folder or a set of files handed over through the optional `Library`
   host capability (desktop: directory walk; browser: File System Access directory handle with an
   `<input webkitdirectory>` fallback; Rusty Bucket: its fs); incremental rescans keyed by path, size and mtime;
-  tags (title, artist, album artist, album, track/disc, year, genre, duration) and **cover art** from symphonia's
-  metadata (ID3v2, Vorbis comments, MP4 `ilst`, FLAC pictures) with a folder-art fallback (`cover.jpg`/`folder.png`);
+  tags (title, artist, album artist, album, track/disc, year, genre, duration) and **cover art** from `rvp-demux`
+  (its own readers since M9: ID3v2, Vorbis comments, MP4 `ilst`, FLAC pictures) with a folder-art fallback (`cover.jpg`/`folder.png`);
   the index and a downscaled art cache persist through `Storage`. Art decoding is JPEG/PNG; a small decoder crate
   is chosen in this milestone (MIT/Apache only).
 - **Playlists:** M3U, M3U8 (UTF-8, `#EXTINF`) and PLS import and export; relative paths resolved against the
@@ -693,7 +801,7 @@ audio and file APIs.
 | # | Risk | Plan |
 | --- | --- | --- |
 | R1 | `rav1d` 1.1.0 does not compile on `wasm32-unknown-unknown` (libc imports). | **Resolved in M4**: a private `libc` shim module (see `third_party/rav1d/PATCHES.md`) was the only change needed. The vendored copy decodes bit-exact in Node (`cargo xtask wasm-smoke`). Upstreaming the shim is still worthwhile. |
-| R2 | Real-time 1080p in single-threaded wasm for H.264/AV1/VP9. | Budgeted ticks, frame skipping, SIMD128 (M9), optional workers; lower-resolution graceful degrade; honest "performance mode" in UI. |
+| R2 | Real-time 1080p in single-threaded wasm for H.264/AV1/VP9. | **Resolved in M9**: SIMD128 kernels (single-threaded build: H.264 typical and VP9 at 0% dropped, H.264 25 Mbit/s 5%, AV1 9.6%) and the opt-in threads build (0% dropped on all four, 60 s each). Numbers in the M9 notes. |
 | R3 | Rusty Bucket's `wasmi` is an interpreter: video will not be realtime there. | M12; native codec service or a JIT/AOT runtime; tracked in `../rust-os/docs/planning/architecture.md` (D12 compile-ahead engine, D16 threads). |
 | R4 | Bit-exact H.264 is long, detail-heavy work. | **Resolved in M6**: staged ffmpeg oracles, generated tables, synthetic streams for features x264 does not emit. |
 | R5 | `opus-decoder` is a 0.1.x crate. | Test vectors in M3; fallback `ropus`. |
