@@ -256,13 +256,19 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
             let thread_data = Arc::new(Rav1dTaskContextTaskThread::new(task_thread));
             let thread_data_copy = Arc::clone(&thread_data);
             let task = if n_tc > 1 {
-                let handle = thread::Builder::new()
-                    // Don't set stack size like `dav1d` does.
-                    // See <https://github.com/memorysafety/rav1d/issues/889>.
-                    .name(format!("rav1d-worker-{n}"))
-                    .spawn(|| rav1d_worker_task(thread_data_copy))
-                    .unwrap();
-                Rav1dContextTaskType::Worker(handle)
+                match THREAD_SPAWN.get() {
+                    // The host starts the thread itself (a Web Worker on wasm32, where `std::thread::spawn` does not work).
+                    Some(spawn) => spawn(Box::new(|| rav1d_worker_task(thread_data_copy))),
+                    None => {
+                        thread::Builder::new()
+                            // Don't set stack size like `dav1d` does.
+                            // See <https://github.com/memorysafety/rav1d/issues/889>.
+                            .name(format!("rav1d-worker-{n}"))
+                            .spawn(|| rav1d_worker_task(thread_data_copy))
+                            .unwrap();
+                    }
+                }
+                Rav1dContextTaskType::Worker
             } else {
                 Rav1dContextTaskType::Single(Mutex::new(Box::new(Rav1dTaskContext::new(
                     thread_data_copy,
@@ -304,14 +310,23 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
     let c = c;
 
     for tc in c.tc.iter() {
-        if let Rav1dContextTaskType::Worker(handle) = &tc.task {
-            // Unpark each thread once we set its `thread_data.c`.
+        if let Rav1dContextTaskType::Worker = &tc.task {
+            // Each worker waits for its `thread_data.c` to be set before it starts.
             *tc.thread_data.c.lock() = Some(Arc::clone(&c));
-            handle.thread().unpark();
         }
     }
 
     Ok(c)
+}
+
+/// How worker threads are started. Unset, `std::thread` is used; hosts where that does not work (WebAssembly with
+/// shared memory) set a function that runs the closure on a new thread.
+pub static THREAD_SPAWN: std::sync::OnceLock<fn(Box<dyn FnOnce() + Send + 'static>)> =
+    std::sync::OnceLock::new();
+
+/// Set [`THREAD_SPAWN`] (once, before the first context with several threads is opened).
+pub fn set_thread_spawn(f: fn(Box<dyn FnOnce() + Send + 'static>)) {
+    let _ = THREAD_SPAWN.set(f);
 }
 
 /// # Safety

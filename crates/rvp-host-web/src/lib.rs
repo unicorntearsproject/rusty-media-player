@@ -19,6 +19,8 @@ mod media;
 mod player;
 #[cfg(target_arch = "wasm32")]
 mod source;
+#[cfg(target_arch = "wasm32")]
+mod threads;
 
 #[cfg(target_arch = "wasm32")]
 pub use player::WebPlayer;

@@ -14,3 +14,14 @@ rusty-video-player so that it builds for `wasm32-unknown-unknown` (docs/PLAN.md 
 
 Everything else is unchanged. Use it with `n_threads = 1` and `max_frame_delay = 1` (no threads on wasm).
 Upstreaming the `libc` change is the preferred end state.
+
+## Threads (M9)
+
+5. `src/lib.rs`: `THREAD_SPAWN` / `set_thread_spawn`: a hook that starts the worker threads (a Web Worker on wasm32 with
+   shared memory, where `std::thread::spawn` is unsupported). Unset, `std::thread` is used as before. The workers no
+   longer park until the opener unparks them (that needed a `std::thread::Thread` handle, which a foreign thread cannot
+   give us); they wait for `thread_data.c` to be set instead, and `Rav1dContextTaskType::Worker` holds no handle.
+6. `Cargo.toml`: `parking_lot_core` with the `nightly` feature, which selects its wasm32 `memory.atomic.wait32` thread
+   parker (without it a worker thread would panic when it first waits on a lock).
+   `rvp-codec-av1` opens the context with `n_threads` and frame delay set from the host's thread count (the single
+   threaded setting is kept where there are no threads).

@@ -1,0 +1,15 @@
+[package]
+name = "rvp-par"
+description = "Worker threads for rusty-video-player: a pool for data-parallel kernels and a decoder that runs on its own thread (native, or wasm32 with shared memory)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true

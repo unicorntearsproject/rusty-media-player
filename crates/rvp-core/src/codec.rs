@@ -14,6 +14,12 @@ pub trait VideoDecoder {
     fn drain(&mut self) -> Result<()> {
         Ok(())
     }
+    /// Commands accepted but not finished. Always 0 for a decoder that works inside `send_packet`; a decoder on its
+    /// own thread (`rvp-par`) answers later, so the caller keeps polling `receive_frame` until this is 0 before it
+    /// treats the stream as finished.
+    fn pending(&self) -> usize {
+        0
+    }
 }
 
 /// An audio decoder.

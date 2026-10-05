@@ -20,12 +20,22 @@ impl CodecFactory for WebCodecs {
     }
 
     fn video(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
-        match info.codec.as_str() {
-            "av1" => rvp_codec_av1::av1_decoder(info),
-            "h264" => rvp_codec_h264::h264_decoder(info),
-            "vp9" => rvp_codec_vp9::vp9_decoder(info),
-            other => Err(Error::Unsupported(format!("video codec `{other}`"))),
+        // With shared memory the decoder runs on a worker thread of its own, so decoding never competes with the UI
+        // thread; without it the decoder runs inside the tick as before.
+        if rvp_par::available() && matches!(info.codec.as_str(), "av1" | "h264" | "vp9") {
+            let info = info.clone();
+            return Ok(Box::new(rvp_par::ThreadedVideoDecoder::new(Box::new(move || build_video(&info)))));
         }
+        build_video(info)
+    }
+}
+
+fn build_video(info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
+    match info.codec.as_str() {
+        "av1" => rvp_codec_av1::av1_decoder(info),
+        "h264" => rvp_codec_h264::h264_decoder(info),
+        "vp9" => rvp_codec_vp9::vp9_decoder(info),
+        other => Err(Error::Unsupported(format!("video codec `{other}`"))),
     }
 }
 

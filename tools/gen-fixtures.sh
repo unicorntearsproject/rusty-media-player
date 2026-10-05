@@ -2,8 +2,9 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=core|h264|vp9|m8|all   which set to build (default all); H.264 goes to <outdir>/h264, VP9 to <outdir>/vp9, M8 (subtitles,
-#                                       tracks, gapless) to <outdir>/m8
+#   RVP_FIXTURE_SET=core|h264|vp9|m8|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
+#                                       VP9 to <outdir>/vp9, M8 (subtitles, tracks, gapless) to <outdir>/m8, and the one-minute 1080p30
+#                                       speed streams (M9) to <outdir>/perf (minutes of encoding: `cargo xtask perf-fixtures`)
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -314,9 +315,32 @@ CH
   echo "m8 fixtures in $d"
 }
 
+# ---------------------------------------------------------------------------------------------------------
+# M9: one minute of 1080p30 per codec for the real-time tests in the browser (video plus a sine on AAC/Opus).
+gen_perf() {
+  local d="$out/perf"
+  mkdir -p "$d"
+  local version=1
+  [[ "$(cat "$d/.done" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
+  local frames=1800 a=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=60")
+  # src <noise>: busy synthetic picture (testsrc2 plus temporal noise); noise 2 gives a few Mbit/s, 9 about 25 Mbit/s.
+  # The audio is input 0 and the picture input 1; the filter and frame count are output options.
+  src() { echo -vf "noise=alls=$1:allf=t,format=yuv420p" -frames:v "$frames" -map 1:v -map 0:a; }
+  local vin=(-f lavfi -i "testsrc2=size=1920x1080:rate=30")
+  local high=(-c:v libx264 -profile:v high -preset medium -g 60 -bf 3 -refs 3 -pix_fmt yuv420p -threads 4)
+  ff "${a[@]}" "${vin[@]}" $(src 2) "${high[@]}" -crf 22 -c:a aac -b:a 96k -shortest -movflags +faststart "$d/h264_1080p30_typ.mp4"
+  ff "${a[@]}" "${vin[@]}" $(src 9) "${high[@]}" -crf 18 -x264-params vbv-maxrate=25000:vbv-bufsize=25000 -c:a aac -b:a 96k -shortest -movflags +faststart "$d/h264_1080p30_stress.mp4"
+  ff "${a[@]}" "${vin[@]}" $(src 2) -c:v libvpx-vp9 -deadline good -cpu-used 4 -crf 33 -b:v 0 -g 60 -tile-columns 2 -row-mt 1 -threads 8 \
+     -c:a libopus -b:a 96k -shortest "$d/vp9_1080p30.webm"
+  ff "${a[@]}" "${vin[@]}" $(src 2) -c:v libsvtav1 -preset 10 -crf 36 -g 60 -svtav1-params log=0 -c:a libopus -b:a 96k -shortest "$d/av1_1080p30.webm"
+  echo "$version" > "$d/.done"
+  echo "perf fixtures in $d"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
 if [[ "$fixture_set" == all || "$fixture_set" == h264 ]]; then gen_h264; fi
 if [[ "$fixture_set" == all || "$fixture_set" == vp9 ]]; then gen_vp9; fi
 if [[ "$fixture_set" == all || "$fixture_set" == m8 ]]; then gen_m8; fi
+if [[ "$fixture_set" == perf ]]; then gen_perf; fi
 echo "fixtures in $out"

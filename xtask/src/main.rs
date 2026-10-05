@@ -12,9 +12,10 @@ const USAGE: &str = "usage: cargo xtask <command>
   check            cargo check for the host, and for wasm32 / no_std targets where applicable
   wasm-smoke       decode AV1, H.264 and VP9 fixtures inside WebAssembly (Node) and compare with the native decoder
   fixtures [dir]   generate ffmpeg test media into target/fixtures (tools/gen-fixtures.sh)
-  web [--no-opt]   build the browser player into target/web (wasm32 release, wasm-bindgen, wasm-opt if installed)
+  web [--no-opt] [--threads]   build the browser player into target/web (wasm32 release, wasm-bindgen, wasm-opt if installed);
+                   --threads also builds the shared-memory variant (pkg-mt: atomics, worker threads; needs nightly + rust-src)
   serve [--port N] [--dir D]   serve target/web (default port 8080) with the headers a wasm page likes
-  e2e [--update-golden] [--screenshots] [-- args]
+  e2e [--update-golden] [--screenshots] [--threads] [-- args]
                    build the page, make fixtures and run the Playwright suite (tests/e2e);
                    --screenshots regenerates docs/screenshots
   licenses         not implemented yet (see docs/PLAN.md)";
@@ -26,7 +27,9 @@ fn main() -> ExitCode {
         Some("check") => check(),
         Some("fixtures") => fixtures(&args[1..]),
         Some("wasm-smoke") => wasm_smoke(),
-        Some("web") => web::build(args.iter().any(|a| a == "--no-opt")),
+        Some("web") => {
+            web::build(args.iter().any(|a| a == "--no-opt"), args.iter().any(|a| a == "--threads"))
+        }
         Some("serve") => web::serve(&args[1..]),
         Some("e2e") => web::e2e(&args[1..]),
         Some(cmd @ "licenses") => Err(format!("`{cmd}` is not implemented yet")),
@@ -50,12 +53,40 @@ pub(crate) fn fixtures(extra: &[String]) -> Result<(), String> {
     status.success().then_some(()).ok_or_else(|| "fixture generation failed".to_string())
 }
 
-/// Build the smoke module for wasm32, run it in Node on AV1 and H.264 fixtures, and require the same frame count
-/// and hash as the native build.
+/// Build the smoke module for wasm32 (plain, and with SIMD128), run it in Node on AV1, H.264 and VP9 fixtures, and
+/// require the same frame count and hash as the native build from both; the SIMD build also runs the self-tests that
+/// compare every vector kernel with its scalar twin.
 fn wasm_smoke() -> Result<(), String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     cargo(&["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "rvp-wasm-smoke"])?;
     let wasm = root.join("target/wasm32-unknown-unknown/release/rvp_wasm_smoke.wasm");
+    println!("+ cargo build --release --target wasm32-unknown-unknown -p rvp-wasm-smoke (simd128)");
+    let st = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args([
+            "build",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown",
+            "-p",
+            "rvp-wasm-smoke",
+            "--target-dir",
+        ])
+        .arg(root.join("target/wasm-simd"))
+        .env("RUSTFLAGS", "-C target-feature=+simd128")
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !st.success() {
+        return Err("the SIMD128 smoke build failed".into());
+    }
+    let wasm_simd = root.join("target/wasm-simd/wasm32-unknown-unknown/release/rvp_wasm_smoke.wasm");
+    let st = Command::new("node")
+        .arg(root.join("tools/wasm-selftest.mjs"))
+        .arg(&wasm_simd)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !st.success() {
+        return Err("a SIMD128 kernel disagrees with its scalar reference".into());
+    }
     // AV1 and H.264 (CAVLC Baseline, CABAC Main with B-frames, High with 8x8 transform and scaling matrices).
     for name in [
         "av1_opus.webm",
@@ -85,8 +116,10 @@ fn wasm_smoke() -> Result<(), String> {
             .arg(&file))?;
         let wasm_out =
             run(Command::new("node").arg(root.join("tools/wasm-smoke.mjs")).arg(&wasm).arg(&file))?;
-        println!("{name}: native `{native}`, wasm `{wasm_out}`");
-        if native != wasm_out {
+        let simd_out =
+            run(Command::new("node").arg(root.join("tools/wasm-smoke.mjs")).arg(&wasm_simd).arg(&file))?;
+        println!("{name}: native `{native}`, wasm `{wasm_out}`, wasm simd128 `{simd_out}`");
+        if native != wasm_out || native != simd_out {
             return Err(format!("{name}: wasm and native decoders disagree"));
         }
     }
@@ -106,6 +139,7 @@ pub(crate) fn cargo(args: &[&str]) -> Result<(), String> {
 const WASM_CRATES: &[&str] = &[
     "theme",
     "rvp-core",
+    "rvp-par",
     "rvp-host",
     "rvp-demux",
     "rvp-codec-audio",

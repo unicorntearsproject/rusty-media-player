@@ -1,8 +1,8 @@
 // Page glue for the Rust player: owns the DOM (canvas, file picker, drag and drop, fullscreen) and forwards
 // input to the wasm `WebPlayer`. All drawing happens in Rust; this file only blits and forwards.
-import init, { WebPlayer } from "./pkg/rvp.js";
 import { RvpAudio } from "./audio.js";
 import { RvpMediaSession } from "./mediasession.js";
+import { Threads } from "./threads.js";
 
 const canvas = document.getElementById("screen");
 const fileInput = document.getElementById("file");
@@ -10,7 +10,42 @@ const fileInput = document.getElementById("file");
 const addInput = document.getElementById("file-add");
 const statusEl = document.getElementById("status");
 
-await init();
+// ---- the wasm module: shared-memory build with worker threads when the page can have it ------------------
+
+// `?threads=0` forces the single-threaded build; the threaded build needs a cross-origin isolated page (the
+// server sends COOP/COEP) and exists only if `cargo xtask web --threads` made it.
+const wantThreads = new URLSearchParams(location.search).get("threads") !== "0" && !/(?:^|;\s*)rvp_threads=0/.test(document.cookie);
+let glue = null;
+let threadInfo = { mode: "single", threads: 1, reason: "" };
+if (wantThreads && self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined") {
+  try {
+    const url = new URL("./pkg-mt/rvp.js", import.meta.url);
+    const wasmUrl = new URL("./pkg-mt/rvp_bg.wasm", import.meta.url);
+    const head = await fetch(wasmUrl, { method: "HEAD" });
+    if (head.ok) {
+      glue = await import(url.href);
+      const module = await WebAssembly.compileStreaming(fetch(wasmUrl));
+      const memory = new WebAssembly.Memory({ initial: 64, maximum: 32768, shared: true });
+      await glue.default({ module_or_path: module, memory, thread_stack_size: 4 << 20 });
+      const threads = new Threads(module, memory, url.href);
+      const n = glue.rvp_init_threads((ptr) => threads.spawn(ptr), navigator.hardwareConcurrency || 4);
+      threadInfo = { mode: "threads", threads: n, reason: "" };
+    } else {
+      threadInfo.reason = "no threaded build";
+    }
+  } catch (err) {
+    console.warn("threaded build unavailable, using the single-threaded one:", err);
+    glue = null;
+    threadInfo = { mode: "single", threads: 1, reason: String(err) };
+  }
+} else if (wantThreads) {
+  threadInfo.reason = "page is not cross-origin isolated";
+}
+if (!glue) {
+  glue = await import("./pkg/rvp.js");
+  await glue.default();
+}
+const { WebPlayer } = glue;
 const audio = new RvpAudio();
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const player = new WebPlayer(canvas, audio, reduceMotion.matches);
@@ -232,5 +267,8 @@ window.rvp = {
     return { mean: sum / (want.length / 4 * 3), badFraction: bad / (want.length / 4) };
   },
   perf: () => ({ ...perf, avgMs: perf.totalMs / Math.max(1, perf.ticks) }),
+  /** Worker threads in use: 1 for the single-threaded build. */
+  threads: () => threadInfo.threads,
+  threadInfo: () => threadInfo,
 };
 canvas.focus({ preventScroll: true });

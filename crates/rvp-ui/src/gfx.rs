@@ -378,10 +378,9 @@ impl FrameBuffer {
 
     /// Draw a picture (`sw * sh` RGBA, opaque) scaled with bilinear filtering into `dst`.
     ///
-    /// Two passes with packed channel arithmetic (red and blue share one `u32` multiply): first every source
-    /// row is scaled to the destination width (once per picture, `sh` rows), then each destination row blends
-    /// two of those rows. The second pass is a straight zip over contiguous memory, which the compiler turns
-    /// into SIMD where the target has it.
+    /// Vertical first: each destination row blends two source rows (straight SIMD-friendly byte arithmetic), then
+    /// the blended row is resampled to the destination width. Channel arithmetic is 8.8 fixed point with a
+    /// truncating shift, exactly the same in the scalar code and in the WebAssembly SIMD128 code.
     pub fn blit_scaled(&mut self, dst: RectF, src: &[u8], sw: u32, sh: u32) {
         if sw == 0 || sh == 0 || dst.w < 1.0 || dst.h < 1.0 || src.len() < sw as usize * sh as usize * 4 {
             return;
@@ -393,54 +392,50 @@ impl FrameBuffer {
         if x1 <= x0 || y1 <= y0 {
             return;
         }
-        const RB: u32 = 0x00FF_00FF;
-        const G: u32 = 0x0000_FF00;
-        #[inline(always)]
-        fn lerp(a: u32, b: u32, w: u32) -> u32 {
-            let rb = (((a & RB) * (256 - w) + (b & RB) * w) >> 8) & RB;
-            let g = (((a & G) * (256 - w) + (b & G) * w) >> 8) & G;
-            rb | g | 0xFF00_0000
-        }
         let dw = (x1 - x0) as usize;
         let (sx, sy) = (sw as f32 / dst.w, sh as f32 / dst.h);
-        let cols: Vec<(usize, usize, u32)> = (x0..x1)
+        let cols: Vec<Col> = (x0..x1)
             .map(|x| {
                 let fx = ((x as f32 + 0.5 - dst.x) * sx - 0.5).clamp(0.0, (sw - 1) as f32);
                 let i0 = fx as usize;
-                (i0, (i0 + 1).min(sw as usize - 1), ((fx - i0 as f32) * 256.0) as u32)
+                Col::new(i0, (i0 + 1).min(sw as usize - 1), ((fx - i0 as f32) * 256.0) as u32)
             })
             .collect();
-        // Pass 1: source rows scaled to the destination width.
         let stride = sw as usize * 4;
-        let mut wide: Vec<u32> = alloc::vec![0; dw * sh as usize];
-        let mut line: Vec<u32> = alloc::vec![0; sw as usize];
-        for (j, out) in wide.chunks_exact_mut(dw).enumerate() {
-            for (l, p) in line.iter_mut().zip(src[j * stride..(j + 1) * stride].chunks_exact(4)) {
-                *l = u32::from_le_bytes([p[0], p[1], p[2], p[3]]);
+        let fb_w = self.width as usize;
+        let rows = (y1 - y0) as usize;
+        let region = &mut self.pixels[y0 as usize * fb_w * 4..y1 as usize * fb_w * 4];
+        // Rows are independent, so the pool takes bands of them (each with its own scratch rows).
+        let band_rows = if rvp_core::par::threads() > 1 && rows * dw >= 128 * 1024 {
+            rows.div_ceil(rvp_core::par::threads() * 2).max(8)
+        } else {
+            rows
+        };
+        rvp_core::par::for_each_chunk_mut(region, band_rows * fb_w * 4, &|b, band| {
+            // One pixel of padding: the vector resampler reads the pixel after the last one (its weight is 0).
+            let mut vrow: Vec<u8> = alloc::vec![0; stride + 4];
+            let mut padded: Vec<u8> = alloc::vec![0; stride + 4];
+            for (k, line) in band.chunks_exact_mut(fb_w * 4).enumerate() {
+                let y = y0 + (b * band_rows + k) as i32;
+                let fy = ((y as f32 + 0.5 - dst.y) * sy - 0.5).clamp(0.0, (sh - 1) as f32);
+                let j0 = fy as usize;
+                let j1 = (j0 + 1).min(sh as usize - 1);
+                let wy = ((fy - j0 as f32) * 256.0) as u32;
+                let a = &src[j0 * stride..(j0 + 1) * stride];
+                let row: &[u8] = if wy == 0 || j1 == j0 {
+                    if (j0 + 1) * stride + 4 <= src.len() {
+                        &src[j0 * stride..(j0 + 1) * stride + 4]
+                    } else {
+                        padded[..stride].copy_from_slice(a);
+                        &padded
+                    }
+                } else {
+                    blend_rows(&mut vrow[..stride], a, &src[j1 * stride..(j1 + 1) * stride], wy);
+                    &vrow
+                };
+                resample_row(&mut line[x0 as usize * 4..x0 as usize * 4 + dw * 4], row, &cols);
             }
-            for (o, &(i0, i1, wx)) in out.iter_mut().zip(cols.iter()) {
-                *o = lerp(line[i0], line[i1], wx);
-            }
-        }
-        // Pass 2: blend two wide rows per destination row.
-        for y in y0..y1 {
-            let fy = ((y as f32 + 0.5 - dst.y) * sy - 0.5).clamp(0.0, (sh - 1) as f32);
-            let j0 = fy as usize;
-            let j1 = (j0 + 1).min(sh as usize - 1);
-            let wy = ((fy - j0 as f32) * 256.0) as u32;
-            let (a, b) = (&wide[j0 * dw..(j0 + 1) * dw], &wide[j1 * dw..(j1 + 1) * dw]);
-            let o = (y as usize * self.width as usize + x0 as usize) * 4;
-            let row = &mut self.pixels[o..o + dw * 4];
-            if wy == 0 {
-                for (d, &v) in row.chunks_exact_mut(4).zip(a) {
-                    d.copy_from_slice(&v.to_le_bytes());
-                }
-            } else {
-                for ((d, &p), &q) in row.chunks_exact_mut(4).zip(a).zip(b) {
-                    d.copy_from_slice(&lerp(p, q, wy).to_le_bytes());
-                }
-            }
-        }
+        });
     }
 
     /// Copy another buffer of the same size over this one.
@@ -449,6 +444,157 @@ impl FrameBuffer {
             self.pixels.copy_from_slice(&other.pixels);
         }
     }
+}
+
+/// One destination column of the picture scaler: the two source columns and the 8.8 weight of the second.
+#[derive(Clone, Copy)]
+struct Col {
+    i0: u32,
+    i1: u32,
+    w: u32,
+    /// `(256 - w) | w << 16`: both weights in one lane for the dot product.
+    #[cfg_attr(not(all(target_arch = "wasm32", target_feature = "simd128")), allow(dead_code))]
+    wp: u32,
+}
+
+impl Col {
+    fn new(i0: usize, i1: usize, w: u32) -> Self {
+        Self { i0: i0 as u32, i1: i1 as u32, w, wp: (256 - w) | (w << 16) }
+    }
+}
+
+const RB: u32 = 0x00FF_00FF;
+const G: u32 = 0x0000_FF00;
+
+/// Blend packed RGBA pixels `a` and `b` (opaque) with the weight `w` (0..=255) of `b`.
+#[inline(always)]
+fn lerp_px(a: u32, b: u32, w: u32) -> u32 {
+    let rb = (((a & RB) * (256 - w) + (b & RB) * w) >> 8) & RB;
+    let g = (((a & G) * (256 - w) + (b & G) * w) >> 8) & G;
+    rb | g | 0xFF00_0000
+}
+
+/// `out = (a * (256 - w) + b * w) >> 8` per byte, alpha forced to 255 (the picture is opaque).
+fn blend_rows(out: &mut [u8], a: &[u8], b: &[u8], w: u32) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        use rvp_core::simd::*;
+        let (wa, wb) = (u16x8_splat((256 - w) as u16), u16x8_splat(w as u16));
+        let n = out.len() & !15;
+        for i in (0..n).step_by(16) {
+            let (va, vb) = (load(&a[i..]), load(&b[i..]));
+            let lo = u16x8_shr(
+                i16x8_add(
+                    i16x8_mul(u16x8_extend_low_u8x16(va), wa),
+                    i16x8_mul(u16x8_extend_low_u8x16(vb), wb),
+                ),
+                8,
+            );
+            let hi = u16x8_shr(
+                i16x8_add(
+                    i16x8_mul(u16x8_extend_high_u8x16(va), wa),
+                    i16x8_mul(u16x8_extend_high_u8x16(vb), wb),
+                ),
+                8,
+            );
+            store(&mut out[i..], v128_or(u8x16_narrow_i16x8(lo, hi), u32x4_splat(0xFF00_0000)));
+        }
+        blend_rows_scalar(&mut out[n..], &a[n..], &b[n..], w);
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    blend_rows_scalar(out, a, b, w);
+}
+
+fn blend_rows_scalar(out: &mut [u8], a: &[u8], b: &[u8], w: u32) {
+    for ((o, p), q) in out.chunks_exact_mut(4).zip(a.chunks_exact(4)).zip(b.chunks_exact(4)) {
+        let v = lerp_px(
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]]),
+            u32::from_le_bytes([q[0], q[1], q[2], q[3]]),
+            w,
+        );
+        o.copy_from_slice(&v.to_le_bytes());
+    }
+}
+
+/// Resample one row of packed RGBA to the destination columns. `line` must hold one pixel more than the source
+/// width (the vector code reads the pair `i0, i0 + 1` with one load).
+fn resample_row(out: &mut [u8], line: &[u8], cols: &[Col]) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        use rvp_core::simd::*;
+        let n = cols.len() & !3;
+        // One output pixel: its two source pixels are adjacent, so load them together, interleave the bytes as
+        // (a, b) pairs per channel and let a dot product apply (256 - w, w).
+        for i in (0..n).step_by(4) {
+            let c = &cols[i..i + 4];
+            let at = |k: usize| &line[c[k].i0 as usize * 4..];
+            let x01 = load8_hi(load8(at(0)), at(1));
+            let x23 = load8_hi(load8(at(2)), at(3));
+            let sh = |x: v128| i8x16_shuffle::<0, 4, 1, 5, 2, 6, 3, 7, 8, 12, 9, 13, 10, 14, 11, 15>(x, x);
+            let (t01, t23) = (sh(x01), sh(x23));
+            let wp = |k: usize| i32x4_splat(c[k].wp as i32);
+            let r0 = u32x4_shr(i32x4_dot_i16x8(u16x8_extend_low_u8x16(t01), wp(0)), 8);
+            let r1 = u32x4_shr(i32x4_dot_i16x8(u16x8_extend_high_u8x16(t01), wp(1)), 8);
+            let r2 = u32x4_shr(i32x4_dot_i16x8(u16x8_extend_low_u8x16(t23), wp(2)), 8);
+            let r3 = u32x4_shr(i32x4_dot_i16x8(u16x8_extend_high_u8x16(t23), wp(3)), 8);
+            let packed = u8x16_narrow_i16x8(i16x8_narrow_i32x4(r0, r1), i16x8_narrow_i32x4(r2, r3));
+            store(&mut out[i * 4..], v128_or(packed, u32x4_splat(0xFF00_0000)));
+        }
+        resample_row_scalar(&mut out[n * 4..], line, &cols[n..]);
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    resample_row_scalar(out, line, cols);
+}
+
+fn resample_row_scalar(out: &mut [u8], line: &[u8], cols: &[Col]) {
+    let px = |i: u32| -> u32 {
+        let k = i as usize * 4;
+        u32::from_le_bytes([line[k], line[k + 1], line[k + 2], line[k + 3]])
+    };
+    for (o, c) in out.chunks_exact_mut(4).zip(cols) {
+        o.copy_from_slice(&lerp_px(px(c.i0), px(c.i1), c.w).to_le_bytes());
+    }
+}
+
+/// Run the WebAssembly SIMD128 self-tests of this crate (0 mismatches expected).
+pub fn simd_selftest() -> u32 {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        let mut bad = 0;
+        let mut seed = 0x9e37_79b9u32;
+        let mut rnd = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+        for (sw, dw) in [(8usize, 5usize), (33, 70), (64, 31), (17, 17), (100, 3)] {
+            let line: Vec<u8> = (0..sw * 4 + 4).map(|_| rnd() as u8).collect();
+            let cols: Vec<Col> = (0..dw)
+                .map(|x| {
+                    let f = (x as f32 + 0.5) * sw as f32 / dw as f32 - 0.5;
+                    let f = f.clamp(0.0, (sw - 1) as f32);
+                    let i0 = f as usize;
+                    Col::new(i0, (i0 + 1).min(sw - 1), ((f - i0 as f32) * 256.0) as u32)
+                })
+                .collect();
+            let (mut a, mut b) = (alloc::vec![0u8; dw * 4], alloc::vec![0u8; dw * 4]);
+            resample_row(&mut a, &line, &cols);
+            resample_row_scalar(&mut b, &line, &cols);
+            bad += (a != b) as u32;
+            let line = &line[..sw * 4];
+            let other: Vec<u8> = (0..sw * 4).map(|_| rnd() as u8).collect();
+            for w in [1u32, 77, 128, 255] {
+                let (mut a, mut b) = (alloc::vec![0u8; sw * 4], alloc::vec![0u8; sw * 4]);
+                blend_rows(&mut a, line, &other, w);
+                blend_rows_scalar(&mut b, line, &other, w);
+                bad += (a != b) as u32;
+            }
+        }
+        bad
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    0
 }
 
 #[cfg(test)]

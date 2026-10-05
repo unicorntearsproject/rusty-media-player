@@ -773,8 +773,10 @@ fn delayed_fg_task<'l, 'ttd: 'l>(
 }
 
 pub fn rav1d_worker_task(task_thread: Arc<Rav1dTaskContextTaskThread>) {
-    // The main thread will unpark us once `task_thread.c` is set.
-    thread::park();
+    // The thread that opened the context sets `task_thread.c` right after starting us; until then there is nothing to do.
+    while task_thread.c.lock().is_none() {
+        thread::yield_now();
+    }
     let c = &*task_thread.c.lock().take().unwrap();
     let mut tc = Rav1dTaskContext::new(task_thread);
 

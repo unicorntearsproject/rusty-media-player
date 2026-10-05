@@ -436,7 +436,8 @@ async fn video_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
             while s.video_dec.len() >= 2 && s.video_dec[1].pts <= s.video_floor {
                 s.video_dec.pop_front();
             }
-            if s.video_dec.len() >= MAX_VIDEO_FRAMES {
+            // A decoder on its own thread has packets in flight whose frames are still to come.
+            if s.video_dec.len() + dec.pending() >= MAX_VIDEO_FRAMES {
                 (None, false)
             } else {
                 let p = s.video_in.pop_front();
@@ -464,9 +465,15 @@ async fn video_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
             drained = true;
             s.progress += 1;
         }
+        // Read `pending` before collecting: a threaded decoder publishes frames before it lowers the count, so
+        // a zero here means every frame is already visible below.
+        let pending = dec.pending();
         {
             let mut s = sh.borrow_mut();
-            if drained && s.video_in.is_empty() && s.demux_done && !s.seeking {
+            while let Ok(Some(f)) = dec.receive_frame() {
+                s.video_dec.push_back(f);
+            }
+            if drained && pending == 0 && s.video_in.is_empty() && s.demux_done && !s.seeking {
                 s.video_done = true;
             }
         }

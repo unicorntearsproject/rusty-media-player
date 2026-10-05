@@ -17,44 +17,91 @@ fn have(tool: &str) -> bool {
     Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
-/// Build `rvp-host-web` for wasm32, run wasm-bindgen, optionally wasm-opt, and copy `web/` next to it.
-pub fn build(no_opt: bool) -> Result<(), String> {
+/// Build `rvp-host-web` for wasm32, run wasm-bindgen, optionally wasm-opt, and copy `web/` next to it. With `threads`
+/// the shared-memory variant (atomics, worker threads) is built as well, into `pkg-mt`; the page uses it when it can.
+pub fn build(no_opt: bool, threads: bool) -> Result<(), String> {
     let root = root();
-    // The page needs a modern browser anyway, so build with wasm SIMD128: the compiler then vectorises the
-    // pixel loops (picture scaling, scrims, YUV conversion) and the codecs. A separate target dir keeps this
-    // build from invalidating the plain `cargo check` / `cargo test` caches.
-    let build_dir = root.join("target/web-build");
+    let out = out_dir();
+    let size = build_variant(&root, &out.join("pkg"), "target/web-build", false, no_opt)?;
+    let mut note = format!("{} KiB wasm", size / 1024);
+    if threads {
+        let size = build_variant(&root, &out.join("pkg-mt"), "target/web-threads-build", true, no_opt)?;
+        note += &format!(", {} KiB wasm with threads", size / 1024);
+    } else {
+        // A stale threaded build must not be picked up by a page that was rebuilt without it.
+        let _ = std::fs::remove_dir_all(out.join("pkg-mt"));
+    }
+    for entry in std::fs::read_dir(root.join("web")).map_err(|e| e.to_string())? {
+        let p = entry.map_err(|e| e.to_string())?.path();
+        if p.is_file() {
+            std::fs::copy(&p, out.join(p.file_name().unwrap_or_default())).map_err(|e| e.to_string())?;
+        }
+    }
+    println!("built {} ({note})", out.display());
+    Ok(())
+}
+
+/// One wasm variant: returns the size of the final module. The page needs a modern browser anyway, so every variant is
+/// built with wasm SIMD128. A separate target dir per variant keeps them from invalidating each other and the plain
+/// `cargo check` / `cargo test` caches.
+fn build_variant(
+    root: &Path,
+    pkg: &Path,
+    target_dir: &str,
+    threads: bool,
+    no_opt: bool,
+) -> Result<u64, String> {
+    let build_dir = root.join(target_dir);
     let mut flags = std::env::var("RUSTFLAGS").unwrap_or_default();
     flags.push_str(" -C target-feature=+simd128");
-    println!("+ cargo build --release --target wasm32-unknown-unknown -p rvp-host-web (simd128)");
+    let mut args: Vec<&str> = vec![
+        "build",
+        "--release",
+        "--target",
+        "wasm32-unknown-unknown",
+        "-p",
+        "rvp-host-web",
+        "--target-dir",
+    ];
+    let dir_s = build_dir.to_string_lossy().into_owned();
+    args.push(&dir_s);
+    if threads {
+        // Shared memory and atomics need the standard library rebuilt with them (nightly + rust-src), and the linker
+        // told to share and import the memory and export the TLS setup wasm-bindgen threads on top of.
+        flags.push_str(
+            " -C target-feature=+atomics,+bulk-memory,+mutable-globals \
+             -C link-arg=--shared-memory -C link-arg=--max-memory=2147483648 -C link-arg=--import-memory \
+             -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size \
+             -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base",
+        );
+        args.extend(["-Z", "build-std=std,panic_abort"]);
+    }
+    println!(
+        "+ cargo build --release --target wasm32-unknown-unknown -p rvp-host-web (simd128{})",
+        if threads { ", threads" } else { "" }
+    );
     let st = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args([
-            "build",
-            "--release",
-            "--target",
-            "wasm32-unknown-unknown",
-            "-p",
-            "rvp-host-web",
-            "--target-dir",
-        ])
-        .arg(&build_dir)
-        .env("RUSTFLAGS", flags.trim())
+        .args(&args)
+        .env("RUSTFLAGS", flags.split_whitespace().collect::<Vec<_>>().join(" "))
         .status()
         .map_err(|e| e.to_string())?;
     if !st.success() {
-        return Err("cargo build for the web player failed".into());
+        return Err(format!(
+            "cargo build for the web player{} failed{}",
+            if threads { " (threads variant)" } else { "" },
+            if threads { " (it needs a nightly toolchain with the rust-src component)" } else { "" }
+        ));
     }
     let wasm = build_dir.join("wasm32-unknown-unknown/release/rvp_host_web.wasm");
-    let out = out_dir();
-    let pkg = out.join("pkg");
-    std::fs::create_dir_all(&pkg).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(pkg);
+    std::fs::create_dir_all(pkg).map_err(|e| e.to_string())?;
     if !have("wasm-bindgen") {
         return Err("wasm-bindgen CLI not found: `cargo install wasm-bindgen-cli --version <the wasm-bindgen crate version in Cargo.lock>`".into());
     }
     println!("+ wasm-bindgen --target web");
     let st = Command::new("wasm-bindgen")
         .args(["--target", "web", "--no-typescript", "--out-name", "rvp", "--out-dir"])
-        .arg(&pkg)
+        .arg(pkg)
         .arg(&wasm)
         .status()
         .map_err(|e| e.to_string())?;
@@ -67,22 +114,21 @@ pub fn build(no_opt: bool) -> Result<(), String> {
     if !no_opt && have("wasm-opt") {
         println!("+ wasm-opt -O2");
         let tmp = pkg.join("rvp_bg.opt.wasm");
-        let st = Command::new("wasm-opt")
-            .args([
-                "-O2",
-                "--enable-simd",
-                "--enable-bulk-memory",
-                "--enable-sign-ext",
-                "--enable-mutable-globals",
-                "--enable-nontrapping-float-to-int",
-                "--enable-multivalue",
-                "--enable-reference-types",
-                "-o",
-            ])
-            .arg(&tmp)
-            .arg(&bg)
-            .status()
-            .map_err(|e| e.to_string())?;
+        let mut cmd = Command::new("wasm-opt");
+        cmd.args([
+            "-O2",
+            "--enable-simd",
+            "--enable-bulk-memory",
+            "--enable-sign-ext",
+            "--enable-mutable-globals",
+            "--enable-nontrapping-float-to-int",
+            "--enable-multivalue",
+            "--enable-reference-types",
+        ]);
+        if threads {
+            cmd.arg("--enable-threads");
+        }
+        let st = cmd.arg("-o").arg(&tmp).arg(&bg).status().map_err(|e| e.to_string())?;
         if st.success() {
             std::fs::rename(&tmp, &bg).map_err(|e| e.to_string())?;
         } else {
@@ -91,15 +137,7 @@ pub fn build(no_opt: bool) -> Result<(), String> {
     } else if !no_opt {
         eprintln!("xtask: wasm-opt not installed, skipping (cargo install wasm-opt)");
     }
-    for entry in std::fs::read_dir(root.join("web")).map_err(|e| e.to_string())? {
-        let p = entry.map_err(|e| e.to_string())?.path();
-        if p.is_file() {
-            std::fs::copy(&p, out.join(p.file_name().unwrap_or_default())).map_err(|e| e.to_string())?;
-        }
-    }
-    let size = std::fs::metadata(&bg).map(|m| m.len()).unwrap_or(0);
-    println!("built {} ({} KiB wasm)", out.display(), size / 1024);
-    Ok(())
+    Ok(std::fs::metadata(&bg).map(|m| m.len()).unwrap_or(0))
 }
 
 fn mime(path: &Path) -> &'static str {
@@ -178,11 +216,13 @@ pub fn serve(args: &[String]) -> Result<(), String> {
 
 /// Build the page, make fixtures, and run the Playwright suite in `tests/e2e`.
 /// Options: `--update-golden` rewrites the golden screenshot; `--screenshots` regenerates `docs/screenshots`;
+/// `--threads` also builds the shared-memory variant and runs the suite a second time with worker threads on;
 /// anything after `--` goes to `playwright test`.
 pub fn e2e(args: &[String]) -> Result<(), String> {
     let root = root();
     let e2e = root.join("tests/e2e");
-    build(false)?;
+    let threads = args.iter().any(|a| a == "--threads");
+    build(false, threads)?;
     if !root.join("target/fixtures/.done").exists() {
         crate::fixtures(&[])?;
     }
@@ -199,25 +239,38 @@ pub fn e2e(args: &[String]) -> Result<(), String> {
         npm(&["npm", "install", "--no-audit", "--no-fund"])?;
     }
     npm(&["npx", "playwright", "install", "chromium"])?;
-    let mut cmd = Command::new("npx");
-    cmd.args(["playwright", "test"]).current_dir(&e2e);
+    let mut env: Vec<(&str, &str)> = Vec::new();
+    let mut extra: Vec<&str> = Vec::new();
     let mut rest = false;
     for a in args {
         match a.as_str() {
-            "--update-golden" => {
-                cmd.env("UPDATE_GOLDEN", "1");
-            }
+            "--update-golden" => env.push(("UPDATE_GOLDEN", "1")),
             "--screenshots" => {
-                cmd.env("RVP_SCREENSHOTS", "1").args(["-g", "screenshots"]);
+                env.push(("RVP_SCREENSHOTS", "1"));
+                extra.extend(["-g", "screenshots"]);
             }
+            "--threads" => {}
             "--" => rest = true,
-            other if rest => {
-                cmd.arg(other);
-            }
+            other if rest => extra.push(other),
             other => return Err(format!("unknown option `{other}`")),
         }
     }
-    println!("+ (tests/e2e) npx playwright test");
-    let st = cmd.status().map_err(|e| e.to_string())?;
-    st.success().then_some(()).ok_or_else(|| "the browser tests failed".to_string())
+    // With the threaded variant built, run once on the single-threaded build (the baseline, selected by a cookie the
+    // page honours) and once with threads.
+    let passes: &[(&str, &str)] =
+        if threads { &[("single-threaded", "0"), ("threaded", "1")] } else { &[("single-threaded", "0")] };
+    for (name, on) in passes {
+        let mut cmd = Command::new("npx");
+        cmd.args(["playwright", "test"]).args(&extra).current_dir(&e2e);
+        for (k, v) in &env {
+            cmd.env(k, v);
+        }
+        cmd.env("RVP_E2E_THREADS", on);
+        println!("+ (tests/e2e) npx playwright test [{name}]");
+        let st = cmd.status().map_err(|e| e.to_string())?;
+        if !st.success() {
+            return Err(format!("the browser tests failed ({name})"));
+        }
+    }
+    Ok(())
 }

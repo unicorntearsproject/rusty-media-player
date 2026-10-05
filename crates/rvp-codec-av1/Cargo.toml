@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 rvp-core.workspace = true
+rvp-par.workspace = true
 rav1d = { path = "../../third_party/rav1d", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 
 [dev-dependencies]

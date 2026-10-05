@@ -23,6 +23,8 @@ atomig = { version = "0.4.0", features = ["derive"] }
 bitflags = "2.4.0"
 cfg-if = "1.0.0"
 parking_lot = "0.12.2"
+# `nightly` selects the wasm32 shared-memory thread parker (memory.atomic.wait32); harmless elsewhere.
+parking_lot_core = { version = "0.9", features = ["nightly"] }
 paste = "1.0.14"
 strum = { version = "0.26", features = ["derive"] }
 to_method = "1.1.0"

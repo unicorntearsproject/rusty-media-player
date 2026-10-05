@@ -16,6 +16,11 @@ module.exports = defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
+    // RVP_E2E_THREADS=0 runs the page on its single-threaded build even when the threaded one exists.
+    storageState:
+      process.env.RVP_E2E_THREADS === "0"
+        ? { cookies: [{ name: "rvp_threads", value: "0", domain: "127.0.0.1", path: "/", expires: -1, httpOnly: false, secure: false, sameSite: "Lax" }], origins: [] }
+        : undefined,
     viewport: { width: 1280, height: 720 },
     deviceScaleFactor: 1,
     trace: "retain-on-failure",

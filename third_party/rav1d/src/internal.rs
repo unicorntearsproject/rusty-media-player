@@ -339,7 +339,7 @@ pub(crate) struct Rav1dContextRefs {
 
 pub(crate) enum Rav1dContextTaskType {
     /// Worker thread in a multi-threaded context.
-    Worker(JoinHandle<()>),
+    Worker,
     /// Main thread in a single-threaded context. There are no worker threads so
     /// we need to store a Rav1dTaskContext for work that requires it.
     // This Rav1dTaskContext is heap-allocated because we don't want to bloat

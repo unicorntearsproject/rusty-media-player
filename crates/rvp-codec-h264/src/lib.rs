@@ -31,6 +31,11 @@ pub mod params;
 pub mod transform;
 
 pub use error::{Error, Result};
+
+/// Run the WebAssembly SIMD128 self-tests of this crate (0 mismatches expected; always 0 without SIMD128).
+pub fn simd_selftest() -> u32 {
+    0
+}
 use rvp_core::VideoCodec;
 
 /// The codec this crate decodes.

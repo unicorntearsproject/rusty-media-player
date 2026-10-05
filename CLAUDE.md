@@ -18,3 +18,4 @@
 - Repo: private `iDoMeteor/rusty-video-player`.
 - Rust toolchain lives in `~/.cargo/bin` (not on PATH): run `source ~/.cargo/env` first.
 - **Standalone (user, 2026-10-05):** RVP is Rusty Bucket's built-in Media app (audio + video), but it must remain a shippable independent app that never requires Rusty Bucket. Targets: an installable web app (PWA) and a native desktop app (Linux first). Rusty Bucket is just one more host; nothing in core/ui/app may depend on it. Separate builds/editions per target are fine (user OK); prefer one shared codebase with per-host crates.
+- **Packaging (user, 2026-10-05), at the end (M11):** Flatpak, AppImage, .deb, .rpm, and a Windows .exe with an Inno Setup installer. Full app polish: logo, icon set at every size (.ico/.icns/hicolor PNG+SVG), .desktop file, AppStream metainfo, MIME/file associations, signing hooks. Reference: `../unicorn-viz` packaging. The desktop host must therefore support Windows as well as Linux.

@@ -93,3 +93,50 @@ pub extern "C" fn smoke_hash_hi() -> u32 {
     // SAFETY: single-threaded read of a plain value.
     unsafe { ((*std::ptr::addr_of!(RESULT)).1 >> 32) as u32 }
 }
+
+/// Run every crate's WebAssembly SIMD128 self-test (vector kernels against their scalar twins). Returns the number of
+/// mismatches; 0 also when this build has no SIMD128 code.
+#[unsafe(no_mangle)]
+pub extern "C" fn smoke_selftest() -> u32 {
+    rvp_core::color::simd_selftest() * 1_000_000
+        + rvp_ui::gfx::simd_selftest() * 1_000
+        + rvp_codec_h264::simd_selftest()
+}
+
+/// 1 when this module was built with SIMD128, else 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn smoke_has_simd() -> u32 {
+    cfg!(all(target_arch = "wasm32", target_feature = "simd128")) as u32
+}
+
+/// The picture path of the player, `reps` times: convert a synthetic `w` x `h` 4:2:0 frame to RGBA and scale it into a
+/// `dw` x `dh` surface (`mode` bit 0: convert, bit 1: scale). The JavaScript side times the call.
+#[unsafe(no_mangle)]
+pub extern "C" fn smoke_present_bench(w: u32, h: u32, dw: u32, dh: u32, reps: u32, mode: u32) -> u32 {
+    use rvp_core::{ColorMatrix, ColorRange, PixelFormat};
+    let (wz, hz) = (w as usize, h as usize);
+    let plane = |n: usize, k: usize| (0..n).map(|i| (i * k) as u8).collect::<Vec<u8>>();
+    let frame = VideoFrame {
+        width: w,
+        height: h,
+        format: PixelFormat::Yuv420p8,
+        matrix: ColorMatrix::Bt709,
+        range: ColorRange::Limited,
+        planes: [plane(wz * hz, 7), plane(wz * hz / 4, 13), plane(wz * hz / 4, 31)],
+        strides: [wz, wz / 2, wz / 2],
+        pts: 0,
+    };
+    let mut rgba = vec![0u8; wz * hz * 4];
+    let mut fb = rvp_ui::gfx::FrameBuffer::new(dw, dh);
+    let mut sum = 0u32;
+    for _ in 0..reps {
+        if mode & 1 != 0 {
+            rvp_core::color::yuv420_to_rgba(&frame, &mut rgba);
+        }
+        if mode & 2 != 0 {
+            fb.blit_scaled(rvp_ui::gfx::RectF::new(0.0, 0.0, dw as f32, dh as f32), &rgba, w, h);
+        }
+        sum = sum.wrapping_add(fb.pixels[(dw as usize * dh as usize * 2) & !3] as u32);
+    }
+    sum
+}

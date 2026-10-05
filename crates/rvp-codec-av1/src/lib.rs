@@ -1,7 +1,8 @@
 //! AV1 decoding with rav1d (BSD-2-Clause), vendored and patched for wasm32 in `third_party/rav1d`.
 //!
 //! The decoder runs single threaded (`n_threads = 1`, `max_frame_delay = 1`), which is what wasm32 without
-//! threads needs, and applies film grain. Output is 4:2:0 (or 4:0:0 expanded to grey chroma) at 8 or 10 bits;
+//! threads needs, unless the host has installed a thread pool (`rvp_core::par`): then rav1d gets that many threads
+//! (frame and tile threading) and starts them through `rvp_par` (Web Workers on wasm32). It applies film grain. Output is 4:2:0 (or 4:0:0 expanded to grey chroma) at 8 or 10 bits;
 //! 4:2:2 and 4:4:4 streams are rejected with `Unsupported`.
 //!
 //! This crate contains the only `unsafe` code that talks to rav1d: the dav1d-style C API is the only public
@@ -49,8 +50,17 @@ impl Av1Decoder {
             dav1d_default_settings(NonNull::new_unchecked(settings.as_mut_ptr()));
             settings.assume_init()
         };
-        settings.n_threads = 1;
-        settings.max_frame_delay = 1;
+        // Several threads only where blocking is allowed and the host has said it has threads (see the module docs);
+        // otherwise rav1d decodes inside `dav1d_send_data`/`dav1d_get_picture` on the calling thread.
+        let threads = if rvp_par::available() { rvp_core::par::threads().min(8) } else { 1 };
+        if threads > 1 {
+            rav1d::src::lib::set_thread_spawn(rvp_par::spawn_boxed);
+            settings.n_threads = threads as i32;
+            settings.max_frame_delay = 0;
+        } else {
+            settings.n_threads = 1;
+            settings.max_frame_delay = 1;
+        }
         let mut ctx: Option<Dav1dContext> = None;
         // SAFETY: both pointers are valid for the duration of the call; `ctx` is written on success.
         let r = unsafe { dav1d_open(Some(NonNull::from(&mut ctx)), Some(NonNull::from(&mut settings))) };

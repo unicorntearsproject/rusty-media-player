@@ -300,6 +300,7 @@ dependencies = [
  "bitflags",
  "cfg-if",
  "parking_lot",
+ "parking_lot_core",
  "paste",
  "strum",
  "to_method",
@@ -374,6 +375,7 @@ dependencies = [
  "rvp-core",
  "rvp-demux",
  "rvp-host",
+ "rvp-par",
 ]
 
 [[package]]
@@ -450,10 +452,18 @@ dependencies = [
  "rvp-codec-vp9",
  "rvp-core",
  "rvp-host",
+ "rvp-par",
  "rvp-ui",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "rvp-par"
+version = "0.0.1"
+dependencies = [
+ "rvp-core",
 ]
 
 [[package]]
@@ -480,6 +490,7 @@ version = "0.0.1"
 dependencies = [
  "fontdue",
  "libm",
+ "rvp-core",
  "rvp-host",
  "theme",
 ]
@@ -503,6 +514,7 @@ dependencies = [
  "rvp-core",
  "rvp-demux",
  "rvp-host",
+ "rvp-ui",
 ]
 
 [[package]]
