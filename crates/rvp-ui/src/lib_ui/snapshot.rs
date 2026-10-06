@@ -33,6 +33,7 @@ fn view_name(v: View) -> &'static str {
         View::Albums => "albums",
         View::Artists => "artists",
         View::Tracks => "tracks",
+        View::Videos => "videos",
         View::Playlists => "playlists",
         View::Queue => "queue",
         View::Search => "search",
@@ -162,6 +163,7 @@ impl Ui {
                         ("artist", a.name.clone(), a.id as i64)
                     }
                     EntKind::Track { id, .. } => ("track", lib.track(id)?.display_title().into(), id as i64),
+                    EntKind::Video { id, .. } => ("video", lib.video(id)?.display_title().into(), id as i64),
                     EntKind::Queue(id) => {
                         ("queue", model.playlist.iter().find(|q| q.id == id)?.label.clone(), id as i64)
                     }

@@ -5,7 +5,7 @@ use crate::model::UiModel;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ops::Range;
-use rvp_library::TrackSort;
+use rvp_library::{TrackSort, VideoSort};
 
 /// What an entity is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,13 @@ pub enum EntKind {
         /// Library id.
         id: u32,
         /// Position among the list's tracks.
+        pos: usize,
+    },
+    /// A video (library id); `pos` counts the videos of the list.
+    Video {
+        /// Library id.
+        id: u32,
+        /// Position among the list's videos.
         pos: usize,
     },
     /// An item of the queue (playlist item id).
@@ -73,6 +80,7 @@ pub(crate) struct RowsKey {
     pub detail: Option<Detail>,
     pub query: String,
     pub sort: (TrackSort, bool),
+    pub video: (bool, VideoSort, bool),
     pub width: u32,
     pub queue: u64,
     pub scale: u32,
@@ -85,8 +93,10 @@ pub(crate) struct Rows {
     pub rows: Vec<Row>,
     pub ents: Vec<Ent>,
     pub total: f32,
-    /// Library ids of the playable tracks of the list, in order (what a double click on a row queues from).
+    /// Library ids of the playable tracks (or videos) of the list, in order (what a double click on a row queues from).
     pub list: Vec<u32>,
+    /// The Videos view is laid out as a list.
+    pub video_list: bool,
 }
 
 struct Builder<'a> {
@@ -97,6 +107,10 @@ struct Builder<'a> {
     y: f32,
     list: Vec<u32>,
     card_h: f32,
+    /// The Videos view is a list (else posters).
+    video_list: bool,
+    video_cols: usize,
+    vcard_h: f32,
     _p: core::marker::PhantomData<&'a ()>,
 }
 
@@ -123,6 +137,28 @@ impl Builder<'_> {
         }
     }
 
+    /// A video: a poster card in a grid, or a row in a list.
+    fn videos<I: Iterator<Item = u32>>(&mut self, ids: I) {
+        let ids: Vec<u32> = ids.collect();
+        if self.video_list {
+            for id in ids {
+                let pos = self.list.len();
+                self.list.push(id);
+                self.list_row(64.0 * self.s, EntKind::Video { id, pos });
+            }
+            return;
+        }
+        for chunk in ids.chunks(self.video_cols.max(1)) {
+            let start = self.ents.len();
+            for (c, id) in chunk.iter().enumerate() {
+                let pos = self.list.len();
+                self.list.push(*id);
+                self.ents.push(Ent { kind: EntKind::Video { id: *id, pos }, row: self.rows.len(), col: c });
+            }
+            self.push(self.vcard_h + 20.0 * self.s, RowKind::Items(start..start + chunk.len()));
+        }
+    }
+
     fn track(&mut self, id: u32) {
         let pos = self.list.len();
         self.list.push(id);
@@ -142,6 +178,9 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
         y: 0.0,
         list: Vec::new(),
         card_h: m.card_h(),
+        video_list: ui.video_list,
+        video_cols: m.video_cols(),
+        vcard_h: m.vcard_h(),
         _p: Default::default(),
     };
     let empty_lib = lib.track_count() == 0;
@@ -242,6 +281,20 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
                 b.track(id);
             }
         }
+        (View::Videos, None) => {
+            if lib.video_count() == 0 {
+                b.push(
+                    300.0 * s,
+                    RowKind::Message(
+                        "Your videos go here.".into(),
+                        "Add a folder with films or clips (MP4, MKV or WebM). Everything stays on this device.".into(),
+                    ),
+                );
+            } else {
+                b.push(8.0 * s, RowKind::Gap);
+                b.videos(lib.sorted_videos(ui.video_sort, ui.video_asc).into_iter());
+            }
+        }
         (View::Playlists, None) => {
             if lib.playlists().is_empty() {
                 b.push(
@@ -282,7 +335,7 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
                 );
             } else {
                 let r = lib.search(q);
-                if r.tracks.is_empty() && r.albums.is_empty() && r.artists.is_empty() {
+                if r.tracks.is_empty() && r.albums.is_empty() && r.artists.is_empty() && r.videos.is_empty() {
                     b.push(260.0 * s, RowKind::Message("Nothing found.".into(), "Try fewer words.".into()));
                 }
                 if !r.artists.is_empty() {
@@ -295,6 +348,14 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
                     b.push(44.0 * s, RowKind::Header(alloc::format!("Albums ({})", r.albums.len())));
                     b.grid(r.albums.iter().take(b.cols * 2).map(|&i| EntKind::Album(i)));
                 }
+                if !r.videos.is_empty() {
+                    b.push(44.0 * s, RowKind::Header(alloc::format!("Videos ({})", r.videos.len())));
+                    b.videos(r.videos.iter().copied().take(if ui.video_list {
+                        50
+                    } else {
+                        b.video_cols * 2
+                    }));
+                }
                 if !r.tracks.is_empty() {
                     b.push(44.0 * s, RowKind::Header(alloc::format!("Tracks ({})", r.tracks.len())));
                     for &t in r.tracks.iter().take(200) {
@@ -306,7 +367,7 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
         (View::NowPlaying | View::Visualizer, None) => {}
     }
     b.push(24.0 * s, RowKind::Gap);
-    Rows { key, rows: b.rows, ents: b.ents, total: b.y, list: b.list }
+    Rows { key, rows: b.rows, ents: b.ents, total: b.y, list: b.list, video_list: ui.video_list }
 }
 
 impl Rows {
@@ -319,8 +380,9 @@ impl Rows {
         if range.len() == 1 && self.is_list(range.start) {
             return (y >= row.y && y < row.y + row.h).then_some(range.start);
         }
-        // A grid row: cards of a fixed width with gaps, starting at the padding.
-        let (cw, gap) = (m.card_w(), 20.0 * m.s);
+        // A grid row: cards of a fixed width with gaps, starting at the padding (posters are wider than covers).
+        let video = matches!(self.ents[range.start].kind, EntKind::Video { .. });
+        let (cw, gap) = (if video { m.vcard_w() } else { m.card_w() }, 20.0 * m.s);
         let rx = x - m.pad;
         if rx < 0.0 {
             return None;
@@ -329,15 +391,19 @@ impl Rows {
         if rx - col as f32 * (cw + gap) > cw {
             return None;
         }
-        if y - row.y > m.card_h() {
+        if y - row.y > if video { m.vcard_h() } else { m.card_h() } {
             return None;
         }
         (col < range.len()).then_some(range.start + col)
     }
 
-    /// True for entities that fill a row (everything but album cards).
+    /// True for entities that fill a row (everything but album and poster cards).
     pub(crate) fn is_list(&self, ent: usize) -> bool {
-        !matches!(self.ents[ent].kind, EntKind::Album(_))
+        match self.ents[ent].kind {
+            EntKind::Album(_) => false,
+            EntKind::Video { .. } => self.video_list,
+            _ => true,
+        }
     }
 
     /// The rectangle of an entity in body coordinates (scroll not applied).
@@ -346,6 +412,9 @@ impl Rows {
         let row = &self.rows[e.row];
         if self.is_list(ent) {
             crate::gfx::RectF::new(m.pad - 8.0 * m.s, row.y, m.body.w - 2.0 * m.pad + 16.0 * m.s, row.h)
+        } else if matches!(e.kind, EntKind::Video { .. }) {
+            let (cw, gap) = (m.vcard_w(), 20.0 * m.s);
+            crate::gfx::RectF::new(m.pad + e.col as f32 * (cw + gap), row.y, cw, m.vcard_h())
         } else {
             let (cw, gap) = (m.card_w(), 20.0 * m.s);
             crate::gfx::RectF::new(m.pad + e.col as f32 * (cw + gap), row.y, cw, m.card_h())

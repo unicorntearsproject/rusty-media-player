@@ -95,7 +95,14 @@ impl Rig {
 
     fn handle(&mut self, ev: InputEvent) -> Vec<Action> {
         self.now += 20_000;
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         self.ui.handle_lib(&ev, self.now, &self.m, &ctx)
     }
 
@@ -127,7 +134,14 @@ impl Rig {
 
     /// Lay the rows out for the current state and return the screen rectangle of entity `i`.
     fn ent_rect(&mut self, i: usize) -> crate::gfx::RectF {
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         let g = self.ui.lib_geom(&self.m, &ctx);
         self.ui.ensure_rows(&self.m, &ctx, &g);
         let rows = self.ui.lib.rows.as_ref().unwrap();
@@ -137,20 +151,41 @@ impl Rig {
 
     /// The entities of the current view (rows are laid out first).
     fn ents(&mut self) -> Vec<super::Ent> {
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         let g = self.ui.lib_geom(&self.m, &ctx);
         self.ui.ensure_rows(&self.m, &ctx, &g);
         self.ui.lib_state().entities().to_vec()
     }
 
     fn rail_item(&mut self, v: View) -> crate::gfx::RectF {
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         let g = self.ui.lib_geom(&self.m, &ctx);
         g.nav.iter().find(|(x, _)| *x == v).unwrap().1
     }
 
     fn draw(&mut self) -> FrameBuffer {
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         let mut fb = FrameBuffer::new(self.ui.size().0, self.ui.size().1);
         self.ui.update(self.now, &self.m);
         self.ui.draw_base_lib(&mut fb, &self.m, &ctx);
@@ -169,7 +204,14 @@ fn albums_are_a_grid_a_click_opens_one_and_back_returns() {
     r.ui.show_view(View::Albums);
     let first = r.ent_rect(0);
     let ents = {
-        let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &r.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         let g = r.ui.lib_geom(&r.m, &ctx);
         r.ui.ensure_rows(&r.m, &ctx, &g);
         r.ui.lib.rows.as_ref().unwrap().ents.len()
@@ -253,7 +295,14 @@ fn arrows_enter_and_the_context_key_drive_the_track_list() {
 fn clicking_a_header_sorts_and_the_wheel_scrolls() {
     let mut r = Rig::new();
     r.ui.show_view(View::Tracks);
-    let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
     let g = r.ui.lib_geom(&r.m, &ctx);
     let (_, col) = g.table_cols.iter().find(|(c, _)| *c == 1).copied().unwrap();
     r.click(col.cx(), col.cy());
@@ -278,7 +327,14 @@ fn typing_in_the_search_box_shows_results_and_escape_goes_back() {
     // The album, and its five tracks.
     let kinds: Vec<EntKind> = r.ui.lib_state().entities().iter().map(|e| e.kind).collect();
     let _ = kinds;
-    let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
     let g = r.ui.lib_geom(&r.m, &ctx);
     r.ui.ensure_rows(&r.m, &ctx, &g);
     let ents = r.ui.lib_state().entities().to_vec();
@@ -316,7 +372,14 @@ fn digits_and_the_rail_switch_views() {
     r.click(x, y);
     assert_eq!(r.ui.lib_state().view(), View::Tracks);
     // The mode switch asks the app to go to the player.
-    let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
     let g = r.ui.lib_geom(&r.m, &ctx);
     let (px, py) = center(g.mode[1]);
     assert_eq!(r.click(px, py), [Action::SetMode(Mode::Player)]);
@@ -379,7 +442,14 @@ fn the_name_prompt_collects_text_as_a_command() {
 fn the_bar_controls_map_to_actions_and_the_seek_bar_seeks() {
     let mut r = Rig::new();
     r.m = playing_model(&r.lib);
-    let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
     let g = r.ui.lib_geom(&r.m, &ctx);
     for (b, a) in [
         (crate::ui::Btn::Play, Action::PlayPause),
@@ -469,7 +539,14 @@ fn the_general_menu_reaches_every_view_and_every_shortcut() {
     r.m = playing_model(&r.lib);
     r.right_click(900.0, 650.0);
     assert!(r.ui.menu_open());
-    let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
     let items = super::menus::global_menu(&r.ui, &r.m, &ctx);
     let mut reach = Vec::new();
     menu_actions(&items, &mut reach);
@@ -500,7 +577,14 @@ fn the_empty_library_offers_to_add_a_folder() {
     let mut r = Rig::new();
     r.lib = Library::new();
     r.ui.show_view(View::Albums);
-    let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
     let g = r.ui.lib_geom(&r.m, &ctx);
     r.ui.ensure_rows(&r.m, &ctx, &g);
     let rect = crate::gfx::RectF::new(g.m.body.x, g.m.body.y, g.m.body.w, 300.0);
@@ -535,19 +619,40 @@ fn visualizer_keys_step_effects_and_leave() {
 impl Rig {
     /// What the app does for the visualizer's button and key.
     fn toggle_viz(&mut self) {
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         self.ui.toggle_visualizer(&self.m, &ctx);
     }
 
     fn go_back(&mut self) {
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         self.ui.go_back(&self.m, &ctx);
     }
 
     /// Click the bar's visualizer button (the bar is drawn first, so the floating bar of the visualizer is up).
     fn click_viz_button(&mut self) {
         self.draw();
-        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &self.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         let g = self.ui.lib_geom(&self.m, &ctx);
         let (x, y) = center(g.bar_btns.iter().find(|(b, _)| *b == crate::ui::Btn::VizView).unwrap().1);
         let out = self.click(x, y);
@@ -791,7 +896,14 @@ fn the_added_folders_show_in_the_rail_at_every_size() {
                 r.lib.finish_scan();
             }
             r.ui.set_size(w, h, 1.0);
-            let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+            let ctx = LibCtx {
+                lib: &r.lib,
+                now_art: None,
+                scan: None,
+                viz: None,
+                video: None,
+                resume: crate::lib_ui::no_resume(),
+            };
             let g = r.ui.lib_geom(&r.m, &ctx);
             assert!(!g.m.compact || w < 1000, "{w}x{h}");
             if g.m.compact {
@@ -822,11 +934,169 @@ fn the_rail_has_a_settings_button_that_opens_settings_and_never_overlaps_the_oth
     for (w, h) in [(1280, 720), (1024, 600), (800, 500), (1280, 540)] {
         let mut r = Rig::new();
         r.ui.set_size(w, h, 1.0);
-        let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: crate::lib_ui::no_resume() };
+        let ctx = LibCtx {
+            lib: &r.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
         let g = r.ui.lib_geom(&r.m, &ctx);
         assert!(g.settings.y >= g.add_folder.bottom(), "{w}x{h}: the Settings button sits under Add folder");
         assert!(g.settings.bottom() <= g.m.rail.bottom());
         let (x, y) = (g.settings.cx(), g.settings.cy());
         assert_eq!(r.click(x, y), [Action::ShowSettings], "{w}x{h}");
     }
+}
+
+// ---- videos ------------------------------------------------------------------------------------------------------------------------
+
+fn with_videos(r: &mut Rig, n: usize) {
+    for i in 0..n {
+        let entry = FileEntry {
+            id: alloc::format!("v{i}"),
+            path: alloc::format!("Films/Film {i:02}.mkv"),
+            size: 1000 + i as u64,
+            mtime_ms: 1_000 + i as i64 * 10,
+        };
+        r.lib.apply_video(
+            0,
+            &entry,
+            Ok(rvp_library::VideoInfo {
+                title: if i == 3 { "A Special Film".into() } else { String::new() },
+                duration_us: (60 + i as i64 * 7) * 1_000_000,
+                width: 1920,
+                height: 1080,
+                vcodec: "h264".into(),
+                acodec: "aac".into(),
+            }),
+        );
+    }
+    r.lib.finish_scan();
+}
+
+fn video_id(r: &mut Rig, i: usize) -> u32 {
+    match r.ents()[i].kind {
+        super::EntKind::Video { id, .. } => id,
+        k => panic!("not a video: {k:?}"),
+    }
+}
+
+#[test]
+fn the_videos_view_shows_posters_in_a_grid_and_plays_them() {
+    let mut r = Rig::new();
+    with_videos(&mut r, 14);
+    r.ui.show_view(View::Videos);
+    let ents = r.ents();
+    assert_eq!(ents.len(), 14);
+    assert!(ents.iter().any(|e| e.col > 0), "a grid: several to a row");
+    // Sorted by title: "A Special Film" comes first.
+    let first = video_id(&mut r, 0);
+    assert_eq!(r.lib.video(first).unwrap().display_title(), "A Special Film");
+    // Cards are side by side; the poster (16:9) fills the top, the title and details sit under it.
+    let (a, b) = (r.ent_rect(0), r.ent_rect(1));
+    assert!(b.x > a.right() && a.h > a.w * 9.0 / 16.0 && a.h < a.w * 0.9, "{a:?} {b:?}");
+    // A double click plays the list from that poster; the play button of a poster plays it at once.
+    let id1 = video_id(&mut r, 1);
+    let (x, y) = center(b);
+    let out = r.click(x, y - b.h * 0.3);
+    assert!(out.is_empty(), "a single click only selects");
+    let out = r.click(x, y - b.h * 0.3);
+    assert_eq!(out, [Action::Lib(LibAction::Play(Scope::ListFrom(1), Enqueue::Now))]);
+    let out = r.click(b.cx(), b.y + b.w * 9.0 / 32.0);
+    assert_eq!(
+        out,
+        [Action::Lib(LibAction::Play(Scope::ListFrom(1), Enqueue::Now))],
+        "the round button in the middle"
+    );
+    // The context menu offers play, play next and add to queue, as a track's does.
+    r.right_click(x, y - b.h * 0.3);
+    assert!(r.ui.menu_open());
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let items = super::menus::ent_menu(&r.ui, 1, &r.m, &ctx);
+    let labels: Vec<_> = items.iter().map(|m| m.label.as_str()).collect();
+    assert_eq!(labels, ["Play", "Play next", "Add to queue"]);
+    let mut reach = Vec::new();
+    menu_actions(&items, &mut reach);
+    assert!(reach.contains(&Action::Lib(LibAction::Play(Scope::Video(id1), Enqueue::Next))));
+    assert_eq!(r.ui.scope_tracks(Scope::Video(id1), &ctx, &r.m), [id1]);
+}
+
+#[test]
+fn the_layout_and_the_order_of_the_videos_can_be_changed_and_search_finds_them() {
+    let mut r = Rig::new();
+    with_videos(&mut r, 6);
+    r.ui.show_view(View::Videos);
+    r.draw();
+    // The header's buttons: List (id 0) and the sort (id 1).
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let labels: Vec<_> = g.header_btns.iter().map(|b| (b.id, b.label.clone())).collect();
+    assert!(
+        labels.contains(&(0, "List".into()))
+            && labels.iter().any(|(id, l)| *id == 1 && l.starts_with("Sort")),
+        "{labels:?}"
+    );
+    let list_btn = g.header_btns.iter().find(|b| b.id == 0).unwrap().rect;
+    r.click(list_btn.cx(), list_btn.cy());
+    let ents = r.ents();
+    assert!(ents.iter().all(|e| e.col == 0), "one to a row in the list");
+    assert!(r.ui.lib_state().rows.as_ref().unwrap().video_list);
+    // Sorting by when they were added puts the newest first.
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let sort_btn = g.header_btns.iter().find(|b| b.id == 1).unwrap().rect;
+    r.click(sort_btn.cx(), sort_btn.cy());
+    let newest = r.lib.sorted_videos(rvp_library::VideoSort::Added, false)[0];
+    assert_eq!(video_id(&mut r, 0), newest);
+    // Search finds a video by its title, in its own group.
+    r.key(Key::Char('/'));
+    r.typed("special");
+    let ents = r.ents();
+    assert_eq!(ents.len(), 1);
+    assert!(matches!(ents[0].kind, super::EntKind::Video { .. }));
+    r.draw();
+}
+
+#[test]
+fn resume_markers_and_the_empty_message_are_drawn() {
+    let mut r = Rig::new();
+    r.ui.show_view(View::Videos);
+    // No videos: the message offers to add a folder.
+    r.draw();
+    let fb = r.draw();
+    assert!(fb.pixels.iter().any(|&b| b != 0));
+    with_videos(&mut r, 3);
+    let id = r.lib.sorted_videos(rvp_library::VideoSort::Title, true)[1];
+    let mut resume = alloc::collections::BTreeMap::new();
+    resume.insert(id, 0.5f32);
+    let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None, resume: &resume };
+    let mut with = FrameBuffer::new(r.ui.size().0, r.ui.size().1);
+    r.ui.update(r.now, &r.m);
+    r.ui.draw_base_lib(&mut with, &r.m, &ctx);
+    let without = r.draw();
+    // The marker is a bar along the foot of the second poster: the two pictures differ there and nowhere in the first poster's row.
+    assert_ne!(with.pixels, without.pixels, "the resume marker is drawn");
 }

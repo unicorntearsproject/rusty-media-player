@@ -11,7 +11,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ops::Range;
-pub use rvp_library::{Image, Library, ListFormat, ScanStatus, TrackSort};
+pub use rvp_library::{Image, Library, ListFormat, ScanStatus, TrackSort, VideoSort};
 use rvp_viz::Viz;
 
 mod draw;
@@ -45,6 +45,8 @@ pub enum View {
     Artists,
     /// Every track, sortable.
     Tracks,
+    /// Videos as a grid of posters or a list, with search and resume markers.
+    Videos,
     /// Saved playlists.
     Playlists,
     /// What plays next.
@@ -104,6 +106,17 @@ pub enum Enqueue {
     Append,
 }
 
+impl crate::ui::Ui {
+    /// The view on screen is one of the library's lists and the library has nothing for it (the message offers to add a folder).
+    pub(crate) fn empty_view(&self, ctx: &LibCtx<'_>) -> bool {
+        match self.lib.view {
+            View::Videos => ctx.lib.video_count() == 0,
+            View::Albums | View::Artists | View::Tracks => ctx.lib.track_count() == 0,
+            _ => false,
+        }
+    }
+}
+
 /// An action of the library mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibAction {
@@ -137,6 +150,10 @@ pub enum LibAction {
     QueueToNext(u32),
     /// Sort the track list.
     SortTracks(TrackSort, bool),
+    /// Show the videos as a list (`true`) or as posters (`false`).
+    VideoLayout(bool),
+    /// Order the videos.
+    SortVideos(VideoSort, bool),
     /// Visualizer: the next (+1) or previous (-1) effect.
     VizStep(i8),
     /// Visualizer: the next colour scheme.
@@ -313,6 +330,10 @@ pub struct LibUi {
     pub(crate) query: String,
     pub(crate) track_sort: TrackSort,
     pub(crate) track_asc: bool,
+    /// The Videos view shows a list instead of posters.
+    pub(crate) video_list: bool,
+    pub(crate) video_sort: VideoSort,
+    pub(crate) video_asc: bool,
     pub(crate) sel: Option<usize>,
     pub(crate) scroll: f32,
     pub(crate) zone: Zone,
@@ -357,6 +378,9 @@ impl Default for LibUi {
             query: String::new(),
             track_sort: TrackSort::Title,
             track_asc: true,
+            video_list: false,
+            video_sort: VideoSort::Title,
+            video_asc: true,
             sel: None,
             scroll: 0.0,
             zone: Zone::Content,
@@ -486,6 +510,28 @@ impl Metrics {
     pub(crate) fn card_h(&self) -> f32 {
         self.card_w() + 54.0 * self.s
     }
+
+    /// Posters are wider than covers: 16 by 9, at least two to a row.
+    pub(crate) fn vcard_w(&self) -> f32 {
+        let base = 248.0 * self.s;
+        let avail = self.body.w - 2.0 * self.pad;
+        let cols = libm::floorf((avail + 20.0 * self.s) / (base + 20.0 * self.s)).max(2.0);
+        let w = (avail - (cols - 1.0) * 20.0 * self.s) / cols;
+        w.clamp(160.0 * self.s, 360.0 * self.s)
+    }
+
+    pub(crate) fn vcard_poster_h(&self) -> f32 {
+        self.vcard_w() * 9.0 / 16.0
+    }
+
+    pub(crate) fn vcard_h(&self) -> f32 {
+        self.vcard_poster_h() + 56.0 * self.s
+    }
+
+    pub(crate) fn video_cols(&self) -> usize {
+        let (cw, gap) = (self.vcard_w(), 20.0 * self.s);
+        (libm::floorf((self.body.w - 2.0 * self.pad + gap) / (cw + gap)) as usize).max(1)
+    }
 }
 
 /// A virtual list's slice that is on screen: the row indexes whose pixels intersect the body.
@@ -505,6 +551,7 @@ pub(crate) fn rows_key(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metric
         detail: ui.detail,
         query: ui.query.clone(),
         sort: (ui.track_sort, ui.track_asc),
+        video: (ui.video_list, ui.video_sort, ui.video_asc),
         width: m.body.w as u32,
         queue: model.queue_rev,
         scale: (m.s * 100.0) as u32,

@@ -5,7 +5,7 @@ use super::menus;
 use super::rows::{EntKind, RowKind};
 use super::{
     Detail, Enqueue, LibAction, LibCtx, LibDrag, LibHit, Mode, NavEntry, Prompt, PromptKind, Scope,
-    UiCommand, View, VizReturn, Zone, rows_key,
+    UiCommand, VideoSort, View, VizReturn, Zone, rows_key,
 };
 use crate::actions::{Action, MenuItem, shortcut_for};
 use crate::gfx::RectF;
@@ -21,7 +21,7 @@ fn home_nav() -> NavEntry {
 }
 
 /// The views the digit keys go to.
-const DIGITS: [View; 7] = [
+const DIGITS: [View; 8] = [
     View::Albums,
     View::Artists,
     View::Tracks,
@@ -29,6 +29,7 @@ const DIGITS: [View; 7] = [
     View::Queue,
     View::NowPlaying,
     View::Visualizer,
+    View::Videos,
 ];
 
 impl Ui {
@@ -483,10 +484,7 @@ impl Ui {
         let bx = x - g.m.body.x;
         // The buttons of the empty-library message.
         if let Some(row) = rows.rows.first().filter(|r| matches!(r.kind, RowKind::Message(..))) {
-            if ctx.lib.track_count() == 0
-                && self.lib.detail.is_none()
-                && matches!(view, View::Albums | View::Artists | View::Tracks)
-            {
+            if self.empty_view(ctx) && self.lib.detail.is_none() {
                 let rect = RectF::new(g.m.body.x, g.m.body.y + row.y - self.lib.scroll, g.m.body.w, row.h);
                 for b in self.message_buttons(rect) {
                     if b.rect.contains(x, y) {
@@ -522,6 +520,11 @@ impl Ui {
                         let (cx, cy) = (cw - 30.0 * s, cw - 30.0 * s);
                         (lx - cx).abs() < 26.0 * s && (ly - cy).abs() < 26.0 * s
                     }
+                    EntKind::Video { .. } if !rows.video_list => {
+                        let (cw, ch) = (g.m.vcard_w(), g.m.vcard_poster_h());
+                        (lx - cw * 0.5).abs() < 28.0 * s && (ly - ch * 0.5).abs() < 28.0 * s
+                    }
+                    EntKind::Video { .. } => lx < 84.0 * s,
                     EntKind::Track { .. } | EntKind::PlEntry { .. } | EntKind::Queue(_) => lx < 52.0 * s,
                     _ => false,
                 };
@@ -1035,6 +1038,24 @@ impl Ui {
             (View::Tracks | View::Albums, None, 0) => {
                 out.push(Action::Lib(LibAction::Play(Scope::AllTracks, Enqueue::ShuffleNow)))
             }
+            (View::Videos, None, 0) => {
+                self.lib.video_list = !self.lib.video_list;
+                self.lib.sel = None;
+                self.lib.scroll = 0.0;
+                self.dirty = true;
+            }
+            (View::Videos, None, 1) => {
+                // Title, then newest first, then longest first.
+                let (sort, asc) = match (self.lib.video_sort, self.lib.video_asc) {
+                    (VideoSort::Title, _) => (VideoSort::Added, false),
+                    (VideoSort::Added, _) => (VideoSort::Length, false),
+                    (VideoSort::Length, _) => (VideoSort::Title, true),
+                };
+                self.lib.video_sort = sort;
+                self.lib.video_asc = asc;
+                self.lib.scroll = 0.0;
+                self.dirty = true;
+            }
             (View::NowPlaying, None, 0) => self.show_view(View::Albums),
             (_, None, 10) => out.push(Action::Lib(LibAction::AddFolder)),
             (_, None, 11) => out.push(Action::OpenFile),
@@ -1118,6 +1139,12 @@ impl Ui {
                 Enqueue::Now => out.push(Action::PlayItem(id)),
                 _ => out.push(Action::Lib(LibAction::QueueToNext(id))),
             },
+            EntKind::Video { id, pos } => match how {
+                Enqueue::Now => {
+                    out.push(Action::Lib(LibAction::Play(Scope::ListFrom(pos as u32), Enqueue::Now)))
+                }
+                h => out.push(Action::Lib(LibAction::Play(Scope::Video(id), h))),
+            },
         }
         let _ = model;
     }
@@ -1132,7 +1159,7 @@ impl Ui {
                     out.push(Action::Lib(LibAction::Play(Scope::Album(a.id), Enqueue::Now)));
                 }
             }
-            EntKind::Track { pos, .. } => {
+            EntKind::Track { pos, .. } | EntKind::Video { pos, .. } => {
                 out.push(Action::Lib(LibAction::Play(Scope::ListFrom(pos as u32), Enqueue::Now)))
             }
             EntKind::PlEntry { pl, idx } => {
@@ -1228,7 +1255,7 @@ impl Ui {
                 self.show_view(View::Search);
                 return;
             }
-            Key::Char(c @ '1'..='7') if plain && !mods.shift => {
+            Key::Char(c @ '1'..='8') if plain && !mods.shift => {
                 self.show_view(DIGITS[(*c as u8 - b'1') as usize]);
                 return;
             }

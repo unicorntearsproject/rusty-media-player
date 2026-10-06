@@ -1,6 +1,6 @@
 //! Where everything of the library screen is, in pixels: the rail, the header, the bar, the columns of a track row, the hero
 //! block's buttons. Computed from the window size, the view and the data; shared by drawing and hit testing.
-use super::{Detail, LibCtx, Metrics, View};
+use super::{Detail, LibCtx, Metrics, VideoSort, View};
 use crate::font::Face;
 use crate::gfx::RectF;
 use crate::icon::Icon;
@@ -105,12 +105,13 @@ pub(crate) struct Geom {
 }
 
 /// The rail's entries, top to bottom (a `None` is a divider).
-pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 9] = [
+pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 10] = [
     Some((View::Search, "Search", Icon::Search, "/")),
     Some((View::NowPlaying, "Now playing", Icon::AudioLines, "6")),
     Some((View::Albums, "Albums", Icon::Disc3, "1")),
     Some((View::Artists, "Artists", Icon::MicVocal, "2")),
     Some((View::Tracks, "Tracks", Icon::Music, "3")),
+    Some((View::Videos, "Videos", Icon::Film, "8")),
     Some((View::Playlists, "Playlists", Icon::ListMusic, "4")),
     Some((View::Queue, "Queue", Icon::List, "5")),
     None,
@@ -196,7 +197,7 @@ impl Ui {
         let area_bottom = g.add_folder.y - 12.0 * s - if ctx.scan.is_some() { 34.0 * s } else { 0.0 };
         let items = NAV.iter().flatten().count() as f32;
         let dividers = NAV.iter().filter(|n| n.is_none()).count() as f32;
-        let nav_min = items * (24.0 * s + 2.0 * s) + dividers * 14.0 * s;
+        let nav_min = items * (22.0 * s + 2.0 * s) + dividers * 14.0 * s;
         let space = (area_bottom - y - nav_min - 12.0 * s - head).max(0.0);
         let mut reserved_rows = n_roots.min(3).min((space / step) as usize);
         // Folders beyond the rows need room for the "+N more" line too.
@@ -209,7 +210,7 @@ impl Ui {
             head + reserved_rows as f32 * step + if n_roots > reserved_rows { more_h } else { 0.0 } + 12.0 * s
         };
         let room = (area_bottom - reserve) - y - dividers * 14.0 * s;
-        let item_h = ((room / items) - 2.0 * s).clamp(24.0 * s, if compact { 44.0 * s } else { 42.0 * s });
+        let item_h = ((room / items) - 2.0 * s).clamp(22.0 * s, if compact { 44.0 * s } else { 42.0 * s });
         for it in NAV.iter() {
             match it {
                 Some((v, ..)) => {
@@ -272,6 +273,22 @@ impl Ui {
             }
             (View::Tracks | View::Albums, _) if ctx.lib.track_count() > 0 => {
                 alloc::vec![(0, "Shuffle all", Icon::Shuffle, true)]
+            }
+            (View::Videos, _) if ctx.lib.video_count() > 0 => {
+                let sort = match self.lib.video_sort {
+                    VideoSort::Title => "Sort: Title",
+                    VideoSort::Added => "Sort: Added",
+                    VideoSort::Length => "Sort: Length",
+                };
+                alloc::vec![
+                    (1, sort, Icon::ChevronDown, false),
+                    (
+                        0,
+                        if self.lib.video_list { "Posters" } else { "List" },
+                        if self.lib.video_list { Icon::LayoutGrid } else { Icon::List },
+                        false
+                    )
+                ]
             }
             _ => Vec::new(),
         };

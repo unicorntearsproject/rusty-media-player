@@ -28,6 +28,19 @@ fn placeholder() -> [(Rgba, Rgba); 3] {
     [(t::violet_600(), t::magenta_700()), (t::cyan_600(), t::violet_600()), (t::magenta_700(), t::ink_600())]
 }
 
+/// `1920x1080 \u{b7} h264` (what is known of the file).
+fn video_sub(v: &rvp_library::Video) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let size = v.size_text();
+    if !size.is_empty() {
+        parts.push(size);
+    }
+    if !v.vcodec.is_empty() {
+        parts.push(v.vcodec.clone());
+    }
+    parts.join(" \u{b7} ")
+}
+
 fn dur_text(us: i64) -> String {
     if us <= 0 { String::from("--:--") } else { format_time(us) }
 }
@@ -116,6 +129,43 @@ impl Ui {
                 fb.stroke_rrect(r, radius, 1.0 * s, fade(t::white(), 0.10), a);
                 let size = (r.w / s * 0.38).clamp(12.0, 64.0);
                 self.icon(fb, Icon::Music, r.cx(), r.cy(), size, t::pink_white(), 0.55 * a, false);
+            }
+        }
+    }
+
+    /// A video's poster frame in a 16:9 box (a placeholder with a film icon until it is made).
+    fn draw_poster(
+        &mut self,
+        fb: &mut FrameBuffer,
+        ctx: &LibCtx<'_>,
+        r: RectF,
+        radius: f32,
+        art: u64,
+        seed: u32,
+    ) {
+        let s = self.scale;
+        match self.thumb_rgba(ctx, art) {
+            Some(img) => {
+                let (iw, ih) = (img.0 as f32, img.1 as f32);
+                if (iw / ih - r.w / r.h).abs() < 0.05 {
+                    fb.blit_scaled_rounded(r, radius, &img.2, img.0, img.1);
+                } else {
+                    // Another shape: letterboxed on a dark tile.
+                    fb.fill_rrect(r, radius, Paint::Solid(t::ink_900()), 1.0);
+                    let k = (r.w / iw).min(r.h / ih);
+                    let (w, h) = (iw * k, ih * k);
+                    let dst = RectF::new(r.cx() - w * 0.5, r.cy() - h * 0.5, w, h);
+                    fb.blit_scaled_rounded(dst, radius.min(w * 0.5).min(h * 0.5), &img.2, img.0, img.1);
+                }
+                fb.stroke_rrect(r, radius, 1.0 * s, fade(t::white(), 0.10), 1.0);
+            }
+            None => {
+                let ph = placeholder();
+                let (c0, c1) = ph[seed as usize % ph.len()];
+                fb.fill_rrect(r, radius, Paint::Vertical(fade(c0, 0.55), fade(c1, 0.55)), 1.0);
+                fb.stroke_rrect(r, radius, 1.0 * s, fade(t::white(), 0.10), 1.0);
+                let size = (r.h / s * 0.34).clamp(12.0, 56.0);
+                self.icon(fb, Icon::Film, r.cx(), r.cy(), size, t::pink_white(), 0.55, false);
             }
         }
     }
@@ -530,6 +580,14 @@ impl Ui {
                     long_duration(lib.total_duration_us())
                 ),
             ),
+            View::Videos => (
+                "Videos".into(),
+                alloc::format!(
+                    "{} \u{b7} {}",
+                    plural(lib.video_count(), "video", "videos"),
+                    long_duration(lib.total_video_duration_us())
+                ),
+            ),
             View::Playlists => ("Playlists".into(), plural(lib.playlists().len(), "playlist", "playlists")),
             View::Queue => {
                 let total: i64 = model.playlist.iter().map(|e| e.duration_us).sum();
@@ -885,8 +943,7 @@ impl Ui {
         let s = self.scale;
         let cx = rect.cx();
         let mut y = rect.y + 70.0 * s;
-        if ctx.lib.track_count() == 0 && matches!(self.lib.view, View::Albums | View::Artists | View::Tracks)
-        {
+        if self.empty_view(ctx) {
             // The empty library: the logo.
             crate::logo::draw(fb, RectF::new(cx - 46.0 * s, y - 46.0 * s, 92.0 * s, 92.0 * s), 1.0);
         } else {
@@ -911,10 +968,7 @@ impl Ui {
             self.text(fb, Face::Sans, 14.0, cx - w * 0.5, y, &line, t::text_muted(), 1.0, 0.0);
             y += 22.0 * s;
         }
-        if ctx.lib.track_count() == 0
-            && matches!(self.lib.view, View::Albums | View::Artists | View::Tracks)
-            && self.lib.detail.is_none()
-        {
+        if self.empty_view(ctx) && self.lib.detail.is_none() {
             for b in self.message_buttons(rect) {
                 let h = LibHit::Button(b.id);
                 self.draw_pill(fb, &b, self.lib.hover == h, self.lib_pressed(h), false);
@@ -1052,6 +1106,136 @@ impl Ui {
                 }
                 let sub = self.fonts.fit(Face::Sans, 12.5 * s, &sub, cw);
                 self.text(fb, Face::Sans, 12.5, cover.x, ty + 20.0 * s, &sub, t::text_dim(), 1.0, 0.0);
+            }
+            EntKind::Video { id, .. } => {
+                let Some(v) = lib.video(id) else { return false };
+                let frac = ctx.resume.get(&id).copied().filter(|f| *f > 0.005 && *f < 0.995);
+                let now_here = model.now_track == Some(id);
+                if rows.is_list(ei) {
+                    self.row_background(fb, r, hover_row, selected, kb);
+                    let ph = r.h - 16.0 * s;
+                    let poster = RectF::new(r.x + 12.0 * s, r.y + 8.0 * s, ph * 16.0 / 9.0, ph);
+                    self.draw_poster(fb, ctx, poster, 8.0 * s, v.poster, v.id);
+                    let tx = poster.right() + 16.0 * s;
+                    let right = r.right() - 20.0 * s;
+                    let dur = dur_text(v.duration_us);
+                    let dw = self.text_w(Face::Mono, 12.0, &dur, 0.0);
+                    self.text(fb, Face::Mono, 12.0, right - dw, r.cy(), &dur, t::text_dim(), 1.0, 0.0);
+                    let mut room = right - dw - tx - 24.0 * s;
+                    if let Some(f) = frac {
+                        let bar = RectF::new(right - dw - 100.0 * s, r.cy() - 2.0 * s, 70.0 * s, 4.0 * s);
+                        fb.fill_rrect(bar, 2.0 * s, Paint::Solid(fade(t::white(), 0.18)), 1.0);
+                        fb.fill_rrect(
+                            RectF::new(bar.x, bar.y, (bar.w * f).max(4.0 * s), bar.h),
+                            2.0 * s,
+                            Paint::Horizontal(t::magenta_500(), t::violet_400()),
+                            1.0,
+                        );
+                        room -= 90.0 * s;
+                    }
+                    let title =
+                        self.fonts.fit(Face::SansMedium, 15.0 * s, v.display_title(), room.max(40.0 * s));
+                    self.text(
+                        fb,
+                        Face::SansMedium,
+                        15.0,
+                        tx,
+                        r.cy() - 9.0 * s,
+                        &title,
+                        if now_here { t::cyan_400() } else { t::text_strong() },
+                        1.0,
+                        0.0,
+                    );
+                    let sub = self.fonts.fit(Face::Sans, 12.5 * s, &video_sub(v), room.max(40.0 * s));
+                    self.text(fb, Face::Sans, 12.5, tx, r.cy() + 11.0 * s, &sub, t::text_dim(), 1.0, 0.0);
+                } else {
+                    let cw = r.w;
+                    let poster = RectF::new(r.x, r.y, cw, cw * 9.0 / 16.0);
+                    let lift = if hover_row || selected { 2.0 * s } else { 0.0 };
+                    let pr = RectF::new(
+                        poster.x - lift,
+                        poster.y - lift,
+                        poster.w + 2.0 * lift,
+                        poster.h + 2.0 * lift,
+                    );
+                    if hover_row || kb {
+                        fb.glow_rrect(pr, 14.0 * s, 18.0 * s, t::violet_500(), 0.45);
+                    }
+                    self.draw_poster(fb, ctx, pr, 12.0 * s, v.poster, v.id);
+                    // The length, bottom right, on a dark chip.
+                    let dur = dur_text(v.duration_us);
+                    let dw = self.text_w(Face::Mono, 11.0, &dur, 0.0);
+                    let chip = RectF::new(
+                        poster.right() - dw - 18.0 * s,
+                        poster.bottom() - 28.0 * s - if frac.is_some() { 4.0 * s } else { 0.0 },
+                        dw + 12.0 * s,
+                        20.0 * s,
+                    );
+                    fb.fill_rrect(chip, 6.0 * s, Paint::Solid(fade(t::ink_900(), 0.78)), 1.0);
+                    self.text(
+                        fb,
+                        Face::Mono,
+                        11.0,
+                        chip.x + 6.0 * s,
+                        chip.cy(),
+                        &dur,
+                        t::text_strong(),
+                        1.0,
+                        0.0,
+                    );
+                    // The resume marker: how far the film was watched, along the foot of the poster.
+                    if let Some(f) = frac {
+                        let bar = RectF::new(
+                            poster.x + 8.0 * s,
+                            poster.bottom() - 10.0 * s,
+                            poster.w - 16.0 * s,
+                            4.0 * s,
+                        );
+                        fb.fill_rrect(bar, 2.0 * s, Paint::Solid(fade(t::white(), 0.28)), 1.0);
+                        fb.fill_rrect(
+                            RectF::new(bar.x, bar.y, (bar.w * f).max(4.0 * s), bar.h),
+                            2.0 * s,
+                            Paint::Horizontal(t::magenta_500(), t::violet_400()),
+                            1.0,
+                        );
+                    }
+                    if hover_row || kb {
+                        fb.stroke_rrect(
+                            pr,
+                            12.0 * s,
+                            2.0 * s,
+                            if kb { t::focus_ring() } else { fade(t::violet_400(), 0.9) },
+                            1.0,
+                        );
+                        let pb =
+                            RectF::new(poster.cx() - 24.0 * s, poster.cy() - 24.0 * s, 48.0 * s, 48.0 * s);
+                        let pb = if play_hot { pb.inflate(2.0 * s) } else { pb };
+                        fb.glow_rrect(
+                            pb,
+                            pb.h * 0.5,
+                            16.0 * s,
+                            t::magenta_500(),
+                            if play_hot { 0.7 } else { 0.4 },
+                        );
+                        fb.fill_rrect(pb, pb.h * 0.5, Paint::Gradient(t::gradient_tears()), 1.0);
+                        self.icon(fb, Icon::Play, pb.cx() + 1.5 * s, pb.cy(), 22.0, t::white(), 1.0, true);
+                    }
+                    let ty = poster.bottom() + 20.0 * s;
+                    let title = self.fonts.fit(Face::SansMedium, 14.0 * s, v.display_title(), cw);
+                    self.text(
+                        fb,
+                        Face::SansMedium,
+                        14.0,
+                        poster.x,
+                        ty,
+                        &title,
+                        if now_here { t::cyan_400() } else { t::text_strong() },
+                        1.0,
+                        0.0,
+                    );
+                    let sub = self.fonts.fit(Face::Sans, 12.5 * s, &video_sub(v), cw);
+                    self.text(fb, Face::Sans, 12.5, poster.x, ty + 20.0 * s, &sub, t::text_dim(), 1.0, 0.0);
+                }
             }
             EntKind::Artist(ai) => {
                 let Some(a) = lib.artists().get(ai) else { return false };

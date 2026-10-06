@@ -64,6 +64,11 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
             v.extend(go_to(Some(id), ctx));
             v
         }
+        EntKind::Video { id, pos } => alloc::vec![
+            play("Play", "Enter", Scope::ListFrom(pos as u32), Enqueue::Now),
+            play("Play next", "Ctrl+Enter", Scope::Video(id), Enqueue::Next),
+            play("Add to queue", "Shift+Enter", Scope::Video(id), Enqueue::Append),
+        ],
         EntKind::Album(ai) => {
             let Some(a) = lib.albums().get(ai) else { return global_menu(ui, model, ctx) };
             let id = a.id;
