@@ -43,7 +43,8 @@ Status: milestones 0 to 11 done.
 - M11: the native desktop app `rusty-wave` for Linux and Windows (winit window, CPU-drawn pixels, cpal audio, native dialogs, drag and drop, full screen, HiDPI,
   MPRIS and the Windows media controls, system fonts for CJK, decoding on worker threads), the queue and playback position restored after a restart (all
   hosts), bounded cover memory, an original logo and icon set, and packaging: Flatpak, AppImage, .deb, .rpm, a Windows installer, the PWA, release
-  workflows. See [`docs/packaging.md`](docs/packaging.md).
+  workflows. See [`docs/packaging.md`](docs/packaging.md). The desktop app can check for and install updates (signed with the release key) and add itself to the
+  app menu: [`docs/updates.md`](docs/updates.md).
 
 Try it with `cargo xtask web && cargo xtask serve` and open http://127.0.0.1:8080/. Run the desktop app with `cargo run --release -p rvp-host-desktop -- <files or folders>` (`rusty-wave --help`). Read [`docs/PLAN.md`](docs/PLAN.md)
 for the architecture and the milestone list (M10 audio-first view, M11 desktop app and packaging, M12 Rusty

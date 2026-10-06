@@ -144,6 +144,15 @@ Nothing new is asked of a host. The app keeps the settings in `Storage` under `s
 
 The library index (`library/index`) is at format version 2: each track also carries its integrated loudness (from tags or measured) and the tags' album figure; version 1 loads without them.
 
+## AppServices (update checks, app-menu entry)
+
+Optional, `Host::app_services() -> Option<&mut dyn AppServices>` (default `None`). Only the desktop host offers it; with `None` the app shows none of it (no menu entries, no
+dialogs, nothing stored). The host does the work on its own threads; the app polls `update_state()` each tick: `Idle`, `Checking`, `UpToDate`, `Managed(text)` (updates come from elsewhere,
+the text says how), `Available { version, how: Install | Manual { message, url } }`, `Downloading { done, total }`, `Installing`, `Ready { version }`, `Failed(text)`.
+Requests: `check_updates`, `install_update`, `cancel_update`, `reset_update`, `restart` (the host quits after its window closes and then starts the new copy). `integration()` is `Unavailable`, `Off` or `On`
+and `set_integration(bool)` changes it. `unix_time()` is wall-clock seconds, because the host clock is monotonic. The app keeps what the user chose under `settings/app`
+(`auto_check`, `last_check`, `skipped`, `integration`) in `Storage`. `ScriptedServices` in `rvp-host` is the scripted implementation for tests. Details: [`updates.md`](updates.md).
+
 ## Rusty Bucket mapping (M12)
 
 `rvp-host-rb` implements these traits on Rusty Bucket's App API (`bucket_v0`, draft v0.3) through the raw bindings of `bucket-v0-sys`. The
@@ -183,3 +192,4 @@ and the OS's own now-playing state follow the audio stream, not the UI. Not chan
 - 2026-10-05: `Host::stable_ids`, the saved queue and position keys, the thumbnail budget (M11).
 - 2026-10-05: audio settings (crossfade, automatic level) under `settings/audio`; library index version 2 (loudness).
 - 2026-10-05: the Rusty Bucket mapping and its open questions (M12). No trait changed.
+- 2026-10-06: optional `AppServices` capability (update checks, app-menu entry); `settings/app` key.
