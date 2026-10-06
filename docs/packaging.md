@@ -87,7 +87,10 @@ stable alias:
 The version is `[workspace.package] version` in `Cargo.toml`. `dist` stamps it into the AppStream release entry, the man page, the `.iss`
 (`/DAppVersion`), file names and the PWA service worker (`<version>-<hash of the page's files>`). The release date is the last commit's date
 (`SOURCE_DATE_EPOCH` wins). To release: bump the version, commit, tag `v<version>`, push the tag; the workflow refuses a tag that does not
-match `Cargo.toml`.
+match `Cargo.toml`. When the files were built by a dry run and published from the maintainer's machine (`dist publish`), the tag run is skipped by the
+gate (the bucket already serves `rusty-wave-<version>-SHA256SUMS`): push the tag over SSH (`git tag -a v<version> <sha> -m ...; git push origin v<version>`),
+then create the release on that tag with the published files (`gh release create v<version> --verify-tag --title ... <files>`; no ref is created, so the
+token needs no `workflow` scope). If the gate lets a run through anyway, `gh run cancel` it.
 
 ## Shared metadata (`packaging/shared`, `packaging/icons`)
 

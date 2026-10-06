@@ -5,7 +5,9 @@
 #
 # Writes `run=true` or `run=false` to $GITHUB_OUTPUT. The other jobs `need: gate` and run only when `needs.gate.outputs.run == 'true'`; a
 # skipped workflow is still green. Skips when
-#   - a tag run: the release for that tag already has assets (a real release is not built twice; a manual dry run on the same commit does not count);
+#   - a tag run: the release for that tag already has assets, or `dist publish` already put that version's files on the distribution bucket
+#     (`rusty-wave-<version>-SHA256SUMS` is served): a real release is not built twice, and a tag pushed after a local publish never
+#     rebuilds. A manual dry run on the same commit does not count;
 #   - any other run: a successful run of the same workflow already exists for this commit (other than this one).
 # `FORCE=true` (the `force` input of a manual run) overrides it. If GitHub cannot be asked, it runs (fail open). Drafts are invisible to the
 # read-only token, so a tag run whose release exists only as a draft builds again, which is harmless: the release step updates the draft.
@@ -33,7 +35,14 @@ if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
   if [[ "$total" -gt 0 ]]; then
     decide false "the release for ${GITHUB_REF_NAME} already has ${total} assets"
   fi
-  decide true "no release with assets for ${GITHUB_REF_NAME}"
+  # The files may already be published from the maintainer's machine (the release is then created by hand on this tag).
+  base="${DIST_BASE_URL:-https://ut-software-dist.s3.amazonaws.com}"
+  ver="${GITHUB_REF_NAME#v}"
+  code=$(curl -s -o /dev/null -I -w '%{http_code}' --max-time 20 "${base}/rusty-wave-${ver}-SHA256SUMS" || true)
+  if [[ "$code" == "200" ]]; then
+    decide false "${ver} is already published at ${base} (rusty-wave-${ver}-SHA256SUMS)"
+  fi
+  decide true "no release with assets for ${GITHUB_REF_NAME} and nothing published at ${base} (HTTP ${code:-none})"
 fi
 
 if ! count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${GITHUB_SHA}&status=success&per_page=100" \
