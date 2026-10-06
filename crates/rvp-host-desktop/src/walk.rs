@@ -24,6 +24,7 @@ fn wanted(name: &str) -> bool {
     match ext {
         Some(e) => {
             rvp_library::AUDIO_EXTENSIONS.contains(&e.as_str())
+                || rvp_library::VIDEO_EXTENSIONS.contains(&e.as_str())
                 || IMAGE_EXTENSIONS.contains(&e.as_str())
                 || LIST_EXTENSIONS.contains(&e.as_str())
         }
@@ -96,6 +97,7 @@ mod tests {
         let album = base.join("Artist").join("Album");
         std::fs::create_dir_all(&album).unwrap();
         std::fs::create_dir_all(base.join(".hidden")).unwrap();
+        std::fs::create_dir_all(base.join("Films")).unwrap();
         for f in [
             "Artist/Album/01 a.mp3",
             "Artist/Album/cover.JPG",
@@ -103,12 +105,24 @@ mod tests {
             ".hidden/x.mp3",
             "root.flac",
             "list.m3u8",
+            "Films/night.webm",
+            "Films/day.MP4",
         ] {
             std::fs::write(base.join(f), b"x").unwrap();
         }
         let l = list_dir(&base);
         let paths: Vec<_> = l.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, ["Artist/Album/01 a.mp3", "Artist/Album/cover.JPG", "list.m3u8", "root.flac"]);
+        assert_eq!(
+            paths,
+            [
+                "Artist/Album/01 a.mp3",
+                "Artist/Album/cover.JPG",
+                "Films/day.MP4",
+                "Films/night.webm",
+                "list.m3u8",
+                "root.flac"
+            ]
+        );
         assert!(l.root.starts_with("dir:") && root_path(&l.root).unwrap() == base);
         assert!(l.files[0].id.ends_with("01 a.mp3") && l.files[0].size == 1);
         for f in [

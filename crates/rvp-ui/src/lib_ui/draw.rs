@@ -502,7 +502,13 @@ impl Ui {
             if !compact {
                 let label = alloc::format!(
                     "{} {} / {}",
-                    if sc.posters { "Posters" } else if sc.analysing { "Measuring" } else { "Scanning" },
+                    if sc.posters {
+                        "Posters"
+                    } else if sc.analysing {
+                        "Measuring"
+                    } else {
+                        "Scanning"
+                    },
                     sc.done,
                     sc.total.max(sc.done)
                 );
@@ -861,7 +867,7 @@ impl Ui {
         }
         let track = g.scroll_track;
         let max = total - h;
-        let thumb_h = (track.h * h / total).clamp(36.0 * s, track.h);
+        let thumb_h = (track.h * h / total).max(36.0 * s).min(track.h);
         let thumb_y = track.y + (track.h - thumb_h) * (self.lib.scroll / max).clamp(0.0, 1.0);
         let hot = self.lib.hover == LibHit::Scrollbar
             || matches!(self.lib.drag, Some(super::LibDrag::Scroll { .. }));

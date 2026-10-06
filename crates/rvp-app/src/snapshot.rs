@@ -73,7 +73,9 @@ impl App {
         );
         // The item playing: its id and place in the queue, and the title shown for it (null when nothing is loaded).
         j += &match m.playlist.iter().position(|e| e.current) {
-            Some(i) => format!("\"item\":{{\"id\":{},\"index\":{i},\"title\":{}}},", m.playlist[i].id, esc(&m.title)),
+            Some(i) => {
+                format!("\"item\":{{\"id\":{},\"index\":{i},\"title\":{}}},", m.playlist[i].id, esc(&m.title))
+            }
             None => "\"item\":null,".to_string(),
         };
         j += &format!("\"toast\":{},", ui.toast_text().map_or("null".to_string(), esc));

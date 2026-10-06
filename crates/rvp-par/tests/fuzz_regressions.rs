@@ -30,7 +30,12 @@ fn pipelined_equals_inline_on_regressions() {
             while let Some(f) = dec.next_frame() {
                 got.push(f);
             }
-            assert_eq!(want.len(), got.len(), "{}: frame counts differ with {threads} parse threads", path.display());
+            assert_eq!(
+                want.len(),
+                got.len(),
+                "{}: frame counts differ with {threads} parse threads",
+                path.display()
+            );
             for (i, (a, b)) in want.iter().zip(&got).enumerate() {
                 assert!(a == b, "{}: frame {i} differs with {threads} parse threads", path.display());
             }

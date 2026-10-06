@@ -11,7 +11,8 @@ use std::time::Instant;
 fn fnv(h: &mut u64, b: &[u8]) {
     let mut it = b.chunks_exact(8);
     for c in &mut it {
-        *h = (h.rotate_left(5) ^ u64::from_le_bytes(c.try_into().unwrap())).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        *h = (h.rotate_left(5) ^ u64::from_le_bytes(c.try_into().unwrap()))
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15);
     }
     for &x in it.remainder() {
         *h = (*h ^ x as u64).wrapping_mul(0x100_0000_01b3);

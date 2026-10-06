@@ -100,7 +100,10 @@ impl Pps {
         p.num_ref_idx_l1_default = l1 + 1;
         p.weighted_pred = r.read_flag()?;
         p.weighted_bipred_idc = r.read_bits(2)?;
-        p.pic_init_qp = 26i32.checked_add(r.read_se()?).filter(|q| (0..=51).contains(q)).ok_or(Error::Invalid("pic_init_qp out of range"))?;
+        p.pic_init_qp = 26i32
+            .checked_add(r.read_se()?)
+            .filter(|q| (0..=51).contains(q))
+            .ok_or(Error::Invalid("pic_init_qp out of range"))?;
         p.pic_init_qs = 26 + r.read_se()?;
         p.chroma_qp_index_offset = r.read_se()?;
         if !(-12..=12).contains(&p.chroma_qp_index_offset) {

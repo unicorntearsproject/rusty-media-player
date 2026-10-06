@@ -72,8 +72,10 @@ impl Ui {
             None => "\"detail\":null,".into(),
         };
         j += &format!(
-            "\"tracks\":{},\"albums\":{},\"artists\":{},\"playlists\":{},\"queue\":{},\"viz_on\":{},\"viz_info\":{},",
+            "\"tracks\":{},\"videos\":{},\"posters\":{},\"albums\":{},\"artists\":{},\"playlists\":{},\"queue\":{},\"viz_on\":{},\"viz_info\":{},",
             lib.track_count(),
+            lib.video_count(),
+            lib.all_videos().iter().filter(|v| v.poster != 0).count(),
             lib.albums().len(),
             lib.artists().len(),
             lib.playlists().len(),
@@ -182,8 +184,14 @@ impl Ui {
                         ("plentry", e.title.clone().unwrap_or_else(|| e.path.clone()), idx as i64)
                     }
                 };
+                let resume = match e.kind {
+                    EntKind::Video { id, .. } => {
+                        ctx.resume.get(&id).map_or(String::new(), |f| format!(",\"resume\":{f:.3}"))
+                    }
+                    _ => String::new(),
+                };
                 Some(format!(
-                    "{{\"i\":{i},\"kind\":\"{kind}\",\"id\":{id},\"label\":{},\"rect\":{}}}",
+                    "{{\"i\":{i},\"kind\":\"{kind}\",\"id\":{id},\"label\":{},\"rect\":{}{resume}}}",
                     esc(&label),
                     rect(*r)
                 ))

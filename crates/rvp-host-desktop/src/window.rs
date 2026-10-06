@@ -497,10 +497,9 @@ impl ApplicationHandler for Handler {
                         && !event.repeat
                         && (mods.ctrl || mods.logo)
                         && matches!(key, rvp_host::Key::Char('v' | 'V'))
+                        && let Some(text) = clipboard_text()
                     {
-                        if let Some(text) = clipboard_text() {
-                            self.push(InputEvent::Paste(text));
-                        }
+                        self.push(InputEvent::Paste(text));
                     }
                     match event.state {
                         ElementState::Pressed => {

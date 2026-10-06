@@ -54,7 +54,12 @@ impl Rig {
     }
 
     fn saved(&self) -> String {
-        self.host.storage.0.get(SETUP_KEY).map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default()
+        self.host
+            .storage
+            .0
+            .get(SETUP_KEY)
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .unwrap_or_default()
     }
 }
 

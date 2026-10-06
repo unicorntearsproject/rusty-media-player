@@ -1,6 +1,8 @@
 //! Inputs the fuzzer (`fuzz/fuzz_targets/subs.rs`) once crashed on. Same driver as the fuzz target.
 use rvp_subs::pgs::PgsDecoder;
-use rvp_subs::{AssScript, CueList, decode_mkv_text, decode_mov_text, decode_wvtt_sample, parse, parse_srt, parse_vtt};
+use rvp_subs::{
+    AssScript, CueList, decode_mkv_text, decode_mov_text, decode_wvtt_sample, parse, parse_srt, parse_vtt,
+};
 
 #[test]
 fn fuzz_regressions_do_not_panic() {

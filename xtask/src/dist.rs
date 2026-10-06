@@ -134,7 +134,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .unwrap_or(cargo_version);
     let date = release_date(&root);
     let sign = if want_sign { Some(sign::resolve_key(&root, sign_key)?) } else { None };
-    let cx = Ctx { root, version, date, container, no_build, prepare_only, sign, repo_url, base_url, rustybucket };
+    let cx =
+        Ctx { root, version, date, container, no_build, prepare_only, sign, repo_url, base_url, rustybucket };
     fs::create_dir_all(cx.out()).map_err(|e| e.to_string())?;
     match target.as_str() {
         "linux-bin" => cx.linux_bin().map(|_| ()),

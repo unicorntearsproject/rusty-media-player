@@ -702,7 +702,7 @@ impl Ui {
         }
         let track = g.scroll_track;
         let total = self.lib.rows.as_ref().map_or(1.0, |r| r.total.max(1.0));
-        let thumb_h = (track.h * g.m.body.h / total).clamp(36.0 * self.scale, track.h);
+        let thumb_h = (track.h * g.m.body.h / total).max(36.0 * self.scale).min(track.h);
         let k = ((y - grab - track.y) / (track.h - thumb_h).max(1.0)).clamp(0.0, 1.0);
         self.lib.scroll = k * max;
     }
@@ -778,7 +778,7 @@ impl Ui {
                         let total = self.lib.rows.as_ref().map_or(1.0, |r| r.total.max(1.0));
                         let track = g.scroll_track;
                         let max = self.max_scroll(&g).max(1.0);
-                        let thumb_h = (track.h * g.m.body.h / total).clamp(36.0 * self.scale, track.h);
+                        let thumb_h = (track.h * g.m.body.h / total).max(36.0 * self.scale).min(track.h);
                         let thumb_y = track.y + (track.h - thumb_h) * (self.lib.scroll / max);
                         let grab =
                             if y >= thumb_y && y <= thumb_y + thumb_h { y - thumb_y } else { thumb_h * 0.5 };

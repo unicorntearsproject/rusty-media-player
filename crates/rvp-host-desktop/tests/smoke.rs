@@ -361,8 +361,8 @@ fn the_audio_settings_are_changed_from_the_keyboard_and_kept_for_the_next_run() 
     assert_eq!(num(&first, "target_lufs"), Some(-15.0), "{first}");
     assert_eq!(text(&first, "level_mode").as_deref(), Some("album"), "{first}");
     // It is in the data directory...
-    let saved =
-        std::fs::read_to_string(data.join("settings%2faudio.bin")).expect("settings/audio in the data directory");
+    let saved = std::fs::read_to_string(data.join("settings%2faudio.bin"))
+        .expect("settings/audio in the data directory");
     assert!(
         saved.contains("crossfade=1")
             && saved.contains("crossfade_secs=6")
@@ -493,10 +493,17 @@ fn playerctl_reads_and_drives_it_over_mpris() {
 
 /// Options every scripted run here shares: a data directory of its own, no sound, no media keys, a report.
 fn base(data: &Path, report: &Path) -> Vec<String> {
-    ["--data-dir", data.to_str().unwrap(), "--no-audio", "--no-media-keys", "--report", report.to_str().unwrap()]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "--data-dir",
+        data.to_str().unwrap(),
+        "--no-audio",
+        "--no-media-keys",
+        "--report",
+        report.to_str().unwrap(),
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 fn run_args(mut c: Vec<String>, rest: &[&str]) {
@@ -506,7 +513,8 @@ fn run_args(mut c: Vec<String>, rest: &[&str]) {
 
 /// The names of the library folders in a report (`"library_roots": ["Music", "Videos"]`), sorted.
 fn roots(report: &str) -> Vec<String> {
-    let at = report.find("\"library_roots\":").expect("library_roots in the report") + "\"library_roots\":".len();
+    let at =
+        report.find("\"library_roots\":").expect("library_roots in the report") + "\"library_roots\":".len();
     let rest = report[at..].trim_start().strip_prefix('[').expect("a list");
     let list = &rest[..rest.find(']').unwrap()];
     let mut names: Vec<String> =
@@ -553,7 +561,15 @@ fn the_first_run_adds_the_music_and_videos_folders_once() {
     for (i, (album, title)) in [("First", "One"), ("First", "Two"), ("Second", "Three")].iter().enumerate() {
         let f = music.join("Test Artist").join(format!("{i} {title}.flac"));
         let st = Command::new("ffmpeg")
-            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=1:sample_rate=44100"])
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=330:duration=1:sample_rate=44100",
+            ])
             .args(["-metadata", &format!("title={title}"), "-metadata", "artist=Test Artist"])
             .args(["-metadata", &format!("album={album}"), "-metadata", &format!("track={}", i + 1)])
             .arg(&f)
@@ -563,7 +579,8 @@ fn the_first_run_adds_the_music_and_videos_folders_once() {
     }
     std::fs::copy(fx.join("h264_aac.mp4"), videos.join("Clip.mp4")).unwrap();
     let cfg = with_user_dirs(&dir, &music, &videos);
-    let (data, r1, r2, r3) = (dir.join("data"), dir.join("r1.json"), dir.join("r2.json"), dir.join("r3.json"));
+    let (data, r1, r2, r3) =
+        (dir.join("data"), dir.join("r1.json"), dir.join("r2.json"), dir.join("r3.json"));
     let run = |report: &Path| {
         let mut c = rvp(&[]);
         // `rvp(&[])` has no arguments of its own: add ours and point the user directories at the folders above.
@@ -596,7 +613,8 @@ fn the_first_run_adds_the_music_and_videos_folders_once() {
     assert_eq!(roots(&third), ["Music", "Videos"], "{third}");
     // And a user who removed them all does not get them back (the library is empty, the first-run step is done): covered by the app's
     // own tests (`setup.rs`); here the saved choice is what matters.
-    let saved = std::fs::read_to_string(data.join("settings%2fsetup.bin")).expect("settings/setup in the data directory");
+    let saved = std::fs::read_to_string(data.join("settings%2fsetup.bin"))
+        .expect("settings/setup in the data directory");
     assert!(saved.contains("folders=done"), "{saved}");
     std::fs::remove_dir_all(dir).ok();
 }
@@ -615,13 +633,27 @@ fn ctrl_comma_opens_settings_and_the_theme_dialog_is_one_step_further() {
     let a = std::fs::read_to_string(report("a")).unwrap();
     assert_eq!(text(&a, "dialog").as_deref(), Some("Settings"), "{a}");
     // Escape closes it.
-    run_args(base(&data, &report("b")), &["--press", "1:ctrl+,", "--press", "2:Escape", "--exit-after", "3.5"]);
+    run_args(
+        base(&data, &report("b")),
+        &["--press", "1:ctrl+,", "--press", "2:Escape", "--exit-after", "3.5"],
+    );
     let b = std::fs::read_to_string(report("b")).unwrap();
     assert!(b.contains("\"dialog\": null"), "{b}");
     // The keyboard starts on the Close button (the primary one, the last); Down wraps to the first, Audio settings, and on to Theme.
     run_args(
         base(&data, &report("c")),
-        &["--press", "1:ctrl+,", "--press", "1.5:Down", "--press", "2:Down", "--press", "2.5:Enter", "--exit-after", "4"],
+        &[
+            "--press",
+            "1:ctrl+,",
+            "--press",
+            "1.5:Down",
+            "--press",
+            "2:Down",
+            "--press",
+            "2.5:Enter",
+            "--exit-after",
+            "4",
+        ],
     );
     let c = std::fs::read_to_string(report("c")).unwrap();
     assert_eq!(text(&c, "dialog").as_deref(), Some("Theme"), "{c}");

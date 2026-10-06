@@ -6,8 +6,8 @@ const DB_NAME = "rvp-library";
 const KV = "kv";
 const HANDLES = "handles";
 
-/** What the library indexes (the Rust side filters again): audio files, folder pictures and playlist files. */
-const WANTED = /\.(mp3|flac|ogg|oga|opus|wav|m4a|m4b|aac|mka|jpe?g|png|m3u8?|pls)$/i;
+/** What the library indexes (the Rust side filters again): audio and video files, folder pictures and playlist files. */
+const WANTED = /\.(mp4|m4v|mkv|webm|mp3|flac|ogg|oga|opus|wav|m4a|m4b|aac|mka|jpe?g|png|m3u8?|pls)$/i;
 
 /** Big values (the library index and thumbnails) in IndexedDB, mirrored in a Map so a new player instance starts with them. */
 export class RvpStore {

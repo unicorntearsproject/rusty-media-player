@@ -4,10 +4,10 @@ use crate::font::Face;
 use crate::gfx::{FrameBuffer, Paint, RectF, fade};
 use crate::icon::Icon;
 use crate::model::{MediaState, UiModel, format_time};
+use crate::tk as t;
 use crate::ui::{Btn, Layout, Panel, Target, Ui};
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::tk as t;
 use theme::Rgba;
 
 const CLEAR: Rgba = Rgba::new(7, 6, 13, 0);
@@ -685,7 +685,8 @@ impl Ui {
         fb.shadow_rrect(r, 8.0 * s, 4.0 * s, 12.0 * s, Rgba::new(5, 2, 15, 140), 1.0);
         fb.fill_rrect(r, 8.0 * s, Paint::Solid(t::ink_700()), 1.0);
         fb.stroke_rrect(r, 8.0 * s, 1.0 * s, t::ink_500(), 1.0);
-        let x = self.text(fb, Face::SansMedium, 12.5, r.x + 12.0 * s, r.cy(), &label, t::text_body(), 1.0, 0.0);
+        let x =
+            self.text(fb, Face::SansMedium, 12.5, r.x + 12.0 * s, r.cy(), &label, t::text_body(), 1.0, 0.0);
         let chip = RectF::new(x + 10.0 * s, r.cy() - 9.0 * s, kw + 12.0 * s, 18.0 * s);
         fb.fill_rrect(chip, 5.0 * s, Paint::Solid(fade(t::cyan_500(), 0.14)), 1.0);
         self.text(fb, Face::MonoBold, 11.0, chip.x + 6.0 * s, chip.cy(), key, t::cyan_400(), 1.0, 0.0);

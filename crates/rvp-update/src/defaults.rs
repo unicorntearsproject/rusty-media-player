@@ -76,9 +76,7 @@ pub fn is_default(text: &str, desktop_id: &str, mime: &str) -> bool {
         let l = l.trim();
         if l.starts_with('[') {
             in_section = l == "[Default Applications]";
-        } else if in_section
-            && let Some(v) = l.strip_prefix(&format!("{mime}="))
-        {
+        } else if in_section && let Some(v) = l.strip_prefix(&format!("{mime}=")) {
             return v.split(';').map(str::trim).find(|a| !a.is_empty()) == Some(desktop_id);
         }
     }
@@ -87,10 +85,9 @@ pub fn is_default(text: &str, desktop_id: &str, mime: &str) -> bool {
 
 /// `$XDG_CONFIG_HOME` (or `~/.config`).
 pub fn config_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").filter(|v| !v.is_empty()).map(|h| PathBuf::from(h).join(".config")))
+    std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| {
+        std::env::var_os("HOME").filter(|v| !v.is_empty()).map(|h| PathBuf::from(h).join(".config"))
+    })
 }
 
 /// Make the app the default for `mimes` in the user's `mimeapps.list` under `config_home`. The file is written in one step (a temporary
@@ -118,7 +115,9 @@ pub fn open_windows_default_apps() -> io::Result<()> {
         .args(["/C", "start", "", "ms-settings:defaultapps?registeredAppUser=Rusty%20Wave"])
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .status()
-        .and_then(|s| if s.success() { Ok(()) } else { Err(io::Error::other("Windows would not open its settings")) })
+        .and_then(|s| {
+            if s.success() { Ok(()) } else { Err(io::Error::other("Windows would not open its settings")) }
+        })
 }
 
 /// Not Windows.
@@ -143,11 +142,20 @@ pub fn set_macos_defaults(bundle_id: &str, extensions: &[&str]) -> io::Result<us
     #[link(name = "CoreServices", kind = "framework")]
     unsafe extern "C" {
         static kUTTagClassFilenameExtension: CFStringRef;
-        fn UTTypeCreatePreferredIdentifierForTag(class: CFStringRef, tag: CFStringRef, conforming: CFStringRef) -> CFStringRef;
-        fn LSSetDefaultRoleHandlerForContentType(content_type: CFStringRef, roles: u32, handler: CFStringRef) -> i32;
+        fn UTTypeCreatePreferredIdentifierForTag(
+            class: CFStringRef,
+            tag: CFStringRef,
+            conforming: CFStringRef,
+        ) -> CFStringRef;
+        fn LSSetDefaultRoleHandlerForContentType(
+            content_type: CFStringRef,
+            roles: u32,
+            handler: CFStringRef,
+        ) -> i32;
     }
     let cf = |s: &str| -> io::Result<CFStringRef> {
-        let c = CString::new(s).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "a NUL in a name"))?;
+        let c =
+            CString::new(s).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "a NUL in a name"))?;
         // SAFETY: `c` is a valid NUL-terminated string for the call; the result is released by the caller.
         let r = unsafe { CFStringCreateWithCString(kCFAllocatorDefault, c.as_ptr(), UTF8) };
         if r.is_null() { Err(io::Error::other("out of memory")) } else { Ok(r) }
@@ -157,7 +165,9 @@ pub fn set_macos_defaults(bundle_id: &str, extensions: &[&str]) -> io::Result<us
     for ext in extensions {
         let tag = cf(ext)?;
         // SAFETY: both strings are valid CFStrings; a null result (an unknown extension) is handled.
-        let uti = unsafe { UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, tag, std::ptr::null()) };
+        let uti = unsafe {
+            UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, tag, std::ptr::null())
+        };
         // SAFETY: `tag` was created above and is not used again.
         unsafe { CFRelease(tag) };
         if uti.is_null() {
@@ -203,7 +213,8 @@ mod tests {
         assert!(t.contains(&format!("video/mp4={ID};mpv.desktop;vlc.desktop;\n")), "{t}");
         assert!(t.contains("image/png=eog.desktop;\n"), "{t}");
         // A new type lands inside the section, not in the next one.
-        let sect = t.split("[Default Applications]").nth(1).unwrap().split("[Removed Associations]").next().unwrap();
+        let sect =
+            t.split("[Default Applications]").nth(1).unwrap().split("[Removed Associations]").next().unwrap();
         assert!(sect.contains(&format!("audio/mpeg={ID};")), "{t}");
         assert!(t.contains("[Removed Associations]\naudio/mpeg=x.desktop;\n"), "{t}");
     }
@@ -215,7 +226,11 @@ mod tests {
         assert_eq!(once, twice);
         assert_eq!(twice.matches(ID).count(), 1);
         // Already behind others: it moves to the front.
-        let behind = with_defaults(&format!("[Default Applications]\nvideo/mp4=a.desktop;{ID};\n"), ID, &["video/mp4"]);
+        let behind = with_defaults(
+            &format!("[Default Applications]\nvideo/mp4=a.desktop;{ID};\n"),
+            ID,
+            &["video/mp4"],
+        );
         assert!(behind.contains(&format!("video/mp4={ID};a.desktop;\n")), "{behind}");
     }
 

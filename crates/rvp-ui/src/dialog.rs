@@ -8,11 +8,11 @@ use crate::actions::Action;
 use crate::font::Face;
 use crate::gfx::{FrameBuffer, Paint, RectF, fade};
 use crate::icon::Icon;
+use crate::tk as t;
 use crate::ui::Ui;
 use alloc::string::String;
 use alloc::vec::Vec;
 use rvp_host::{InputEvent, Key, Modifiers, PointerButton};
-use crate::tk as t;
 
 /// A button.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,7 +208,8 @@ impl Ui {
         let close =
             RectF::new(card.right() - pad - 32.0 * s + 8.0 * s, card.y + 18.0 * s, 36.0 * s, 36.0 * s);
         let progress = spec.progress.map(|_| RectF::new(x0, card.y + progress_y * s, inner, 8.0 * s));
-        let input = spec.input.as_ref().map(|_| RectF::new(x0, card.y + (input_y + 20.0) * s, inner, 40.0 * s));
+        let input =
+            spec.input.as_ref().map(|_| RectF::new(x0, card.y + (input_y + 20.0) * s, inner, 40.0 * s));
         let toggles = toggle_ys
             .iter()
             .map(|ty| {
@@ -411,7 +412,11 @@ impl Ui {
         self.dialog_sync_focus(spec);
         let g = self.dialog_geom(spec);
         let card = g.card;
-        fb.fill_rect_paint(RectF::new(0.0, 0.0, self.w as f32, self.h as f32), Paint::Solid(t::ink_900()), 0.6);
+        fb.fill_rect_paint(
+            RectF::new(0.0, 0.0, self.w as f32, self.h as f32),
+            Paint::Solid(t::ink_900()),
+            0.6,
+        );
         fb.shadow_rrect(card, 22.0 * s, 20.0 * s, 56.0 * s, theme::Rgba::new(5, 2, 15, 190), 1.0);
         fb.fill_rrect(card, 22.0 * s, Paint::Solid(t::ink_800()), 1.0);
         fb.stroke_rrect(card, 22.0 * s, 1.0 * s, t::border_subtle(), 1.0);
@@ -464,14 +469,21 @@ impl Ui {
                 self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &ph, t::text_disabled(), 1.0, 0.0);
             } else {
                 // Keep the end in view: drop characters from the front until it fits.
-                let mut shown: String = inp.text.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
-                while self.text_w(Face::Sans, 14.0, &shown, 0.0) * 1.0 > room / s && shown.chars().count() > 1 {
+                let mut shown: String =
+                    inp.text.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
+                while self.text_w(Face::Sans, 14.0, &shown, 0.0) * 1.0 > room / s && shown.chars().count() > 1
+                {
                     shown = shown.chars().skip(1).collect();
                 }
                 let w = self.text_w(Face::Sans, 14.0, &shown, 0.0);
                 self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &shown, t::text_strong(), 1.0, 0.0);
                 // The caret, steady (no blinking: nothing here flashes).
-                fb.fill_rrect(RectF::new(r.x + 14.0 * s + w * s + 2.0 * s, r.cy() - 9.0 * s, 1.5 * s, 18.0 * s), 0.5 * s, Paint::Solid(t::cyan_400()), 0.9);
+                fb.fill_rrect(
+                    RectF::new(r.x + 14.0 * s + w * s + 2.0 * s, r.cy() - 9.0 * s, 1.5 * s, 18.0 * s),
+                    0.5 * s,
+                    Paint::Solid(t::cyan_400()),
+                    0.9,
+                );
             }
         }
         // The switches.

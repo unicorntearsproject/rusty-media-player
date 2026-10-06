@@ -293,7 +293,8 @@ impl Ctx {
             return Err(format!("manifest: no release files in {} (build them first)", dir.display()));
         }
         let fpr = sign::resolve_public_fpr(&self.root)?;
-        let text = render(&self.version, &self.date, &fpr, &self.versioned_base(), &self.latest_base(), &entries);
+        let text =
+            render(&self.version, &self.date, &fpr, &self.versioned_base(), &self.latest_base(), &entries);
         let path = dir.join(MANIFEST_NAME);
         write(&path, text.as_bytes())?;
         if self.sign.is_some() {
@@ -350,7 +351,7 @@ mod tests {
       "size": 123,
       "sha256": "{sha}",
       "signature_url": "https://h.example/d/rusty-wave-0.0.3-x86_64.AppImage.asc",
-      "zsync_url": "https://h.example/d/rusty-wave-latest-x86_64.AppImage.zsync"
+      "zsync_url": "https://h.example/d/latest/rusty-wave-latest-x86_64.AppImage.zsync"
     }},
     "linux-deb": {{
       "arch": "amd64",

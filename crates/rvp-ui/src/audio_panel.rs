@@ -11,6 +11,7 @@ use crate::font::Face;
 use crate::gfx::{FrameBuffer, Paint, RectF, fade};
 use crate::icon::Icon;
 use crate::model::UiModel;
+use crate::tk as t;
 use crate::ui::Ui;
 use alloc::format;
 use alloc::string::String;
@@ -19,7 +20,6 @@ use rvp_core::settings::{
     CROSSFADE_MAX_SECS, CROSSFADE_MIN_SECS, LevelMode, TARGET_MAX_LUFS, TARGET_MIN_LUFS,
 };
 use rvp_host::{InputEvent, Key, Modifiers, PointerButton};
-use crate::tk as t;
 
 /// One control of the panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -390,7 +390,11 @@ impl Ui {
         let s = self.scale;
         let g = self.audio_panel_geom();
         let card = g.card;
-        fb.fill_rect_paint(RectF::new(0.0, 0.0, self.w as f32, self.h as f32), Paint::Solid(t::ink_900()), 0.6);
+        fb.fill_rect_paint(
+            RectF::new(0.0, 0.0, self.w as f32, self.h as f32),
+            Paint::Solid(t::ink_900()),
+            0.6,
+        );
         fb.shadow_rrect(card, 22.0 * s, 20.0 * s, 56.0 * s, theme::Rgba::new(5, 2, 15, 190), 1.0);
         fb.fill_rrect(card, 22.0 * s, Paint::Solid(t::ink_800()), 1.0);
         fb.stroke_rrect(card, 22.0 * s, 1.0 * s, t::border_subtle(), 1.0);

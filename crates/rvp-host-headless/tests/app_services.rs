@@ -3,8 +3,8 @@
 //! once-a-day rule, and that nothing happens (and nothing is shown) on a host without the services. No media files are needed.
 use rvp_app::{APP_SETTINGS_KEY, App, IntegrationChoice};
 use rvp_host::{
-    DefaultOutcome, DefaultPlayer, HostClock, InputEvent, Integration, Key, MEDIA_TYPES, Modifiers, PointerButton,
-    ScriptedServices, UpdateHow, UpdateState,
+    DefaultOutcome, DefaultPlayer, HostClock, InputEvent, Integration, Key, MEDIA_TYPES, Modifiers,
+    PointerButton, ScriptedServices, UpdateHow, UpdateState,
 };
 use rvp_host_headless::{DefaultCodecs, UiHost};
 use rvp_ui::UiConfig;
