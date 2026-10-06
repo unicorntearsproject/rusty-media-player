@@ -109,6 +109,7 @@ pub fn shortcut_path() -> Option<PathBuf> {
 /// Make the Start menu shortcut to `exe` (through the system's own scripting host, which writes a proper shell link).
 #[cfg(windows)]
 pub fn create_shortcut(lnk: &Path, exe: &Path) -> io::Result<()> {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
     if let Some(d) = lnk.parent() {
         std::fs::create_dir_all(d)?;
@@ -130,13 +131,18 @@ pub fn create_shortcut(lnk: &Path, exe: &Path) -> io::Result<()> {
         ])
         .env("RW_LNK", lnk)
         .env("RW_EXE", exe)
-        .output()?;
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW: no console flashes up
+        .output()
+        .map_err(|e| io::Error::other(format!("could not run PowerShell to make the shortcut: {e}")))?;
     if out.status.success() && lnk.exists() {
         Ok(())
     } else {
+        let why = String::from_utf8_lossy(&out.stderr);
+        let why = why.trim();
         Err(io::Error::other(format!(
-            "could not create the shortcut: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+            "PowerShell could not create the Start menu shortcut ({}){}",
+            out.status,
+            if why.is_empty() { String::new() } else { format!(": {why}") }
         )))
     }
 }

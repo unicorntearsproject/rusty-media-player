@@ -272,10 +272,15 @@ fn set_windows(on: bool, exe: &Path) -> std::io::Result<()> {
     let mut reg = windows::HkcuRegistry;
     let lnk = windows::shortcut_path();
     let r = if on {
-        windows::add_associations(&mut reg, exe).and_then(|()| match &lnk {
+        let added = windows::add_associations(&mut reg, exe).and_then(|()| match &lnk {
             Some(l) => windows::create_shortcut(l, exe),
             None => Ok(()),
-        })
+        });
+        if added.is_err() {
+            // All or nothing: a half-added entry would read as "in the menu" without being usable.
+            let _ = windows::remove_associations(&mut reg);
+        }
+        added
     } else {
         windows::remove_associations(&mut reg)
             .and_then(|()| lnk.as_deref().map_or(Ok(()), windows::remove_shortcut))
