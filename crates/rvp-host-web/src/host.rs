@@ -223,6 +223,8 @@ pub struct WebHost {
     pub media: Option<crate::media::WebNowPlaying>,
     /// The visualizer tap, while the page has it switched on.
     pub tap: Option<WebTap>,
+    /// Fetching a link (the theme dialog), through the page.
+    pub net: crate::net::WebNet,
 }
 
 impl Host for WebHost {
@@ -265,6 +267,9 @@ impl Host for WebHost {
     }
     fn library(&mut self) -> Option<&mut dyn rvp_host::Library> {
         Some(&mut self.library)
+    }
+    fn net(&mut self) -> Option<&mut dyn rvp_host::Net> {
+        Some(&mut self.net)
     }
     fn now_playing(&mut self) -> Option<&mut dyn rvp_host::NowPlaying> {
         self.media.as_mut().map(|m| m as &mut dyn rvp_host::NowPlaying)

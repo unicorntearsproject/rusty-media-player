@@ -15,6 +15,7 @@ mod library;
 mod restore;
 mod services;
 mod setup;
+mod theme_ui;
 mod snapshot;
 
 pub use restore::{POSITION_KEY, QUEUE_KEY, SavedItem, SavedQueue};
@@ -146,6 +147,8 @@ pub struct App {
     svc: services::Services,
     /// The first run and the last face.
     setup: setup::Setup,
+    /// The Theme dialog: the box, the preview, the fetching.
+    themeui: theme_ui::ThemeUi,
 }
 
 /// What was last told to the host's now-playing sink.
@@ -230,6 +233,7 @@ impl App {
             hint_rev: u64::MAX,
             svc: services::Services::default(),
             setup: setup::Setup::default(),
+            themeui: theme_ui::ThemeUi::default(),
             codecs,
         }
     }
@@ -797,6 +801,13 @@ impl App {
         H: Host<Video = FrameSink>,
         H::Source: 'static,
     {
+        // Pasted text goes to the Theme dialog's box while it is up.
+        if let InputEvent::Paste(text) = &ev {
+            if self.dialog_takes_text() {
+                self.dialog_paste(text, now);
+                return;
+            }
+        }
         if let InputEvent::Drop { id } = &ev {
             // Hosts resolve their own ids without waiting on anything external.
             match rvp_core::task::block_on(host.open(OpenRequest::Id(id.clone()))) {
@@ -828,6 +839,7 @@ impl App {
     {
         let t0 = host.clock().now_us();
         self.setup_tick(host);
+        self.theme_tick(host);
         self.pump(host);
         self.settings_tick(host);
         self.services_tick(host);
@@ -1113,7 +1125,8 @@ impl App {
             Action::Lib(a) => self.apply_lib(host, a, now),
             Action::ShowAudioSettings => self.ui.open_audio_settings(),
             Action::ShowSettings => self.show_settings(now),
-            Action::DialogChar(_) | Action::DialogBackspace => {}
+            Action::DialogChar(c) => self.dialog_char(c, now),
+            Action::DialogBackspace => self.dialog_backspace(now),
             Action::CheckForUpdates => self.check_for_updates(host, now),
             Action::ToggleIntegration => self.toggle_integration(host, now),
             Action::DialogButton(n) => self.dialog_button(host, n, now),

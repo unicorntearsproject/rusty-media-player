@@ -101,6 +101,8 @@ enum Screen {
     Integrate,
     /// Everything the user can set: theme, default player, app menu, updates, audio.
     Settings,
+    /// Paste a link or CSS, preview a theme, apply it or go back to Unicorn Tears.
+    Theme,
     /// "Set as default media player": the checklist of media types (`true` for the first-run offer, which can be declined for good).
     Default(bool),
 }
@@ -126,6 +128,10 @@ enum Btn {
     SetDefault,
     CheckAll,
     BackToSettings,
+    // The Theme dialog.
+    ThemePreview,
+    ThemeApply,
+    ThemeReset,
 }
 
 /// What a dialog switch does.
@@ -333,7 +339,7 @@ impl App {
     pub(crate) fn dialog_spec(&mut self) -> Option<DialogSpec> {
         let screen = self.svc.screen?;
         // Settings and what hangs off it work without the host's services (the audio and theme parts do); the rest needs them.
-        if !self.svc.cache.present && !matches!(screen, Screen::Settings) {
+        if !self.svc.cache.present && !matches!(screen, Screen::Settings | Screen::Theme) {
             self.svc.screen = None;
             return None;
         }
@@ -368,7 +374,11 @@ impl App {
             }
             Screen::Settings => {
                 spec.title = "Settings".into();
-                let ver = if c.version.is_empty() { env!("CARGO_PKG_VERSION").to_string() } else { c.version.clone() };
+                let ver = if c.version.is_empty() {
+                    env!("CARGO_PKG_VERSION").to_string()
+                } else {
+                    c.version.clone()
+                };
                 spec.body.push(format!("Rusty Wave {ver}"));
                 if let Some(n) = &self.svc.notice {
                     spec.body.push(n.clone());
@@ -391,6 +401,29 @@ impl App {
                     add("Check for updates\u{2026}", false, Btn::OpenUpdates);
                 }
                 add("Close", true, Btn::Close);
+            }
+            Screen::Theme => {
+                spec.title = "Theme".into();
+                spec.body = self.themeui.body(&self.themeui.active_name());
+                spec.input = Some(rvp_ui::dialog::DialogInput {
+                    label: "Link or CSS".into(),
+                    text: self.themeui.shown(),
+                    placeholder: "https://\u{2026} or :root { --background: #\u{2026} }".into(),
+                });
+                let busy = self.themeui.busy();
+                let has = self.themeui.has_candidate();
+                let mut preview = DialogButton::new(if busy { "Fetching\u{2026}" } else { "Preview" }, !has);
+                preview.enabled = !busy;
+                spec.buttons.push(preview);
+                buttons.push(Btn::ThemePreview);
+                let mut apply = DialogButton::new("Apply", has);
+                apply.enabled = has;
+                spec.buttons.push(apply);
+                buttons.push(Btn::ThemeApply);
+                spec.buttons.push(DialogButton::new("Reset to Unicorn Tears", false));
+                buttons.push(Btn::ThemeReset);
+                spec.buttons.push(DialogButton::new("Close", false));
+                buttons.push(Btn::Close);
             }
             Screen::Default(offer) => {
                 spec.compact = true;
@@ -427,11 +460,13 @@ impl App {
                         }
                         let any = self.svc.default_checked.iter().any(|&b| b);
                         let all = self.svc.default_checked.iter().all(|&b| b);
-                        let mut b = DialogButton::new(if silent { "Set as default" } else { "Continue" }, true);
+                        let mut b =
+                            DialogButton::new(if silent { "Set as default" } else { "Continue" }, true);
                         b.enabled = any;
                         spec.buttons.push(b);
                         buttons.push(Btn::SetDefault);
-                        spec.buttons.push(DialogButton::new(if all { "Uncheck all" } else { "Check all" }, false));
+                        spec.buttons
+                            .push(DialogButton::new(if all { "Uncheck all" } else { "Check all" }, false));
                         buttons.push(Btn::CheckAll);
                         if offer {
                             spec.buttons.push(DialogButton::new("No thanks", false));
@@ -584,8 +619,34 @@ impl App {
 
     /// The Theme dialog (see `theme_ui.rs`).
     fn open_theme(&mut self) {
-        self.svc.screen = None;
-        self.ui.show_toast("Theme is coming up.", self.now);
+        self.themeui.theme_opened_state();
+        self.svc.screen = Some(Screen::Theme);
+    }
+
+    /// The dialog on screen has a text box that takes typing and pasting.
+    pub(crate) fn dialog_takes_text(&self) -> bool {
+        self.svc.screen == Some(Screen::Theme)
+    }
+
+    pub(crate) fn dialog_char(&mut self, c: char, now: Timestamp) {
+        if self.dialog_takes_text() {
+            self.theme_char(c);
+            self.refresh_model(now);
+        }
+    }
+
+    pub(crate) fn dialog_backspace(&mut self, now: Timestamp) {
+        if self.dialog_takes_text() {
+            self.theme_backspace();
+            self.refresh_model(now);
+        }
+    }
+
+    pub(crate) fn dialog_paste(&mut self, text: &str, now: Timestamp) {
+        if self.dialog_takes_text() {
+            self.theme_paste(text);
+            self.refresh_model(now);
+        }
     }
 
     /// The menu entry: add the app to the app menu, or take it out.
@@ -635,6 +696,21 @@ impl App {
             Btn::OpenTheme => {
                 self.svc.notice = None;
                 self.open_theme();
+                self.refresh_model(now);
+                return;
+            }
+            Btn::ThemePreview => {
+                self.theme_preview(host);
+                self.refresh_model(now);
+                return;
+            }
+            Btn::ThemeApply => {
+                self.theme_apply(host, now);
+                self.refresh_model(now);
+                return;
+            }
+            Btn::ThemeReset => {
+                self.theme_reset(host);
                 self.refresh_model(now);
                 return;
             }
@@ -690,7 +766,7 @@ impl App {
                     }
                 }
             }
-            Btn::OpenAudio | Btn::OpenTheme => {}
+            Btn::OpenAudio | Btn::OpenTheme | Btn::ThemePreview | Btn::ThemeApply | Btn::ThemeReset => {}
             Btn::OpenDefault => {
                 self.svc.default_checked = alloc::vec![true; MEDIA_TYPES.len()];
                 self.svc.screen = Some(Screen::Default(false));
@@ -718,7 +794,13 @@ impl App {
                         self.svc.settings.default_player = IntegrationChoice::Done;
                         self.save_app_settings(host);
                         self.close_dialog(host);
-                        self.ui.show_toast(&format!("Rusty Wave now opens {}", plural(n.max(ids.len()), "kind of file", "kinds of files")), now);
+                        self.ui.show_toast(
+                            &format!(
+                                "Rusty Wave now opens {}",
+                                plural(n.max(ids.len()), "kind of file", "kinds of files")
+                            ),
+                            now,
+                        );
                     }
                     Ok(DefaultOutcome::UserMustConfirm(text)) => {
                         self.svc.settings.default_player = IntegrationChoice::Done;
@@ -772,6 +854,13 @@ impl App {
                 self.svc.settings.default_player = IntegrationChoice::Never;
                 self.save_app_settings(host);
             }
+            // Theme: an unapplied preview goes away; Settings is where it came from.
+            Some(Screen::Theme) => {
+                self.theme_closed();
+                self.svc.screen = Some(Screen::Settings);
+                self.refresh_model(now);
+                return;
+            }
             // The step-by-step dialogs of Settings go back to it; Settings itself closes.
             Some(Screen::Default(false)) if self.svc.notice.is_none() => {
                 self.svc.screen = Some(Screen::Settings);
@@ -788,6 +877,9 @@ impl App {
     where
         H: Host<Video = FrameSink>,
     {
+        if self.svc.screen == Some(Screen::Theme) {
+            self.theme_closed();
+        }
         self.svc.screen = None;
         self.svc.notice = None;
         if matches!(self.svc.cache.state, UpdateState::Ready { .. }) {

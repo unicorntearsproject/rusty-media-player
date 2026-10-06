@@ -1,0 +1,324 @@
+//! The video side of [`Library`]: the list, ordering, search, filing scan results, posters, and saving (`library/videos`).
+use crate::art::Thumb;
+use crate::fold::{fold, natural};
+use crate::index::Library;
+use crate::model::ArtId;
+use crate::video::{Video, VideoId, VideoInfo, poster_id};
+use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use rvp_core::Error;
+use rvp_host::FileEntry;
+
+/// Storage key of the videos.
+pub const VIDEOS_KEY: &str = "library/videos";
+const VIDEOS_MAGIC: &[u8; 4] = b"RVPV";
+const VIDEOS_VERSION: u8 = 1;
+
+/// How the video list is ordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VideoSort {
+    /// By title.
+    #[default]
+    Title,
+    /// By when the file was last changed (newest last when ascending).
+    Added,
+    /// By length.
+    Length,
+}
+
+impl Library {
+    /// Every remembered video file, including the ones that could not be read.
+    pub fn all_videos(&self) -> &[Video] {
+        &self.videos
+    }
+
+    /// Number of videos that are shown.
+    pub fn video_count(&self) -> usize {
+        self.videos.iter().filter(|v| !v.unreadable).count()
+    }
+
+    /// The video with `id`.
+    pub fn video(&self, id: VideoId) -> Option<&Video> {
+        self.videos.binary_search_by_key(&id, |v| v.id).ok().map(|i| &self.videos[i])
+    }
+
+    /// The shown videos in the given order.
+    pub fn sorted_videos(&self, by: VideoSort, ascending: bool) -> Vec<VideoId> {
+        let mut keyed: Vec<(String, VideoId)> = self
+            .videos
+            .iter()
+            .filter(|v| !v.unreadable)
+            .map(|v| {
+                let key = match by {
+                    VideoSort::Title => format!("{}\u{0}{:010}", natural(&fold(v.display_title())), v.id),
+                    VideoSort::Added => format!("{:020}\u{0}{:010}", v.mtime_ms.max(0), v.id),
+                    VideoSort::Length => format!("{:020}\u{0}{:010}", v.duration_us.max(0), v.id),
+                };
+                (key, v.id)
+            })
+            .collect();
+        keyed.sort();
+        if !ascending {
+            keyed.reverse();
+        }
+        keyed.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// The shown videos whose title or folder contains every word (already folded) of a search.
+    pub(crate) fn search_videos(&self, words: &[&str]) -> Vec<VideoId> {
+        self.videos
+            .iter()
+            .filter(|v| !v.unreadable)
+            .filter(|v| {
+                let hay = fold(&format!("{} {}", v.display_title(), v.path));
+                words.iter().all(|w| hay.contains(w))
+            })
+            .map(|v| v.id)
+            .collect()
+    }
+
+    /// Total length of the shown videos.
+    pub fn total_video_duration_us(&self) -> i64 {
+        self.videos.iter().filter(|v| !v.unreadable).map(|v| v.duration_us).sum()
+    }
+
+    /// File the result of reading the headers of video `entry` (a file of root `root`).
+    pub fn apply_video(&mut self, root: u16, entry: &FileEntry, result: Result<VideoInfo, Error>) {
+        let existing = self.videos.iter().position(|v| v.root == root && v.path == entry.path);
+        let id = match existing {
+            Some(i) => self.videos[i].id,
+            None => {
+                let id = self.next_id.max(1);
+                self.next_id = id + 1;
+                id
+            }
+        };
+        let mut v = Video {
+            id,
+            root,
+            path: entry.path.clone(),
+            size: entry.size,
+            mtime_ms: entry.mtime_ms,
+            title: String::new(),
+            duration_us: 0,
+            width: 0,
+            height: 0,
+            vcodec: String::new(),
+            acodec: String::new(),
+            poster: 0,
+            poster_tried: false,
+            unreadable: false,
+            src: entry.id.clone(),
+        };
+        match result {
+            Ok(i) => {
+                v.title = i.title;
+                v.duration_us = i.duration_us;
+                v.width = i.width;
+                v.height = i.height;
+                v.vcodec = i.vcodec;
+                v.acodec = i.acodec;
+            }
+            Err(_) => {
+                v.unreadable = true;
+                self.report.failed += 1;
+            }
+        }
+        match existing {
+            Some(i) => {
+                // A changed file keeps no poster (the id follows the file's time and size, so the old one is simply unused).
+                self.videos[i] = v;
+                self.report.changed += 1;
+            }
+            None => {
+                self.videos.push(v);
+                self.videos.sort_by_key(|v| v.id);
+                self.report.added += 1;
+            }
+        }
+        self.videos_dirty = true;
+    }
+
+    /// Videos that have no poster yet and can be opened now: `(id, what the host opens it with)`.
+    pub fn pending_posters(&self) -> Vec<(VideoId, String)> {
+        self.videos
+            .iter()
+            .filter(|v| !v.unreadable && v.poster == 0 && !v.poster_tried && !v.src.is_empty())
+            .map(|v| (v.id, v.src.clone()))
+            .collect()
+    }
+
+    /// File the poster made for video `id` (`None`: no frame could be made, and it is not tried again until the file changes).
+    pub fn set_poster(&mut self, id: VideoId, poster: Option<Thumb>) {
+        let Ok(i) = self.videos.binary_search_by_key(&id, |v| v.id) else { return };
+        match poster {
+            Some(t) => {
+                let v = &self.videos[i];
+                let art = poster_id(v.root, &v.path, v.mtime_ms, v.size);
+                self.insert_thumb(art, t);
+                self.videos[i].poster = art;
+            }
+            None => self.videos[i].poster_tried = true,
+        }
+        self.videos_dirty = true;
+        self.rev += 1;
+    }
+
+    /// Pictures the videos use (their posters).
+    pub(crate) fn poster_art(&self) -> impl Iterator<Item = ArtId> + '_ {
+        self.videos.iter().map(|v| v.poster).filter(|&a| a != 0)
+    }
+
+    /// True if the videos changed since [`Library::save_videos`] last ran.
+    pub fn videos_dirty(&self) -> bool {
+        self.videos_dirty
+    }
+
+    /// Drop the videos of root index `ri` and renumber the roots above it (a folder was forgotten).
+    pub(crate) fn remove_root_videos(&mut self, ri: usize) {
+        let before = self.videos.len();
+        self.videos.retain(|v| v.root as usize != ri);
+        for v in &mut self.videos {
+            if v.root as usize > ri {
+                v.root -= 1;
+            }
+        }
+        if self.videos.len() != before {
+            self.videos_dirty = true;
+        }
+    }
+
+    /// The videos as bytes, and mark them saved.
+    pub fn save_videos(&mut self) -> Vec<u8> {
+        self.videos_dirty = false;
+        let mut out = Vec::new();
+        out.extend_from_slice(VIDEOS_MAGIC);
+        out.push(VIDEOS_VERSION);
+        // The roots they refer to, by id, so a changed folder list cannot point a video at the wrong folder.
+        out.extend_from_slice(&(self.roots.len() as u16).to_le_bytes());
+        for r in &self.roots {
+            put_str(&mut out, &r.id);
+        }
+        out.extend_from_slice(&(self.videos.len() as u32).to_le_bytes());
+        for v in &self.videos {
+            out.extend_from_slice(&v.id.to_le_bytes());
+            out.extend_from_slice(&v.root.to_le_bytes());
+            put_str(&mut out, &v.path);
+            out.extend_from_slice(&v.size.to_le_bytes());
+            out.extend_from_slice(&v.mtime_ms.to_le_bytes());
+            put_str(&mut out, &v.title);
+            out.extend_from_slice(&v.duration_us.to_le_bytes());
+            out.extend_from_slice(&v.width.to_le_bytes());
+            out.extend_from_slice(&v.height.to_le_bytes());
+            put_str(&mut out, &v.vcodec);
+            put_str(&mut out, &v.acodec);
+            out.extend_from_slice(&v.poster.to_le_bytes());
+            out.push(v.unreadable as u8 | (v.poster_tried as u8) << 1);
+        }
+        out
+    }
+
+    /// Put the videos saved by [`Library::save_videos`] into this library (whose roots are loaded). Videos of a root that is no longer
+    /// in the library are dropped; the id counter moves past every id seen.
+    pub fn load_videos(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let mut r = Rd(bytes);
+        if r.take(4)? != VIDEOS_MAGIC || r.u8()? != VIDEOS_VERSION {
+            return Err("not a video index".to_string());
+        }
+        let nroots = r.u16()? as usize;
+        let mut remap: Vec<Option<u16>> = Vec::new();
+        for _ in 0..nroots {
+            let id = r.str()?;
+            remap.push(self.roots.iter().position(|x| x.id == id).map(|i| i as u16));
+        }
+        let n = r.u32()? as usize;
+        if n.saturating_mul(30) > r.0.len() {
+            return Err("count too large".to_string());
+        }
+        let mut videos = Vec::with_capacity(n);
+        let mut by_id: BTreeMap<u32, ()> = BTreeMap::new();
+        for _ in 0..n {
+            let id = r.u32()?;
+            let root = r.u16()?;
+            let path = r.str()?;
+            let size = r.u64()?;
+            let mtime_ms = r.i64()?;
+            let title = r.str()?;
+            let duration_us = r.i64()?;
+            let (width, height) = (r.u32()?, r.u32()?);
+            let (vcodec, acodec) = (r.str()?, r.str()?);
+            let poster = r.u64()?;
+            let flags = r.u8()?;
+            let Some(Some(root)) = remap.get(root as usize).copied() else { continue };
+            if by_id.insert(id, ()).is_some() {
+                return Err("duplicate video id".to_string());
+            }
+            self.next_id = self.next_id.max(id + 1);
+            videos.push(Video {
+                id,
+                root,
+                path,
+                size,
+                mtime_ms,
+                title,
+                duration_us,
+                width,
+                height,
+                vcodec,
+                acodec,
+                poster,
+                poster_tried: flags & 2 != 0,
+                unreadable: flags & 1 != 0,
+                src: String::new(),
+            });
+        }
+        videos.sort_by_key(|v| v.id);
+        self.videos = videos;
+        self.videos_dirty = false;
+        self.rev += 1;
+        Ok(())
+    }
+}
+
+fn put_str(out: &mut Vec<u8>, s: &str) {
+    let mut n = s.len().min(u16::MAX as usize);
+    while !s.is_char_boundary(n) {
+        n -= 1;
+    }
+    out.extend_from_slice(&(n as u16).to_le_bytes());
+    out.extend_from_slice(&s.as_bytes()[..n]);
+}
+
+struct Rd<'a>(&'a [u8]);
+
+impl<'a> Rd<'a> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
+        if self.0.len() < n {
+            return Err("truncated".to_string());
+        }
+        let (a, b) = self.0.split_at(n);
+        self.0 = b;
+        Ok(a)
+    }
+    fn u8(&mut self) -> Result<u8, String> {
+        Ok(self.take(1)?[0])
+    }
+    fn u16(&mut self) -> Result<u16, String> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().map_err(|_| "x")?))
+    }
+    fn u32(&mut self) -> Result<u32, String> {
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().map_err(|_| "x")?))
+    }
+    fn u64(&mut self) -> Result<u64, String> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().map_err(|_| "x")?))
+    }
+    fn i64(&mut self) -> Result<i64, String> {
+        Ok(i64::from_le_bytes(self.take(8)?.try_into().map_err(|_| "x")?))
+    }
+    fn str(&mut self) -> Result<String, String> {
+        let n = self.u16()? as usize;
+        String::from_utf8(self.take(n)?.to_vec()).map_err(|_| "not utf-8".to_string())
+    }
+}

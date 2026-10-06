@@ -19,7 +19,7 @@ use rvp_core::settings::{
     CROSSFADE_MAX_SECS, CROSSFADE_MIN_SECS, LevelMode, TARGET_MAX_LUFS, TARGET_MIN_LUFS,
 };
 use rvp_host::{InputEvent, Key, Modifiers, PointerButton};
-use theme::tokens as t;
+use crate::tk as t;
 
 /// One control of the panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -390,36 +390,36 @@ impl Ui {
         let s = self.scale;
         let g = self.audio_panel_geom();
         let card = g.card;
-        fb.fill_rect_paint(RectF::new(0.0, 0.0, self.w as f32, self.h as f32), Paint::Solid(t::INK_900), 0.6);
+        fb.fill_rect_paint(RectF::new(0.0, 0.0, self.w as f32, self.h as f32), Paint::Solid(t::ink_900()), 0.6);
         fb.shadow_rrect(card, 22.0 * s, 20.0 * s, 56.0 * s, theme::Rgba::new(5, 2, 15, 190), 1.0);
-        fb.fill_rrect(card, 22.0 * s, Paint::Solid(t::INK_800), 1.0);
-        fb.stroke_rrect(card, 22.0 * s, 1.0 * s, t::BORDER_SUBTLE, 1.0);
+        fb.fill_rrect(card, 22.0 * s, Paint::Solid(t::ink_800()), 1.0);
+        fb.stroke_rrect(card, 22.0 * s, 1.0 * s, t::border_subtle(), 1.0);
         fb.fill_rrect(
             RectF::new(card.x + 40.0 * s, card.y + 1.0 * s, card.w - 80.0 * s, 2.0 * s),
             1.0 * s,
-            Paint::GradientFaded(&t::GRADIENT_TEARS, 0.9),
+            Paint::GradientFaded(t::gradient_tears(), 0.9),
             1.0,
         );
         let pad = 28.0 * s;
         let x0 = card.x + pad;
         let inner = card.w - 2.0 * pad;
-        self.text(fb, Face::SansBold, 20.0, x0, card.y + 36.0 * s, "Audio", t::TEXT_STRONG, 1.0, -0.2);
+        self.text(fb, Face::SansBold, 20.0, x0, card.y + 36.0 * s, "Audio", t::text_strong(), 1.0, -0.2);
         // The close button.
         let hot_close = panel.hover.is_none() && self.pointer.is_some_and(|(x, y)| g.close.contains(x, y));
         if hot_close {
-            fb.fill_rrect(g.close, g.close.h * 0.5, Paint::Solid(fade(t::WHITE, 0.10)), 1.0);
+            fb.fill_rrect(g.close, g.close.h * 0.5, Paint::Solid(fade(t::white(), 0.10)), 1.0);
         }
-        self.icon(fb, Icon::X, g.close.cx(), g.close.cy(), 18.0, t::TEXT_MUTED, 1.0, false);
+        self.icon(fb, Icon::X, g.close.cx(), g.close.cy(), 18.0, t::text_muted(), 1.0, false);
 
         let a = model.audio;
         let focus = if self.keyboard_mode { Some(ORDER[panel.focus]) } else { None };
         let hot = |c: AudioControl| panel.hover == Some(c) || panel.drag == Some(c);
         let row_text = |ui: &mut Ui, fb: &mut FrameBuffer, y: f32, label: &str, desc: &str, dim: bool| {
-            let col = if dim { t::TEXT_MUTED } else { t::TEXT_STRONG };
+            let col = if dim { t::text_muted() } else { t::text_strong() };
             ui.text(fb, Face::SansMedium, 15.0, x0, y + 30.0 * s, label, col, 1.0, 0.0);
             let room = inner - 64.0 * s;
             let shown = ui.fonts.fit(Face::Sans, 12.0 * s, desc, room);
-            ui.text(fb, Face::Sans, 12.0, x0, y + 50.0 * s, &shown, t::TEXT_DIM, 1.0, 0.0);
+            ui.text(fb, Face::Sans, 12.0, x0, y + 50.0 * s, &shown, t::text_dim(), 1.0, 0.0);
         };
 
         // Crossfade.
@@ -441,7 +441,7 @@ impl Ui {
             hot(AudioControl::CrossfadeLength),
         );
         // The rule between the groups.
-        fb.fill_rect_paint(RectF::new(x0, g.rule_y, inner, 1.0 * s), Paint::Solid(t::BORDER_SUBTLE), 1.0);
+        fb.fill_rect_paint(RectF::new(x0, g.rule_y, inner, 1.0 * s), Paint::Solid(t::border_subtle()), 1.0);
         // Automatic level.
         row_text(self, fb, g.rows[2], "Auto-level", "Play every song at the same loudness", false);
         self.draw_switch(
@@ -488,19 +488,19 @@ impl Ui {
         };
         let room = inner - 128.0 * s;
         let shown = self.fonts.fit(Face::Mono, 12.0 * s, &status, room);
-        self.text(fb, Face::Mono, 12.0, x0, g.footer_cy, &shown, t::TEXT_DIM, 1.0, 0.0);
+        self.text(fb, Face::Mono, 12.0, x0, g.footer_cy, &shown, t::text_dim(), 1.0, 0.0);
         let done = g.control(AudioControl::Done).1;
         let hot_done = hot(AudioControl::Done);
         let d = done;
         if hot_done || focus == Some(AudioControl::Done) {
-            fb.glow_rrect(d, d.h * 0.5, 20.0 * s, t::MAGENTA_500, 0.5);
+            fb.glow_rrect(d, d.h * 0.5, 20.0 * s, t::magenta_500(), 0.5);
         }
-        fb.fill_rrect(d, d.h * 0.5, Paint::Gradient(&t::GRADIENT_TEARS), 1.0);
+        fb.fill_rrect(d, d.h * 0.5, Paint::Gradient(t::gradient_tears()), 1.0);
         if hot_done {
-            fb.fill_rrect(d, d.h * 0.5, Paint::Solid(t::WHITE), 0.12);
+            fb.fill_rrect(d, d.h * 0.5, Paint::Solid(t::white()), 0.12);
         }
         let tw = self.text_w(Face::SansBold, 14.0, "Done", 0.0);
-        self.text(fb, Face::SansBold, 14.0, d.cx() - tw * 0.5, d.cy(), "Done", t::WHITE, 1.0, 0.0);
+        self.text(fb, Face::SansBold, 14.0, d.cx() - tw * 0.5, d.cy(), "Done", t::white(), 1.0, 0.0);
         // The focus ring of the keyboard.
         if let Some(c) = focus {
             let (hit, drawn) = g.control(c);
@@ -521,10 +521,10 @@ impl Ui {
         let s = self.scale;
         let rad = r.h * 0.5;
         if on {
-            fb.fill_rrect(r, rad, Paint::Horizontal(t::MAGENTA_500, t::VIOLET_400), 1.0);
+            fb.fill_rrect(r, rad, Paint::Horizontal(t::magenta_500(), t::violet_400()), 1.0);
         } else {
-            fb.fill_rrect(r, rad, Paint::Solid(fade(t::WHITE, if hot { 0.24 } else { 0.16 })), 1.0);
-            fb.stroke_rrect(r, rad, 1.0 * s, fade(t::WHITE, 0.22), 1.0);
+            fb.fill_rrect(r, rad, Paint::Solid(fade(t::white(), if hot { 0.24 } else { 0.16 })), 1.0);
+            fb.stroke_rrect(r, rad, 1.0 * s, fade(t::white(), 0.22), 1.0);
         }
         let k = r.h - 6.0 * s;
         let kx = if on { r.right() - 3.0 * s - k } else { r.x + 3.0 * s };
@@ -536,7 +536,7 @@ impl Ui {
             theme::Rgba::new(5, 2, 15, 140),
             1.0,
         );
-        fb.fill_rrect(RectF::new(kx, r.y + 3.0 * s, k, k), k * 0.5, Paint::Solid(t::WHITE), 1.0);
+        fb.fill_rrect(RectF::new(kx, r.y + 3.0 * s, k, k), k * 0.5, Paint::Solid(t::white()), 1.0);
     }
 
     fn draw_slider_row(
@@ -553,34 +553,34 @@ impl Ui {
         hot: bool,
     ) {
         let s = self.scale;
-        let col = if dim { t::TEXT_MUTED } else { t::TEXT_STRONG };
+        let col = if dim { t::text_muted() } else { t::text_strong() };
         self.text(fb, Face::SansMedium, 15.0, x0, row + 20.0 * s, label, col, 1.0, 0.0);
         let vw = self.text_w(Face::Mono, 13.0, value, 0.0);
-        let vcol = if dim { t::TEXT_DIM } else { t::CYAN_400 };
+        let vcol = if dim { t::text_dim() } else { t::cyan_400() };
         self.text(fb, Face::Mono, 13.0, x0 + inner - vw, row + 20.0 * s, value, vcol, 1.0, 0.0);
         let a = if dim { 0.55 } else { 1.0 };
-        fb.fill_rrect(track, track.h * 0.5, Paint::Solid(fade(t::WHITE, 0.22)), a);
+        fb.fill_rrect(track, track.h * 0.5, Paint::Solid(fade(t::white(), 0.22)), a);
         let f = frac.clamp(0.0, 1.0);
         let fill = RectF::new(track.x, track.y, (track.w * f).max(track.h), track.h);
-        fb.fill_rrect(fill, track.h * 0.5, Paint::Horizontal(t::MAGENTA_500, t::VIOLET_400), a);
+        fb.fill_rrect(fill, track.h * 0.5, Paint::Horizontal(t::magenta_500(), t::violet_400()), a);
         let kr = if hot { 10.0 * s } else { 8.0 * s };
         let kx = track.x + track.w * f;
         let k = RectF::new(kx - kr, track.cy() - kr, kr * 2.0, kr * 2.0);
         if hot {
-            fb.glow_rrect(k, kr, 12.0 * s, t::CYAN_500, 0.5 * a);
+            fb.glow_rrect(k, kr, 12.0 * s, t::cyan_500(), 0.5 * a);
         }
-        fb.fill_rrect(k, kr, Paint::Solid(t::TEXT_STRONG), a);
+        fb.fill_rrect(k, kr, Paint::Solid(t::text_strong()), a);
     }
 
     fn draw_segments(&mut self, fb: &mut FrameBuffer, r: RectF, mode: LevelMode, hot: bool, dim: bool) {
         let s = self.scale;
         let a = if dim { 0.55 } else { 1.0 };
-        fb.fill_rrect(r, r.h * 0.5, Paint::Solid(t::INK_900), a);
+        fb.fill_rrect(r, r.h * 0.5, Paint::Solid(t::ink_900()), a);
         fb.stroke_rrect(
             r,
             r.h * 0.5,
             1.0 * s,
-            if hot { fade(t::CYAN_500, 0.7) } else { fade(t::WHITE, 0.22) },
+            if hot { fade(t::cyan_500(), 0.7) } else { fade(t::white(), 0.22) },
             a,
         );
         let half = r.w * 0.5;
@@ -591,7 +591,7 @@ impl Ui {
                 RectF::new(r.x + half * i as f32 + 3.0 * s, r.y + 3.0 * s, half - 6.0 * s, r.h - 6.0 * s);
             let on = mode == me;
             if on {
-                fb.fill_rrect(seg, seg.h * 0.5, Paint::Gradient(&t::GRADIENT_TEARS), a);
+                fb.fill_rrect(seg, seg.h * 0.5, Paint::Gradient(t::gradient_tears()), a);
             }
             let tw = self.text_w(Face::SansMedium, 14.0, label, 0.0);
             self.text(
@@ -601,7 +601,7 @@ impl Ui {
                 seg.cx() - tw * 0.5,
                 seg.cy(),
                 label,
-                if on { t::WHITE } else { t::TEXT_MUTED },
+                if on { t::white() } else { t::text_muted() },
                 a,
                 0.0,
             );

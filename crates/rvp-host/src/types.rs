@@ -45,13 +45,7 @@ pub const MEDIA_TYPES: &[MediaType] = &[
         mimes: &["audio/x-matroska"],
         video: false,
     },
-    MediaType {
-        id: "mp3",
-        label: "MP3 audio",
-        extensions: &["mp3"],
-        mimes: &["audio/mpeg"],
-        video: false,
-    },
+    MediaType { id: "mp3", label: "MP3 audio", extensions: &["mp3"], mimes: &["audio/mpeg"], video: false },
     MediaType {
         id: "flac",
         label: "FLAC audio",
@@ -109,19 +103,25 @@ mod tests {
     #[test]
     fn the_table_is_what_the_desktop_file_and_the_windows_installer_declare() {
         let mime_line = DESKTOP.lines().find(|l| l.starts_with("MimeType=")).expect("a MimeType line");
-        let declared: Vec<&str> = mime_line["MimeType=".len()..].split(';').filter(|m| !m.is_empty()).collect();
+        let declared: Vec<&str> =
+            mime_line["MimeType=".len()..].split(';').filter(|m| !m.is_empty()).collect();
         for t in MEDIA_TYPES {
             for m in t.mimes {
                 assert!(declared.contains(m), "{m} is missing from the desktop file");
             }
             for e in t.extensions {
-                assert!(ISS.contains(&std::format!("ValueName: \".{e}\"")), ".{e} is missing from the installer");
+                assert!(
+                    ISS.contains(&std::format!("ValueName: \".{e}\"")),
+                    ".{e} is missing from the installer"
+                );
             }
         }
         // And nothing else is declared but the two subtitle types.
         for m in declared {
             assert!(
-                MEDIA_TYPES.iter().any(|t| t.mimes.contains(&m)) || m == "application/x-subrip" || m == "text/vtt",
+                MEDIA_TYPES.iter().any(|t| t.mimes.contains(&m))
+                    || m == "application/x-subrip"
+                    || m == "text/vtt",
                 "{m} is declared but not in the table"
             );
         }

@@ -1,9 +1,11 @@
 //! Software drawing into an RGBA8 framebuffer: anti-aliased rounded rectangles, gradients, glows, text masks
 //! and a bilinear picture scaler. Everything is deterministic integer/`f32` math (no `std`), so the same
 //! pixels come out in a browser and in Rusty Bucket.
+use crate::tk::{Grad, RGrad};
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU32, Ordering};
 use libm::{cosf, expf, floorf, sinf, sqrtf};
-use theme::{GradientStop, LinearGradient, RadialGradient, Rgba};
+use theme::{GradientStop, Rgba};
 
 /// A rectangle in physical pixels, `f32` so layouts can place edges between pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -72,6 +74,17 @@ pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
     Rgba::new(l(a.r, b.r), l(a.g, b.g), l(a.b, b.b), l(a.a, b.a))
 }
 
+static RADIUS_SCALE: AtomicU32 = AtomicU32::new(0x3f80_0000); // 1.0f32
+
+/// Scale every corner radius the UI draws by `k` (a theme's roundness: 1 is the Unicorn Tears look, 0 is square).
+pub fn set_radius_scale(k: f32) {
+    RADIUS_SCALE.store(k.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
+}
+
+fn radius_scale() -> f32 {
+    f32::from_bits(RADIUS_SCALE.load(Ordering::Relaxed))
+}
+
 /// How a shape is filled.
 #[derive(Debug, Clone, Copy)]
 pub enum Paint {
@@ -82,9 +95,9 @@ pub enum Paint {
     /// Left to right.
     Horizontal(Rgba, Rgba),
     /// A design-system gradient (CSS angle semantics) stretched over the shape's box.
-    Gradient(&'static LinearGradient),
+    Gradient(Grad),
     /// A gradient over the same box with its alpha scaled (used to dim a brand gradient).
-    GradientFaded(&'static LinearGradient, f32),
+    GradientFaded(Grad, f32),
 }
 
 fn stops_at(stops: &[GradientStop], t: f32) -> Rgba {
@@ -134,8 +147,8 @@ impl Painter {
             Paint::Solid(c) => c,
             Paint::Vertical(a, b) => mix(a, b, (py - self.bx.y) * self.inv_len),
             Paint::Horizontal(a, b) => mix(a, b, (px - self.bx.x) * self.inv_len),
-            Paint::Gradient(g) => stops_at(g.stops, self.t(px, py)),
-            Paint::GradientFaded(g, k) => fade(stops_at(g.stops, self.t(px, py)), k),
+            Paint::Gradient(g) => stops_at(&g.stops, self.t(px, py)),
+            Paint::GradientFaded(g, k) => fade(stops_at(&g.stops, self.t(px, py)), k),
         }
     }
 
@@ -293,7 +306,7 @@ impl FrameBuffer {
         let x1 = (r.right() as i32 + 2).min(self.width as i32);
         let y1 = (r.bottom() as i32 + 2).min(self.height as i32);
         let p = Painter::new(paint, r);
-        let rad = radius.min(r.w * 0.5).min(r.h * 0.5).max(0.0);
+        let rad = (radius * radius_scale()).min(r.w * 0.5).min(r.h * 0.5).max(0.0);
         // Pixels whose centre is more than a pixel inside the shape are fully covered.
         let (ix0, ix1) = (libm::ceilf(r.x + rad + 1.0) as i32, floorf(r.right() - rad - 1.0) as i32);
         let (iy0, iy1) = (libm::ceilf(r.y + 1.0) as i32, floorf(r.bottom() - 1.0) as i32);
@@ -345,7 +358,7 @@ impl FrameBuffer {
         let y0 = (floorf(r.y) as i32 - 1).max(0);
         let x1 = (r.right() as i32 + 2).min(self.width as i32);
         let y1 = (r.bottom() as i32 + 2).min(self.height as i32);
-        let rad = radius.min(r.w * 0.5).min(r.h * 0.5).max(0.0);
+        let rad = (radius * radius_scale()).min(r.w * 0.5).min(r.h * 0.5).max(0.0);
         let band = libm::ceilf(width + 2.0) as i32;
         for y in y0..y1 {
             let fy = y as f32 + 0.5;
@@ -420,7 +433,7 @@ impl FrameBuffer {
     }
 
     /// Fill the whole buffer with a CSS-style radial gradient (an ellipse radius given in % of the buffer).
-    pub fn fill_radial(&mut self, g: &RadialGradient) {
+    pub fn fill_radial(&mut self, g: &RGrad) {
         let (w, h) = (self.width as f32, self.height as f32);
         let (cx, cy) = (g.cx_pct * 0.01 * w, g.cy_pct * 0.01 * h);
         let (rx, ry) = ((g.rx_pct * 0.01 * w).max(1.0), (g.ry_pct * 0.01 * h).max(1.0));
@@ -428,7 +441,7 @@ impl FrameBuffer {
             let dy = (y as f32 + 0.5 - cy) / ry;
             for x in 0..self.width {
                 let dx = (x as f32 + 0.5 - cx) / rx;
-                let c = stops_at(g.stops, sqrtf(dx * dx + dy * dy));
+                let c = stops_at(&g.stops, sqrtf(dx * dx + dy * dy));
                 let i = (y as usize * self.width as usize + x as usize) * 4;
                 self.pixels[i..i + 4].copy_from_slice(&[c.r, c.g, c.b, 255]);
             }
@@ -512,7 +525,7 @@ impl FrameBuffer {
     /// Like [`FrameBuffer::blit_scaled`], with rounded corners (`radius` = half the size makes a circle): the corners are
     /// blended back over what was there before.
     pub fn blit_scaled_rounded(&mut self, dst: RectF, radius: f32, src: &[u8], sw: u32, sh: u32) {
-        let r = radius.min(dst.w * 0.5).min(dst.h * 0.5).max(0.0);
+        let r = (radius * radius_scale()).min(dst.w * 0.5).min(dst.h * 0.5).max(0.0);
         if r < 0.75 {
             self.blit_scaled(dst, src, sw, sh);
             return;

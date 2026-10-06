@@ -378,6 +378,8 @@ pub struct UiHost {
     pub stable: bool,
     /// When set, the host offers update and app-menu services (scripted by the test).
     pub services: Option<rvp_host::ScriptedServices>,
+    /// When set, the host can fetch pages (scripted by the test).
+    pub net: Option<rvp_host::ScriptedNet>,
 }
 
 impl Default for UiHost {
@@ -403,6 +405,7 @@ impl UiHost {
             presents: 0,
             stable: true,
             services: None,
+            net: None,
         }
     }
 
@@ -450,6 +453,9 @@ impl Host for UiHost {
     }
     fn library(&mut self) -> Option<&mut dyn Library> {
         self.library.as_mut().map(|l| l as &mut dyn Library)
+    }
+    fn net(&mut self) -> Option<&mut dyn rvp_host::Net> {
+        self.net.as_mut().map(|n| n as &mut dyn rvp_host::Net)
     }
     fn app_services(&mut self) -> Option<&mut dyn rvp_host::AppServices> {
         self.services.as_mut().map(|s| s as &mut dyn rvp_host::AppServices)

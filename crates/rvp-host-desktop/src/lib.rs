@@ -13,6 +13,7 @@ pub mod fonts;
 pub mod host;
 pub mod input;
 pub mod media;
+pub mod net;
 pub mod services;
 pub mod smoke;
 pub mod source;

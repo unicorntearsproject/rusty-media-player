@@ -15,6 +15,7 @@ pub mod input;
 pub mod library;
 pub mod media;
 pub mod mock;
+pub mod net;
 pub mod services;
 pub mod types;
 
@@ -22,14 +23,15 @@ pub use frame::FrameSink;
 
 pub use input::{InputEvent, Key, Modifiers, PointerButton, Rect};
 pub use library::{FileEntry, Library, Listing, ScriptedLibrary, StandardFolder, StandardKind};
-pub use types::{MEDIA_TYPES, MediaType, media_types_by_id, mimes_of};
 pub use media::{
     Art, NowPlaying, NowPlayingMeta, PlayState, Playback, RecordingNowPlaying, RecordingTap,
     TransportCommand, VIZ_BANDS, VisualizerTap, VizBlock, VizSummary,
 };
+pub use net::{MAX_FETCH_BYTES, Net, ScriptedNet};
 pub use services::{
     AppServices, DefaultOutcome, DefaultPlayer, Integration, ScriptedServices, UpdateHow, UpdateState,
 };
+pub use types::{MEDIA_TYPES, MediaType, media_types_by_id, mimes_of};
 
 use alloc::{string::String, vec::Vec};
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
@@ -162,6 +164,10 @@ pub trait Host {
     }
     /// Directory access for the library view, if the host has any.
     fn library(&mut self) -> Option<&mut dyn Library> {
+        None
+    }
+    /// Fetching a page of text the user pointed the app at (a link to a design system), if the host can.
+    fn net(&mut self) -> Option<&mut dyn Net> {
         None
     }
     /// Update checks and adding the app to the desktop's menus, if the host has them.

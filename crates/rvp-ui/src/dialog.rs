@@ -12,7 +12,7 @@ use crate::ui::Ui;
 use alloc::string::String;
 use alloc::vec::Vec;
 use rvp_host::{InputEvent, Key, Modifiers, PointerButton};
-use theme::tokens as t;
+use crate::tk as t;
 
 /// A button.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -411,34 +411,34 @@ impl Ui {
         self.dialog_sync_focus(spec);
         let g = self.dialog_geom(spec);
         let card = g.card;
-        fb.fill_rect_paint(RectF::new(0.0, 0.0, self.w as f32, self.h as f32), Paint::Solid(t::INK_900), 0.6);
+        fb.fill_rect_paint(RectF::new(0.0, 0.0, self.w as f32, self.h as f32), Paint::Solid(t::ink_900()), 0.6);
         fb.shadow_rrect(card, 22.0 * s, 20.0 * s, 56.0 * s, theme::Rgba::new(5, 2, 15, 190), 1.0);
-        fb.fill_rrect(card, 22.0 * s, Paint::Solid(t::INK_800), 1.0);
-        fb.stroke_rrect(card, 22.0 * s, 1.0 * s, t::BORDER_SUBTLE, 1.0);
+        fb.fill_rrect(card, 22.0 * s, Paint::Solid(t::ink_800()), 1.0);
+        fb.stroke_rrect(card, 22.0 * s, 1.0 * s, t::border_subtle(), 1.0);
         fb.fill_rrect(
             RectF::new(card.x + 40.0 * s, card.y + 1.0 * s, card.w - 80.0 * s, 2.0 * s),
             1.0 * s,
-            Paint::GradientFaded(&t::GRADIENT_TEARS, 0.9),
+            Paint::GradientFaded(t::gradient_tears(), 0.9),
             1.0,
         );
         let pad = PAD * s;
         let x0 = card.x + pad;
         let inner = card.w - 2.0 * pad;
         let title = self.fonts.fit(Face::SansBold, 20.0 * s, &spec.title, inner - 44.0 * s);
-        self.text(fb, Face::SansBold, 20.0, x0, card.y + 36.0 * s, &title, t::TEXT_STRONG, 1.0, -0.2);
+        self.text(fb, Face::SansBold, 20.0, x0, card.y + 36.0 * s, &title, t::text_strong(), 1.0, -0.2);
         let hot_close =
             self.dialog.hover.is_none() && self.pointer.is_some_and(|(x, y)| g.close.contains(x, y));
         if hot_close {
-            fb.fill_rrect(g.close, g.close.h * 0.5, Paint::Solid(fade(t::WHITE, 0.10)), 1.0);
+            fb.fill_rrect(g.close, g.close.h * 0.5, Paint::Solid(fade(t::white(), 0.10)), 1.0);
         }
-        self.icon(fb, Icon::X, g.close.cx(), g.close.cy(), 18.0, t::TEXT_MUTED, 1.0, false);
+        self.icon(fb, Icon::X, g.close.cx(), g.close.cy(), 18.0, t::text_muted(), 1.0, false);
 
         // The paragraphs.
         let mut y = g.body_top + 4.0 * s;
         let lines = self.dialog.lines.clone();
         for (pi, para) in lines.iter().enumerate() {
             for ln in para {
-                self.text(fb, Face::Sans, 14.0, x0, y + LINE_H * s * 0.5, ln, t::TEXT_MUTED, 1.0, 0.0);
+                self.text(fb, Face::Sans, 14.0, x0, y + LINE_H * s * 0.5, ln, t::text_muted(), 1.0, 0.0);
                 y += LINE_H * s;
             }
             if pi + 1 < lines.len() {
@@ -447,21 +447,21 @@ impl Ui {
         }
         // The progress bar.
         if let (Some(r), Some(p)) = (g.progress, spec.progress) {
-            fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::WHITE, 0.22)), 1.0);
+            fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::white(), 0.22)), 1.0);
             let f = (p.min(1000) as f32) / 1000.0;
             let fill = RectF::new(r.x, r.y, (r.w * f).max(r.h), r.h);
-            fb.fill_rrect(fill, r.h * 0.5, Paint::Horizontal(t::MAGENTA_500, t::VIOLET_400), 1.0);
+            fb.fill_rrect(fill, r.h * 0.5, Paint::Horizontal(t::magenta_500(), t::violet_400()), 1.0);
         }
         let focus = if self.keyboard_mode { self.dialog_focus(spec) } else { None };
         // The text box.
         if let (Some(r), Some(inp)) = (g.input, &spec.input) {
-            self.text(fb, Face::SansMedium, 12.0, r.x, r.y - 10.0 * s, &inp.label, t::TEXT_DIM, 1.0, 0.4);
-            fb.fill_rrect(r, 10.0 * s, Paint::Solid(t::INK_900), 1.0);
-            fb.stroke_rrect(r, 10.0 * s, 1.0 * s, t::CYAN_500, 0.9);
+            self.text(fb, Face::SansMedium, 12.0, r.x, r.y - 10.0 * s, &inp.label, t::text_dim(), 1.0, 0.4);
+            fb.fill_rrect(r, 10.0 * s, Paint::Solid(t::ink_900()), 1.0);
+            fb.stroke_rrect(r, 10.0 * s, 1.0 * s, t::cyan_500(), 0.9);
             let room = r.w - 28.0 * s;
             if inp.text.is_empty() {
                 let ph = self.fonts.fit(Face::Sans, 14.0 * s, &inp.placeholder, room);
-                self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &ph, t::TEXT_DISABLED, 1.0, 0.0);
+                self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &ph, t::text_disabled(), 1.0, 0.0);
             } else {
                 // Keep the end in view: drop characters from the front until it fits.
                 let mut shown: String = inp.text.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
@@ -469,9 +469,9 @@ impl Ui {
                     shown = shown.chars().skip(1).collect();
                 }
                 let w = self.text_w(Face::Sans, 14.0, &shown, 0.0);
-                self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &shown, t::TEXT_STRONG, 1.0, 0.0);
+                self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &shown, t::text_strong(), 1.0, 0.0);
                 // The caret, steady (no blinking: nothing here flashes).
-                fb.fill_rrect(RectF::new(r.x + 14.0 * s + w * s + 2.0 * s, r.cy() - 9.0 * s, 1.5 * s, 18.0 * s), 0.5 * s, Paint::Solid(t::CYAN_400), 0.9);
+                fb.fill_rrect(RectF::new(r.x + 14.0 * s + w * s + 2.0 * s, r.cy() - 9.0 * s, 1.5 * s, 18.0 * s), 0.5 * s, Paint::Solid(t::cyan_400()), 0.9);
             }
         }
         // The switches.
@@ -482,10 +482,10 @@ impl Ui {
             let label = self.fonts.fit(Face::SansMedium, 15.0 * s, &tg.label, room);
             let slim = g.row_h < 50.0;
             let label_y = if slim { row.cy() } else { row.y + 20.0 * s };
-            self.text(fb, Face::SansMedium, 15.0, x0, label_y, &label, t::TEXT_STRONG, 1.0, 0.0);
+            self.text(fb, Face::SansMedium, 15.0, x0, label_y, &label, t::text_strong(), 1.0, 0.0);
             if !tg.desc.is_empty() && !slim {
                 let d = self.fonts.fit(Face::Sans, 12.0 * s, &tg.desc, room);
-                self.text(fb, Face::Sans, 12.0, x0, row.y + 40.0 * s, &d, t::TEXT_DIM, 1.0, 0.0);
+                self.text(fb, Face::Sans, 12.0, x0, row.y + 40.0 * s, &d, t::text_dim(), 1.0, 0.0);
             }
             self.draw_switch(fb, sw, tg.on, self.dialog.hover == Some(c));
             if focus == Some(c) {
@@ -500,19 +500,19 @@ impl Ui {
             let a = if b.enabled { 1.0 } else { 0.45 };
             if b.primary {
                 if hot || focus == Some(c) {
-                    fb.glow_rrect(r, r.h * 0.5, 20.0 * s, t::MAGENTA_500, 0.5);
+                    fb.glow_rrect(r, r.h * 0.5, 20.0 * s, t::magenta_500(), 0.5);
                 }
-                fb.fill_rrect(r, r.h * 0.5, Paint::Gradient(&t::GRADIENT_TEARS), a);
+                fb.fill_rrect(r, r.h * 0.5, Paint::Gradient(t::gradient_tears()), a);
                 if hot {
-                    fb.fill_rrect(r, r.h * 0.5, Paint::Solid(t::WHITE), 0.12);
+                    fb.fill_rrect(r, r.h * 0.5, Paint::Solid(t::white()), 0.12);
                 }
             } else {
-                fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::WHITE, if hot { 0.14 } else { 0.08 })), a);
-                fb.stroke_rrect(r, r.h * 0.5, 1.0 * s, fade(t::WHITE, 0.22), a);
+                fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::white(), if hot { 0.14 } else { 0.08 })), a);
+                fb.stroke_rrect(r, r.h * 0.5, 1.0 * s, fade(t::white(), 0.22), a);
             }
             let label = self.fonts.fit(Face::SansBold, 14.0 * s, &b.label, r.w - 16.0 * s);
             let tw = self.text_w(Face::SansBold, 14.0, &label, 0.0);
-            let col = if b.primary { t::WHITE } else { t::TEXT_STRONG };
+            let col = if b.primary { t::white() } else { t::text_strong() };
             self.text(fb, Face::SansBold, 14.0, r.cx() - tw * 0.5, r.cy(), &label, col, a, 0.0);
             if focus == Some(c) {
                 self.focus_ring(fb, r, r.h * 0.5, 1.0);

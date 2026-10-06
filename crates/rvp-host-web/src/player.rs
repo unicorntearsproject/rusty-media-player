@@ -132,6 +132,7 @@ impl WebPlayer {
             downloads: Vec::new(),
             media: None,
             tap: None,
+            net: crate::net::WebNet,
         };
         let app = App::new(Rc::new(WebCodecs), UiConfig { reduce_motion });
         Ok(WebPlayer { host, app, next_file: 0 })

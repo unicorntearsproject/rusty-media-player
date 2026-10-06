@@ -16,6 +16,8 @@ mod host;
 #[cfg(target_arch = "wasm32")]
 mod media;
 #[cfg(target_arch = "wasm32")]
+mod net;
+#[cfg(target_arch = "wasm32")]
 mod player;
 #[cfg(target_arch = "wasm32")]
 mod source;

@@ -213,6 +213,8 @@ pub struct DesktopHost {
     pub media: Option<DesktopNowPlaying>,
     /// Update checks and the app-menu entry (off in scripted runs unless asked for).
     pub services: Option<crate::services::DesktopServices>,
+    /// Fetching a link for the theme dialog.
+    pub net: crate::net::DesktopNet,
 }
 
 impl DesktopHost {
@@ -228,6 +230,7 @@ impl DesktopHost {
             library: DesktopLibrary::new(),
             media: None,
             services: None,
+            net: crate::net::DesktopNet::new(),
         }
     }
 }
@@ -267,6 +270,9 @@ impl Host for DesktopHost {
     }
     fn library(&mut self) -> Option<&mut dyn Library> {
         Some(&mut self.library)
+    }
+    fn net(&mut self) -> Option<&mut dyn rvp_host::Net> {
+        Some(&mut self.net)
     }
     fn app_services(&mut self) -> Option<&mut dyn rvp_host::AppServices> {
         self.services.as_mut().map(|s| s as &mut dyn rvp_host::AppServices)

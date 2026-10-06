@@ -395,6 +395,36 @@ canvas.addEventListener("wheel", (e) => {
   player.wheel(e.deltaX * k, e.deltaY * k);
 }, { passive: false });
 
+// ---- fetching a link for the theme dialog -------------------------------------------------------------
+
+// The player asks for a text document through these two (see crates/rvp-host-web/src/net.rs); the browser's own rules apply, so a
+// cross-origin page that does not allow the read fails here and the dialog says to paste the CSS instead.
+const fetches = new Map();
+let nextFetch = 0;
+window.rvpFetchText = (url, max) => {
+  const id = ++nextFetch;
+  fetches.set(id, undefined);
+  (async () => {
+    try {
+      if (!/^https?:\/\//i.test(url)) throw new Error("only http and https links are fetched");
+      const res = await fetch(url, { credentials: "omit", redirect: "follow" });
+      if (!res.ok) throw new Error(`the server said ${res.status}`);
+      const text = await res.text();
+      if (text.length > max) throw new Error("that file is too big");
+      fetches.set(id, { ok: true, text });
+    } catch (err) {
+      const why = err instanceof TypeError ? "the browser would not read it (the site may not allow other pages to fetch it)" : String(err.message || err);
+      fetches.set(id, { ok: false, text: why });
+    }
+  })();
+  return id;
+};
+window.rvpFetchPoll = (id) => {
+  const r = fetches.get(id);
+  if (r !== undefined) fetches.delete(id);
+  return r;
+};
+
 // ---- keyboard -------------------------------------------------------------------------------------------
 
 window.addEventListener("keydown", (e) => {
