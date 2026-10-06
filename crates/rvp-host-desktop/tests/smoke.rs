@@ -95,8 +95,33 @@ fn rvp(args: &[&str]) -> Command {
     if !headed() {
         c.env_remove("WAYLAND_DISPLAY").env_remove("XDG_SESSION_TYPE").env("GDK_BACKEND", "x11");
     }
+    // The first-run offers (default media player, the AppImage menu) are pop-ups that would eat the scripted keys, and the first run
+    // adds the system's Music and Videos folders: neither may depend on (or touch) the real session. The user directories come from an
+    // empty configuration folder unless a test points them somewhere (`with_user_dirs`).
+    c.env("RVP_NO_OFFERS", "1").env("XDG_CONFIG_HOME", empty_config_home());
     c.args(args);
     c
+}
+
+/// An `XDG_CONFIG_HOME` without a `user-dirs.dirs`: the app finds no Music or Videos folder.
+fn empty_config_home() -> PathBuf {
+    static ONCE: Once = Once::new();
+    let d = std::env::temp_dir().join(format!("rvp-desktop-test-xdg-empty-{}", std::process::id()));
+    ONCE.call_once(|| std::fs::create_dir_all(&d).unwrap());
+    d
+}
+
+/// Make `$XDG_CONFIG_HOME/user-dirs.dirs` (in a fresh folder under `dir`) name `music` and `videos` as the user's Music and Videos
+/// folders; returns the config home to hand to the app.
+fn with_user_dirs(dir: &Path, music: &Path, videos: &Path) -> PathBuf {
+    let cfg = dir.join("xdg-config");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(
+        cfg.join("user-dirs.dirs"),
+        format!("XDG_MUSIC_DIR=\"{}\"\nXDG_VIDEOS_DIR=\"{}\"\n", music.display(), videos.display()),
+    )
+    .unwrap();
+    cfg
 }
 
 /// `RVP_HEADED=1`: let the app open real windows (for looking at it by hand). Off by default.
@@ -215,7 +240,7 @@ fn the_library_face_scans_a_folder_and_shows_it() {
         "--press",
         "3:End",
         "--exit-after",
-        "5",
+        "8", // the scan of 200 tracks takes a few seconds, more on a loaded machine
         "--screenshot",
         shot.to_str().unwrap(),
         "--report",
@@ -463,5 +488,147 @@ fn playerctl_reads_and_drives_it_over_mpris() {
     std::thread::sleep(Duration::from_millis(800));
     assert_ne!(playerctl(&name, &["status"]), "Playing");
     drop(child);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// Options every scripted run here shares: a data directory of its own, no sound, no media keys, a report.
+fn base(data: &Path, report: &Path) -> Vec<String> {
+    ["--data-dir", data.to_str().unwrap(), "--no-audio", "--no-media-keys", "--report", report.to_str().unwrap()]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn run_args(mut c: Vec<String>, rest: &[&str]) {
+    c.extend(rest.iter().map(|s| s.to_string()));
+    run_ok(rvp(&c.iter().map(String::as_str).collect::<Vec<_>>()));
+}
+
+/// The names of the library folders in a report (`"library_roots": ["Music", "Videos"]`), sorted.
+fn roots(report: &str) -> Vec<String> {
+    let at = report.find("\"library_roots\":").expect("library_roots in the report") + "\"library_roots\":".len();
+    let rest = report[at..].trim_start().strip_prefix('[').expect("a list");
+    let list = &rest[..rest.find(']').unwrap()];
+    let mut names: Vec<String> =
+        list.split(',').map(|s| s.trim().trim_matches('"').to_string()).filter(|s| !s.is_empty()).collect();
+    names.sort(); // the library keeps them in the order of their ids
+    names
+}
+
+#[test]
+fn the_first_run_lands_on_the_library_and_the_next_run_stays_there() {
+    let _turn = one_at_a_time();
+    if skip("the first-run smoke test", &[]) {
+        return;
+    }
+    let dir = scratch("first-run");
+    let (data, r1, r2) = (dir.join("data"), dir.join("r1.json"), dir.join("r2.json"));
+    run_args(base(&data, &r1), &["--exit-after", "2.5"]);
+    let first = std::fs::read_to_string(&r1).unwrap();
+    assert_eq!(text(&first, "mode").as_deref(), Some("library"), "{first}");
+    assert!(first.contains("\"first_run\": true"), "{first}");
+    assert!(first.contains("\"dialog\": null"), "no pop-up on the first run when offers are off\n{first}");
+    assert!(roots(&first).is_empty(), "no Music or Videos folder to add\n{first}");
+    assert_eq!(num(&first, "queue_len"), Some(0.0), "{first}");
+    // The next run is not a first run, and opens on the face the last one ended on.
+    run_args(base(&data, &r2), &["--exit-after", "2.5"]);
+    let second = std::fs::read_to_string(&r2).unwrap();
+    assert!(second.contains("\"first_run\": false"), "{second}");
+    assert_eq!(text(&second, "mode").as_deref(), Some("library"), "{second}");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn the_first_run_adds_the_music_and_videos_folders_once() {
+    let _turn = one_at_a_time();
+    if skip("the standard folders smoke test", &["ffmpeg"]) {
+        return;
+    }
+    let fx = core_fixtures();
+    let dir = scratch("std-folders");
+    // The user's Music and Videos folders, with a little in them (the folder names are what the library shows).
+    let (music, videos) = (dir.join("Music"), dir.join("Videos"));
+    std::fs::create_dir_all(music.join("Test Artist")).unwrap();
+    std::fs::create_dir_all(&videos).unwrap();
+    for (i, (album, title)) in [("First", "One"), ("First", "Two"), ("Second", "Three")].iter().enumerate() {
+        let f = music.join("Test Artist").join(format!("{i} {title}.flac"));
+        let st = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=1:sample_rate=44100"])
+            .args(["-metadata", &format!("title={title}"), "-metadata", "artist=Test Artist"])
+            .args(["-metadata", &format!("album={album}"), "-metadata", &format!("track={}", i + 1)])
+            .arg(&f)
+            .status()
+            .unwrap();
+        assert!(st.success());
+    }
+    std::fs::copy(fx.join("h264_aac.mp4"), videos.join("Clip.mp4")).unwrap();
+    let cfg = with_user_dirs(&dir, &music, &videos);
+    let (data, r1, r2, r3) = (dir.join("data"), dir.join("r1.json"), dir.join("r2.json"), dir.join("r3.json"));
+    let run = |report: &Path| {
+        let mut c = rvp(&[]);
+        // `rvp(&[])` has no arguments of its own: add ours and point the user directories at the folders above.
+        c.args(base(&data, report)).args(["--exit-after", "6"]).env("XDG_CONFIG_HOME", &cfg);
+        run_ok(c);
+        std::fs::read_to_string(report).unwrap()
+    };
+    // First run: both folders are added and listed.
+    let first = run(&r1);
+    assert!(first.contains("\"first_run\": true"), "{first}");
+    assert_eq!(text(&first, "mode").as_deref(), Some("library"), "{first}");
+    assert_eq!(roots(&first), ["Music", "Videos"], "{first}");
+    assert_eq!(num(&first, "library_tracks"), Some(3.0), "{first}");
+    assert_eq!(num(&first, "library_albums"), Some(2.0), "{first}");
+    // The video folder is scanned too. (The app does not fold videos into the library yet, only the library crate does: until it does,
+    // the count is 0; it must never be more than the one file.)
+    assert!(num(&first, "library_videos").is_some_and(|n| n <= 1.0), "{first}");
+    // Second run: the folders are not added again (no duplicates), and what was scanned is still there.
+    let second = run(&r2);
+    assert!(second.contains("\"first_run\": false"), "{second}");
+    assert_eq!(roots(&second), ["Music", "Videos"], "{second}");
+    assert_eq!(num(&second, "library_tracks"), Some(3.0), "{second}");
+    assert_eq!(num(&second, "library_videos"), num(&first, "library_videos"), "{second}");
+    // Folders the system names later are not picked up behind the user's back: the offer was made once.
+    let (music2, videos2) = (dir.join("Music 2"), dir.join("Videos 2"));
+    std::fs::create_dir_all(&music2).unwrap();
+    std::fs::create_dir_all(&videos2).unwrap();
+    with_user_dirs(&dir, &music2, &videos2);
+    let third = run(&r3);
+    assert_eq!(roots(&third), ["Music", "Videos"], "{third}");
+    // And a user who removed them all does not get them back (the library is empty, the first-run step is done): covered by the app's
+    // own tests (`setup.rs`); here the saved choice is what matters.
+    let saved = std::fs::read_to_string(data.join("settings%2fsetup.bin")).expect("settings/setup in the data directory");
+    assert!(saved.contains("folders=done"), "{saved}");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn ctrl_comma_opens_settings_and_the_theme_dialog_is_one_step_further() {
+    let _turn = one_at_a_time();
+    if skip("the settings smoke test", &[]) {
+        return;
+    }
+    let dir = scratch("settings");
+    let data = dir.join("data");
+    let report = |n: &str| dir.join(format!("{n}.json"));
+    // Ctrl+, on the Library face (where the first run starts).
+    run_args(base(&data, &report("a")), &["--press", "1:ctrl+,", "--exit-after", "3"]);
+    let a = std::fs::read_to_string(report("a")).unwrap();
+    assert_eq!(text(&a, "dialog").as_deref(), Some("Settings"), "{a}");
+    // Escape closes it.
+    run_args(base(&data, &report("b")), &["--press", "1:ctrl+,", "--press", "2:Escape", "--exit-after", "3.5"]);
+    let b = std::fs::read_to_string(report("b")).unwrap();
+    assert!(b.contains("\"dialog\": null"), "{b}");
+    // The keyboard starts on the Close button (the primary one, the last); Down wraps to the first, Audio settings, and on to Theme.
+    run_args(
+        base(&data, &report("c")),
+        &["--press", "1:ctrl+,", "--press", "1.5:Down", "--press", "2:Down", "--press", "2.5:Enter", "--exit-after", "4"],
+    );
+    let c = std::fs::read_to_string(report("c")).unwrap();
+    assert_eq!(text(&c, "dialog").as_deref(), Some("Theme"), "{c}");
+    // The Player face too: B, then Ctrl+,.
+    run_args(base(&data, &report("d")), &["--press", "1:b", "--press", "1.5:ctrl+,", "--exit-after", "3"]);
+    let d = std::fs::read_to_string(report("d")).unwrap();
+    assert_eq!(text(&d, "mode").as_deref(), Some("player"), "{d}");
+    assert_eq!(text(&d, "dialog").as_deref(), Some("Settings"), "{d}");
     std::fs::remove_dir_all(dir).ok();
 }
