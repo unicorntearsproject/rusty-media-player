@@ -9,6 +9,8 @@
 //! **Motion safety.** Brightness changes on the beat are capped at 12 percent and at three a second (the general flash
 //! threshold), nothing ever flashes the whole picture, and with `reduce_motion` the effects run calm: no beat pulses or bursts,
 //! slow drift, heavy smoothing.
+mod scenes;
+
 use alloc::vec::Vec;
 use libm::{atan2f, cosf, powf, sinf, sqrtf};
 use rvp_core::Timestamp;
@@ -36,11 +38,25 @@ pub enum Effect {
     Particles,
     /// Sine plasma.
     Plasma,
+    /// A subwoofer, a boombox and a record player, each wired to the spectrum (the scenes take turns).
+    BassMachine,
+    /// Iridescent teardrops falling through a deep star field.
+    UnicornTears,
+    /// A mirror ball throwing sweeping squares of light across the room.
+    DiscoBall,
 }
 
 /// Every effect, in the order the preset switcher steps through them.
-pub const EFFECTS: [Effect; 5] =
-    [Effect::Spectrum, Effect::Scope, Effect::Tunnel, Effect::Particles, Effect::Plasma];
+pub const EFFECTS: [Effect; 8] = [
+    Effect::Spectrum,
+    Effect::Scope,
+    Effect::Tunnel,
+    Effect::Particles,
+    Effect::Plasma,
+    Effect::BassMachine,
+    Effect::UnicornTears,
+    Effect::DiscoBall,
+];
 
 impl Effect {
     /// Name for the switcher.
@@ -51,6 +67,9 @@ impl Effect {
             Effect::Tunnel => "Tunnel",
             Effect::Particles => "Starfield",
             Effect::Plasma => "Plasma",
+            Effect::BassMachine => "Bass machine",
+            Effect::UnicornTears => "Unicorn Tears",
+            Effect::DiscoBall => "Disco ball",
         }
     }
 
@@ -63,7 +82,12 @@ impl Effect {
     /// How much smaller than the window the effect is drawn (a bigger number is cheaper and softer).
     fn divisor(self) -> usize {
         match self {
-            Effect::Spectrum | Effect::Scope | Effect::Particles => 2,
+            Effect::Spectrum
+            | Effect::Scope
+            | Effect::Particles
+            | Effect::BassMachine
+            | Effect::UnicornTears
+            | Effect::DiscoBall => 2,
             Effect::Tunnel | Effect::Plasma => 4,
         }
     }
@@ -153,6 +177,7 @@ pub struct FrameInput<'a> {
     pub scope: &'a [f32],
 }
 
+#[derive(Debug)]
 struct Particle {
     x: f32,
     y: f32,
@@ -179,6 +204,9 @@ pub struct Viz {
     mid: f32,
     treble: f32,
     pulse: f32,
+    /// What the pulse was set to by the last beat (the scenes tell a fresh beat from its decay by it).
+    pulse_set: f32,
+    scenes: scenes::SceneState,
     last_pulse_us: Timestamp,
     last_us: Option<Timestamp>,
     phase: f32,
@@ -222,6 +250,8 @@ impl Viz {
             mid: 0.0,
             treble: 0.0,
             pulse: 0.0,
+            pulse_set: 0.0,
+            scenes: scenes::SceneState::default(),
             last_pulse_us: -PULSE_GAP_US,
             last_us: None,
             phase: 0.0,
@@ -290,6 +320,7 @@ impl Viz {
         follow(&mut self.treble, s.treble);
         if s.onset && !reduce_motion && s.pts_us - self.last_pulse_us >= PULSE_GAP_US {
             self.pulse = (0.4 + s.onset_strength.min(1.5) * 0.4).min(1.0);
+            self.pulse_set = self.pulse;
             self.last_pulse_us = s.pts_us;
             if self.effect == Effect::Particles {
                 self.burst(18 + (s.onset_strength.min(2.0) * 10.0) as usize);
@@ -344,7 +375,7 @@ impl Viz {
             if matches!(self.effect, Effect::Tunnel | Effect::Plasma) {
                 self.build_polar();
             }
-            if matches!(self.effect, Effect::Scope | Effect::Particles) {
+            if matches!(self.effect, Effect::Scope | Effect::Particles | Effect::UnicornTears) {
                 self.backdrop(0.18);
                 self.bg = self.buf.clone();
             }
@@ -375,6 +406,9 @@ impl Viz {
             Effect::Tunnel => self.draw_tunnel(),
             Effect::Particles => self.draw_particles(dt, moving, input.reduce_motion),
             Effect::Plasma => self.draw_plasma(),
+            Effect::BassMachine => self.draw_bass_machine(dt, moving, calm),
+            Effect::UnicornTears => self.draw_unicorn_tears(dt, moving, calm),
+            Effect::DiscoBall => self.draw_disco_ball(dt, moving, calm),
         }
         self.frames += 1;
     }
@@ -804,6 +838,79 @@ mod tests {
         assert!(max_gain <= 1.0 + PULSE_GAIN + 1e-4, "{max_gain}");
     }
 
+    fn mean_brightness(v: &Viz) -> f64 {
+        let px = v.picture().0;
+        px.chunks_exact(4).map(|p| p[0] as f64 + p[1] as f64 + p[2] as f64).sum::<f64>()
+            / (px.len() / 4) as f64
+            / 3.0
+    }
+
+    #[test]
+    fn the_bass_machine_changes_scene_through_the_dark_and_never_flashes() {
+        let mut v = Viz::new();
+        v.effect = Effect::BassMachine;
+        let (mut now, mut scenes_seen) = (0i64, alloc::collections::BTreeSet::new());
+        let mut last: Option<f64> = None;
+        let mut worst = 0.0f64;
+        // A minute and a half at 30 frames a second with a beat every half second: three scene changes.
+        for f in 0..2700 {
+            let loud = 0.5 + 0.4 * sinf(f as f32 * 0.31);
+            v.feed(&summary(now, loud, f % 15 == 0), false);
+            frame(&mut v, now, true, false, &[]);
+            scenes_seen.insert(v.scenes.scene);
+            let m = mean_brightness(&v);
+            if let Some(l) = last {
+                // The general flash threshold is a jump of 0.1 in relative luminance (linear, 0 black to 1 white) between two frames.
+                let lin = |x: f64| powf((x / 255.0) as f32, 2.2) as f64;
+                worst = worst.max((lin(m) - lin(l)).abs());
+            }
+            last = Some(m);
+            now += 33_000;
+        }
+        assert_eq!(scenes_seen.len(), 3, "all three scenes take their turn: {scenes_seen:?}");
+        assert!(worst < 0.05, "relative luminance jumped by {worst:.3} between two frames");
+    }
+
+    #[test]
+    fn unicorn_tears_and_the_disco_ball_rest_in_calm_mode() {
+        for effect in [Effect::UnicornTears, Effect::DiscoBall, Effect::BassMachine] {
+            let mut v = Viz::new();
+            v.effect = effect;
+            let mut now = 0;
+            for i in 0..300 {
+                v.feed(&summary(now, 0.9, i % 5 == 0), true);
+                frame(&mut v, now, true, true, &[]);
+                now += 33_000;
+            }
+            assert_eq!(v.pulse, 0.0, "{effect:?}: a beat pulse in calm mode");
+            assert!(v.scenes.rings.is_empty(), "{effect:?}: speaker rings in calm mode");
+            assert!(v.scenes.drops.len() < 40, "{effect:?}: {} drops", v.scenes.drops.len());
+            assert!(v.scenes.hue_kick == 0.0, "{effect:?}: the room's colour jumped on the beat");
+        }
+    }
+
+    #[test]
+    fn the_new_scenes_draw_something_in_every_corner_of_the_budget() {
+        // Different sizes, silent and loud, with and without a scope: nothing panics and the picture is not blank.
+        for effect in [Effect::BassMachine, Effect::UnicornTears, Effect::DiscoBall] {
+            for (w, h) in [(160, 90), (320, 180), (640, 360), (97, 61)] {
+                let mut v = Viz::new();
+                v.effect = effect;
+                let mut now = 0;
+                for i in 0..20 {
+                    v.feed(&summary(now, if i % 2 == 0 { 0.0 } else { 0.9 }, i % 4 == 0), false);
+                    v.render(
+                        w,
+                        h,
+                        &FrameInput { now_us: now, playing: true, reduce_motion: false, scope: &[] },
+                    );
+                    now += 33_000;
+                }
+                assert!(mean_brightness(&v) > 6.0, "{effect:?} at {w}x{h} is blank");
+            }
+        }
+    }
+
     #[test]
     fn calm_mode_has_no_pulses_or_bursts() {
         let mut v = Viz::new();
@@ -818,9 +925,11 @@ mod tests {
 
     #[test]
     fn effects_and_palettes_step_around() {
-        assert_eq!(Effect::Spectrum.step(-1), Effect::Plasma);
-        assert_eq!(Effect::Plasma.step(1), Effect::Spectrum);
-        assert_eq!(EFFECTS.len(), 5);
+        assert_eq!(Effect::Spectrum.step(-1), Effect::DiscoBall);
+        assert_eq!(Effect::DiscoBall.step(1), Effect::Spectrum);
+        assert_eq!(Effect::Plasma.step(1), Effect::BassMachine);
+        assert_eq!(EFFECTS.len(), 8);
+        assert_eq!(Effect::UnicornTears.name(), "Unicorn Tears");
         assert_eq!(Palette::Tears.next().next().next().next(), Palette::Tears);
         assert_eq!(Palette::Aurora.next(), Palette::Rainbow);
         // The rainbow runs through every hue and its ends meet (it is cyclic), so bars across it show red to violet.
