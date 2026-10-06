@@ -122,6 +122,11 @@ impl NullAudio {
         }
     }
 
+    /// True while the device is paused (nothing queued plays).
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
     /// Total frames accepted since `open`.
     pub fn frames_written(&self) -> u64 {
         self.written

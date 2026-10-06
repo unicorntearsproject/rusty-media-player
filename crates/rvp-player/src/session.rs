@@ -698,6 +698,8 @@ pub struct Session {
     clock: MasterClock,
     audio: Option<AudioOut>,
     audio_opened: bool,
+    /// What the audio device was last told about pausing.
+    sink_paused: bool,
     want_play: bool,
     running: bool,
     needs_sink_flush: bool,
@@ -758,6 +760,7 @@ impl Session {
             clock: MasterClock::new(ClockSource::Monotonic),
             audio: None,
             audio_opened: false,
+            sink_paused: true,
             want_play: false,
             running: false,
             needs_sink_flush: false,
@@ -1291,6 +1294,7 @@ impl Session {
                     // A stream of its own: nothing an earlier item (or an earlier open) left in the device counts.
                     host.audio().flush();
                     host.audio().set_paused(true);
+                    self.sink_paused = true;
                     self.audio = Some(out);
                     self.clock.set_source(ClockSource::Audio, now);
                 }
@@ -1307,7 +1311,9 @@ impl Session {
             }
         }
 
-        // 3. Feed the audio sink (see `feed_audio`).
+        // 3. Feed the audio sink (see `feed_audio`). The device only runs while the clock does: a pause, a seek or the wait for
+        // the start buffer must not let what is queued play on.
+        self.sync_sink_pause(host);
         self.feed_audio(host, seeking);
 
         // 4. Start playback once enough is buffered.
@@ -1337,10 +1343,8 @@ impl Session {
                     self.clock.seek(t, now);
                 }
                 self.clock.resume(now);
-                if self.audio.is_some() {
-                    host.audio().set_paused(false);
-                }
                 self.running = true;
+                self.sync_sink_pause(host);
             }
         }
 
@@ -1597,6 +1601,14 @@ impl Session {
         }
         host.audio().set_volume(if self.muted { 0.0 } else { self.volume });
         self.audio = Some(out);
+    }
+
+    /// Keep the device paused exactly while the clock is not running (tracked, so the host is only told on a change).
+    fn sync_sink_pause<H: Host>(&mut self, host: &mut H) {
+        if self.audio.is_some() && self.sink_paused == self.running {
+            self.sink_paused = !self.running;
+            host.audio().set_paused(self.sink_paused);
+        }
     }
 
     /// Both items of a crossfade at once: keep each one's share of the mixer stocked and send the mixture on.
