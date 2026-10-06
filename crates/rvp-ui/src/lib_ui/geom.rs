@@ -77,6 +77,8 @@ pub(crate) struct Geom {
     pub mode: [RectF; 2],
     pub add_folder: RectF,
     pub folders: Vec<(usize, RectF)>,
+    /// Folders that do not fit under the others: a "+N more" line after the last row.
+    pub folders_more: usize,
     pub back: Option<RectF>,
     pub search: RectF,
     pub search_clear: RectF,
@@ -125,6 +127,7 @@ impl Ui {
             mode: [RectF::default(); 2],
             add_folder: RectF::default(),
             folders: Vec::new(),
+            folders_more: 0,
             back: None,
             search: RectF::default(),
             search_clear: RectF::default(),
@@ -178,12 +181,31 @@ impl Ui {
             ];
         }
         let mut y = top + if compact { 92.0 * s } else { 58.0 * s };
-        // On a short window the entries shrink to fit between the switch and the add button.
+        let bottom = r.bottom() - 16.0 * s;
+        let btn_h = 40.0 * s;
+        g.add_folder = RectF::new(px, bottom - btn_h, iw, btn_h);
+        // The folders live in the space between the entries and the add button (and the scan's progress line when it shows). The
+        // entries shrink first (down to a compact row), so that up to three folders always have their rows; on a window too short
+        // even for one, the folders are left out.
+        let n_roots = if compact { 0 } else { ctx.lib.roots().len() };
+        let (head, step, row_h, more_h) = (26.0 * s, 28.0 * s, 26.0 * s, 16.0 * s);
+        let area_bottom = g.add_folder.y - 12.0 * s - if ctx.scan.is_some() { 34.0 * s } else { 0.0 };
         let items = NAV.iter().flatten().count() as f32;
         let dividers = NAV.iter().filter(|n| n.is_none()).count() as f32;
-        let btn_h = 40.0 * s;
-        let room = (r.bottom() - 16.0 * s - btn_h - 10.0 * s) - y - dividers * 14.0 * s;
-        let item_h = ((room / items) - 2.0 * s).clamp(30.0 * s, if compact { 44.0 * s } else { 42.0 * s });
+        let nav_min = items * (24.0 * s + 2.0 * s) + dividers * 14.0 * s;
+        let space = (area_bottom - y - nav_min - 12.0 * s - head).max(0.0);
+        let mut reserved_rows = n_roots.min(3).min((space / step) as usize);
+        // Folders beyond the rows need room for the "+N more" line too.
+        while reserved_rows > 0 && reserved_rows < n_roots && reserved_rows as f32 * step + more_h > space {
+            reserved_rows -= 1;
+        }
+        let reserve = if reserved_rows == 0 {
+            0.0
+        } else {
+            head + reserved_rows as f32 * step + if n_roots > reserved_rows { more_h } else { 0.0 } + 12.0 * s
+        };
+        let room = (area_bottom - reserve) - y - dividers * 14.0 * s;
+        let item_h = ((room / items) - 2.0 * s).clamp(24.0 * s, if compact { 44.0 * s } else { 42.0 * s });
         for it in NAV.iter() {
             match it {
                 Some((v, ..)) => {
@@ -193,18 +215,21 @@ impl Ui {
                 None => y += 14.0 * s,
             }
         }
-        // Folders (not in the compact rail) and the add button.
-        let bottom = r.bottom() - 16.0 * s;
-        g.add_folder = RectF::new(px, bottom - btn_h, iw, btn_h);
-        if !compact {
-            let mut fy = y + 48.0 * s;
-            for (i, _) in ctx.lib.roots().iter().enumerate() {
-                if fy + 28.0 * s > g.add_folder.y - 8.0 * s {
-                    break;
-                }
-                g.folders.push((i, RectF::new(px, fy, iw, 28.0 * s)));
-                fy += 30.0 * s;
+        if reserved_rows > 0 {
+            // Whatever the entries left over shows more folders; the rest are counted in a "+N more" line.
+            let first = y + 12.0 * s + head;
+            let avail = area_bottom - first;
+            let mut k = (avail / step).max(0.0) as usize;
+            if k < n_roots {
+                k = ((avail - more_h) / step).max(0.0) as usize;
             }
+            let k = k.clamp(reserved_rows, n_roots);
+            let mut fy = first;
+            for i in 0..k {
+                g.folders.push((i, RectF::new(px, fy, iw, row_h)));
+                fy += step;
+            }
+            g.folders_more = n_roots - k;
         }
     }
 

@@ -23,7 +23,7 @@ const NOW_ART_SIDE: u32 = 640;
 const MAX_PLAYLIST_FILE: usize = 8 << 20;
 /// Pictures loaded from storage per tick.
 const ART_PER_TICK: usize = 12;
-/// Playback shorter than this and without a picture does not resume from where it stopped (a song, not an audiobook).
+/// A music track from the library shorter than this and without video does not resume from where it stopped (a song, not an audiobook).
 pub(crate) const RESUME_MIN_AUDIO_US: Timestamp = 20 * 60 * 1_000_000;
 /// The visualizer picture is made at most this often, microseconds (about 30 a second).
 const VIZ_EVERY_US: Timestamp = 30_000;

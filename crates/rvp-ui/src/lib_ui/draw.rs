@@ -422,6 +422,22 @@ impl Ui {
                 );
             }
         }
+        if g.folders_more > 0 {
+            if let Some((_, last)) = g.folders.last() {
+                let label = alloc::format!("+{} more", g.folders_more);
+                self.text(
+                    fb,
+                    Face::Sans,
+                    12.0,
+                    px + 14.0 * s,
+                    last.bottom() + 10.0 * s,
+                    &label,
+                    t::TEXT_DISABLED,
+                    1.0,
+                    0.0,
+                );
+            }
+        }
         if let Some(sc) = ctx.scan {
             let y = g.add_folder.y - 20.0 * s;
             if !compact {

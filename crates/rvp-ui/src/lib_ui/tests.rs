@@ -780,3 +780,39 @@ fn dragging_a_queue_row_moves_it() {
     r.draw();
     r.handle(InputEvent::PointerUp { x: x0 + 100.0, y: y2, button: PointerButton::Primary });
 }
+
+#[test]
+fn the_added_folders_show_in_the_rail_at_every_size() {
+    for (w, h) in [(1280, 720), (1024, 600), (800, 500), (1280, 540)] {
+        for roots in [1usize, 3, 7] {
+            let mut r = Rig::new();
+            for i in 1..roots {
+                r.lib.begin_scan(&alloc::format!("r{i}"), &alloc::format!("Folder {i}"), &[]);
+                r.lib.finish_scan();
+            }
+            r.ui.set_size(w, h, 1.0);
+            let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None };
+            let g = r.ui.lib_geom(&r.m, &ctx);
+            assert!(!g.m.compact || w < 1000, "{w}x{h}");
+            if g.m.compact {
+                continue; // the narrow rail has icons only
+            }
+            let n = g.folders.len();
+            if h >= 720 {
+                assert!(n >= roots.min(3), "{w}x{h}, {roots} folders: only {n} rows");
+            } else if h >= 600 {
+                assert!(n >= 1, "{w}x{h}, {roots} folders: no row");
+            }
+            if n > 0 {
+                assert_eq!(n + g.folders_more, roots, "{w}x{h}: every folder is a row or counted");
+            }
+            // The rows sit under the entries and above the add button, without overlapping either.
+            let nav_bottom = g.nav.last().unwrap().1.bottom();
+            for (_, rect) in &g.folders {
+                assert!(rect.y >= nav_bottom, "{w}x{h}: a folder row overlaps the entries");
+                assert!(rect.bottom() <= g.add_folder.y, "{w}x{h}: a folder row overlaps the add button");
+            }
+            r.draw();
+        }
+    }
+}

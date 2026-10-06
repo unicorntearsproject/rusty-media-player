@@ -237,6 +237,47 @@ fn a_file_that_cannot_open_is_skipped() {
 }
 
 #[test]
+fn an_early_position_and_one_just_before_the_end_resume_and_the_last_stretch_does_not() {
+    if skip() {
+        return;
+    }
+    // 60 s file: 3 s in resumes (the old rule skipped anything under 5 s), 6 s from the end resumes, 3 s from the end restarts.
+    for (fraction, want) in [(0.05, Some(3.0)), (0.90, Some(54.0)), (0.95, None)] {
+        let mut r = Rig::new();
+        r.open(&["av1_opus_60s.webm"]);
+        r.run(500);
+        r.act(Action::SeekFraction(fraction));
+        r.run(700);
+        r.app.save_state(&mut r.host);
+        let mut r = r.reload();
+        r.open(&["av1_opus_60s.webm"]);
+        r.run(1_500);
+        match want {
+            Some(t) => assert!((r.pos_s() - t).abs() < 2.5, "{fraction}: resumed at {}, want {t}", r.pos_s()),
+            None => assert!(r.pos_s() < 2.5, "{fraction}: restarted at {}", r.pos_s()),
+        }
+    }
+}
+
+#[test]
+fn an_audio_file_that_is_opened_directly_resumes_too() {
+    if skip() {
+        return;
+    }
+    // Only a song played from the library starts from the top: a file opened or dropped resumes, whatever it is.
+    let mut r = Rig::new();
+    r.open(&["levels/music.flac"]);
+    r.run(500);
+    r.act(Action::SeekFraction(0.5));
+    r.run(700);
+    r.app.save_state(&mut r.host);
+    let mut r = r.reload();
+    r.open(&["levels/music.flac"]);
+    r.run(1_500);
+    assert!((r.pos_s() - 15.0).abs() < 2.5, "resumed at {}", r.pos_s());
+}
+
+#[test]
 fn the_position_is_remembered_across_a_reload() {
     if skip() {
         return;

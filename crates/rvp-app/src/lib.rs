@@ -35,10 +35,23 @@ use rvp_host::{
 use rvp_player::{Playlist, Repeat, Session, SessionEvent, SessionState};
 use rvp_ui::{Action, Cursor, FrameBuffer, MediaState, Mode, SPEEDS, TrackItem, Ui, UiConfig, UiModel};
 
-/// A saved resume position is only used when the file is longer than this past it, microseconds.
-const RESUME_MIN_REMAINING_US: Timestamp = 10_000_000;
-/// And only when it is at least this far in.
-const RESUME_MIN_POSITION_US: Timestamp = 5_000_000;
+/// An item is finished, not resumable, when the saved position is within this long of its end, microseconds (or within
+/// [`RESUME_END_FRACTION`] of its length, whichever is more): the next play starts from the top.
+const RESUME_END_MIN_US: Timestamp = 5_000_000;
+/// One part in this many of the length: 2%.
+const RESUME_END_FRACTION: Timestamp = 50;
+/// Whether a saved position `pos` in an item of length `dur` is worth going back to: any position past the start, except the last
+/// stretch (the larger of 5 s and 2% of the length), which counts as finished.
+fn resumable(pos: Timestamp, dur: Timestamp) -> bool {
+    pos > 0 && pos + RESUME_END_MIN_US.max(dur / RESUME_END_FRACTION) <= dur
+}
+
+/// The "a song starts from the top" rule: only a music track played from the library, without video, shorter than
+/// [`RESUME_MIN_AUDIO_US`]. A dropped or opened file resumes whatever it is.
+fn song_skips_resume(from_library: bool, has_video: bool, dur: Timestamp) -> bool {
+    from_library && !has_video && dur < RESUME_MIN_AUDIO_US
+}
+
 /// How often the position is written to storage while playing, microseconds.
 const RESUME_SAVE_EVERY_US: Timestamp = 5_000_000;
 /// A previous-item request this far into an item restarts it instead of going back.
@@ -496,15 +509,26 @@ impl App {
         }
         self.last_resume_save = now;
         let (Some(dur), pos) = (s.duration_us(), s.position_us(now)) else { return };
-        if !s.container_has_video() && dur < RESUME_MIN_AUDIO_US {
-            return; // a song starts from the top every time
+        if self.is_library_song(s.container_has_video(), dur) {
+            return; // a song from the library starts from the top every time
         }
-        let value: Vec<u8> = if s.state() == SessionState::Ended || pos + RESUME_MIN_REMAINING_US > dur {
-            Vec::new() // finished (or nearly): next time starts from the beginning
+        let value: Vec<u8> = if s.state() == SessionState::Ended || !resumable(pos, dur) {
+            Vec::new() // finished (or nearly), or at the start: next time starts from the beginning
         } else {
             (pos / 1000).to_le_bytes().to_vec()
         };
         rvp_core::task::block_on(host.storage().store(&key, &value));
+    }
+
+    /// A music track played from the library that is shorter than [`RESUME_MIN_AUDIO_US`] (a song, not an audiobook): it does not
+    /// resume. Everything else does, whatever it is and however it was opened.
+    fn is_library_song(&self, has_video: bool, dur: Timestamp) -> bool {
+        let from_library = self
+            .playlist
+            .current_id()
+            .and_then(|id| self.playlist.get(id))
+            .is_some_and(|i| i.track.is_some());
+        song_skips_resume(from_library, has_video, dur)
     }
 
     /// Persist what must survive a page reload (a host calls this before unloading).
@@ -519,30 +543,32 @@ impl App {
         if self.resume_checked {
             return;
         }
-        let Some(s) = &mut self.session else { return };
+        let Some(s) = &self.session else { return };
         let Some(dur) = s.duration_us() else {
             if s.state() != SessionState::Opening {
                 self.resume_checked = true;
             }
             return;
         };
+        let song = self.is_library_song(s.container_has_video(), dur);
+        let Some(s) = &mut self.session else { return };
         self.resume_checked = true;
         if let Some(pos) = self.restore.forced_pos.take() {
             // The queue was restored: go back to where the last run stopped, whatever the length.
-            if pos >= RESUME_MIN_POSITION_US && pos + RESUME_MIN_REMAINING_US <= dur {
+            if resumable(pos, dur) {
                 s.seek(pos);
                 self.ui.show_toast(&format!("Restored at {}", rvp_ui::format_time(pos)), now);
             }
             return;
         }
-        if !s.container_has_video() && dur < RESUME_MIN_AUDIO_US {
+        if song {
             return;
         }
         let Some(key) = self.resume_key.clone() else { return };
         let Some(bytes) = rvp_core::task::block_on(host.storage().load(&key)) else { return };
         let Ok(raw) = <[u8; 8]>::try_from(bytes.as_slice()) else { return };
         let pos = i64::from_le_bytes(raw) * 1000;
-        if pos >= RESUME_MIN_POSITION_US && pos + RESUME_MIN_REMAINING_US <= dur {
+        if resumable(pos, dur) {
             s.seek(pos);
             self.ui.show_toast(&format!("Resumed at {}", rvp_ui::format_time(pos)), now);
         }
@@ -1477,5 +1503,32 @@ mod tests {
             "Video codec `hevc` isn't on the guest list."
         );
         assert!(friendly_error(&Error::Truncated).contains("ends too early"));
+    }
+
+    const S: Timestamp = 1_000_000;
+
+    #[test]
+    fn a_saved_position_resumes_unless_it_is_at_the_start_or_the_very_end() {
+        // A short clip (60 s): the last 5 s are the end (2% is only 1.2 s).
+        assert!(resumable(S, 60 * S), "1 s in resumes (the old rule skipped under 5 s)");
+        assert!(resumable(54 * S, 60 * S), "6 s from the end resumes (the old rule skipped under 10 s)");
+        assert!(resumable(55 * S, 60 * S), "exactly 5 s from the end still resumes");
+        assert!(!resumable(55 * S + 1, 60 * S));
+        assert!(!resumable(0, 60 * S), "the start is not a position to go back to");
+        // A film (2 h): the last 2% (144 s) is the end.
+        let film = 7200 * S;
+        assert!(resumable(film - 145 * S, film));
+        assert!(!resumable(film - 143 * S, film));
+        // A saved position past the length (the file changed) is not resumable.
+        assert!(!resumable(70 * S, 60 * S));
+    }
+
+    #[test]
+    fn only_a_library_song_starts_from_the_top() {
+        let min = RESUME_MIN_AUDIO_US;
+        assert!(song_skips_resume(true, false, 3 * 60 * S));
+        assert!(!song_skips_resume(true, false, min), "an audiobook from the library resumes");
+        assert!(!song_skips_resume(true, true, 3 * 60 * S), "a video from the library resumes");
+        assert!(!song_skips_resume(false, false, 3 * 60 * S), "a dropped or opened audio file resumes");
     }
 }
