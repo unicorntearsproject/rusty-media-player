@@ -12,3 +12,4 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bucket-v0-sys = { path = "../crates/bucket-v0-sys" }

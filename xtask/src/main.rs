@@ -1,4 +1,5 @@
 //! Repo automation. Run as `cargo xtask <command>`.
+mod bucket;
 mod dist;
 mod theme;
 mod web;
@@ -26,6 +27,11 @@ const USAGE: &str = "usage: cargo xtask <command>
   fuzz [target|all] [secs]   run cargo-fuzz targets (fuzz/, nightly + cargo-fuzz) for `secs` each (default 600)
   dist <target>    release packages: deb, rpm, appimage, flatpak, windows, installer, pwa, ... (`cargo xtask dist` lists them;
                    docs/packaging.md explains each)
+  bucket [--simd] [--no-threads] [--no-opt] [--no-smoke]
+                   build the Rusty Bucket app: the wasm module(s), their imports checked against the documented App API, and
+                   target/bucket/Rusty Wave.bucket; then run them in Node (cargo xtask bucket for the details)
+  bucket-smoke     the Node checks alone, on quick builds (lifecycle of both builds, thread start-up contract)
+  bucket-e2e [--sim PATH]   run the packed app in the Bucket Simulator (skipped when it is not installed)
   licenses         not implemented yet (see docs/PLAN.md)";
 
 fn main() -> ExitCode {
@@ -44,6 +50,13 @@ fn main() -> ExitCode {
         Some("perf-web") => web::perf(&args[1..]),
         Some("fuzz") => fuzz(&args[1..]),
         Some("dist") => dist::run(&args[1..]),
+        Some("bucket") if args.iter().any(|a| a == "--help") => {
+            println!("{}", bucket::USAGE);
+            Ok(())
+        }
+        Some("bucket") => bucket::run_bucket(&args[1..]),
+        Some("bucket-smoke") => bucket::run_smoke(),
+        Some("bucket-e2e") => bucket::run_e2e(&args[1..]),
         Some(cmd @ "licenses") => Err(format!("`{cmd}` is not implemented yet")),
         _ => {
             eprintln!("{USAGE}");
@@ -233,6 +246,8 @@ const WASM_CRATES: &[&str] = &[
     "rvp-app",
     "rvp-host-web",
     "rvp-host-rb",
+    "bucket-v0-sys",
+    "rvp-wave-bucket",
 ];
 
 /// Crates that promise `no_std + alloc` and must build for a target with no std at all.
@@ -248,6 +263,7 @@ const NO_STD_CRATES: &[&str] = &[
     "rvp-player",
     "rvp-ui",
     "rvp-app",
+    "bucket-v0-sys",
 ];
 
 fn check() -> Result<(), String> {

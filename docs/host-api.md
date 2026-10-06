@@ -144,9 +144,42 @@ Nothing new is asked of a host. The app keeps the settings in `Storage` under `s
 
 The library index (`library/index`) is at format version 2: each track also carries its integrated loudness (from tags or measured) and the tags' album figure; version 1 loads without them.
 
+## Rusty Bucket mapping (M12)
+
+`rvp-host-rb` implements these traits on Rusty Bucket's App API (`bucket_v0`, draft v0.3) through the raw bindings of `bucket-v0-sys`. The
+mapping table is in the crate's docs and in `../rust-os/docs/developer/app-api.md`; what is specific to it:
+
+- **Capabilities decide which optional interface exists**: `now_playing()` needs `NOW_PLAYING`, `visualizer()` needs `VISUALIZER` (the shell shows
+  or hides it at any time, `CAPS_CHANGED`), `library()` needs `LIBRARY`. When the shell starts showing now-playing after an item began, the
+  adapter sends the item again.
+- **Transport**: a `TRANSPORT` event becomes a `TransportCommand` (microseconds for the seeks, `f32` in the low four bytes for rate and volume).
+- **The viz tap** batches the summaries of one tick into one `viz_summary_n`; PCM goes out as it is heard (`viz_block`).
+- **`stable_ids()` is true**: `file_id` gives an id that reopens the file after a restart. A file the OS cannot name again gets a handle kept by the
+  adapter under a session id (`rb-handle:n`); such an id does not survive a restart (the saved queue then shows it as unavailable).
+- **Storage** uses the kv store; keys `library/art/...` are the cache class (the OS may evict them without telling us; the library rebuilds them).
+- **Files** are non-blocking: `-BUSY` is `Pending`, `IO_READY` ends the loop's sleep. `file_open_id` and `kv_load` that are `-BUSY` are waited for
+  (bounded to 5 s) while other events are kept for the next tick.
+- **Power**: the adapter calls `power_inhibit` from the player state (system awake while anything plays, display while a picture does).
+
+Open questions for the Rusty Bucket side (answers change only small things in the adapter):
+
+1. After `library_add_folder` and `FOLDER_ADDED`, does the OS start the first walk by itself? We call `library_rescan(root)`, which is a second walk if it does.
+2. `AUDIO_ERROR`: is the stream closed by the OS, or does it stay open and may recover? We close it and play on silently (the user is told once).
+3. A multi-select pick that is cancelled: one `FILE_PICKED` with `-CANCELLED`, or none? We handle both.
+4. `OPEN { while_running }`: should the app replace its queue or append? We replace (as a drop).
+5. `bucket_save_state`: may it be called while the main thread is inside `events_wait` (re-entrantly)? We only call `kv_flush` there and keep no state in memory, so this is safe either way; we need to know whether a hot reload keeps the shared memory.
+6. Threads: a new instance starts with `__stack_pointer` at the module's initial value, the same as the main thread's, so the entry export must switch stacks before it uses any (ours does, with no stack use at all). Is that the intended contract? Please state it in the threads section.
+7. `thread_priority(tid, 1)`: the adapter does not call it yet (the loudness analysis runs on the main thread in 4 ms slices); a threaded analysis would.
+8. Wake-up when the OS is slow to deliver `IO_READY` for `kv_load`/`file_open_id` (`file = 0`): is there an upper bound we can rely on instead of our 5 s?
+
+Found while testing: the core's `Session::pause` only stops the clock; it never calls `AudioSink::set_paused(true)`, and the feeding task keeps
+filling the sink, so on every host a paused player goes on playing what is queued and keeps queueing. It matters here because the `media` class
+and the OS's own now-playing state follow the audio stream, not the UI. Not changed in M12 (it is core behaviour).
+
 ## Changes
 
 - 2026-10-05: first version (M8).
 - 2026-10-05: `Library` capability, effects for folders and playlist files, storage keys (M10).
 - 2026-10-05: `Host::stable_ids`, the saved queue and position keys, the thumbnail budget (M11).
 - 2026-10-05: audio settings (crossfade, automatic level) under `settings/audio`; library index version 2 (loudness).
+- 2026-10-05: the Rusty Bucket mapping and its open questions (M12). No trait changed.

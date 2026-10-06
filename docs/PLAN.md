@@ -70,8 +70,10 @@ Workspace layout (`crates/*`, plus `xtask`). All crates are `MIT OR Apache-2.0`.
 | `rvp-host-headless` | std | Native host for tests: file `Source`, a virtual-time clock, a null/WAV audio sink, a frame-hash `VideoSink`, scripted `InputEvents`. Binary `rvp-headless`. |
 | `rvp-host-web` | wasm32 only | `wasm-bindgen` cdylib: File API `Source`, WebAudio `AudioSink`, `<canvas>` `Surface`, DOM input, `requestAnimationFrame` clock; Media Session API (now-playing, M8); PWA manifest and service worker (M11). |
 | `rvp-host-desktop` | std | (M11) Native Linux app: `winit` window, `softbuffer` `Surface`, `cpal` `AudioSink`, real files and drag-drop, MPRIS now-playing and media keys. Binary `rvp`. |
-| `rvp-host-rb` | wasm32 only | Rusty Bucket adapter (M12): maps `rvp-host` traits (including now-playing and the visualizer tap) to the App API. Stub until its app ABI exists. |
-| `xtask` | std | `cargo xtask theme | fixtures | web | serve | e2e | check | licenses`; from M11 also `desktop`, `flatpak`, `appimage`. |
+| `rvp-host-rb` | std (wasm32 in the module) | Rusty Bucket adapter (M12): maps `rvp-host` traits (including now-playing, the visualizer tap and the library) to the App API (`bucket_v0` v0.3) through `bucket-v0-sys`; the loop, threads start-up, `video_present` layer. |
+| `bucket-v0-sys`, `bucket-v0-mock` | `no_std` / std | (M12) Raw App API bindings with layout asserts, the documented function table and an import checker (Rusty Bucket may adopt it); a deterministic mock host for native tests. |
+| `rvp-wave-bucket` | wasm32 only | (M12) The module of `Rusty Wave.bucket`: `bucket_main`, `bucket_save_state`, `bucket_thread_start`, codecs. `cargo xtask bucket` builds and packs it. |
+| `xtask` | std | `cargo xtask theme | fixtures | web | serve | e2e | check | licenses`; from M11 also `desktop`, `flatpak`, `appimage`; M12 adds `bucket`, `bucket-smoke`, `bucket-e2e`. |
 
 Why our own demuxers: they must be incremental, seekable, `no_std`, and async over a host `Source`;
 every candidate crate (section 8) is `std` and blocking `Read + Seek`. They use `matroska-demuxer`, `mp4` and
@@ -159,7 +161,7 @@ movie in seconds with a virtual clock and get deterministic output.
 Mapping to Rusty Bucket (`../rust-os/docs/planning/README.md`; our page: `docs/planning/rusty-video-player.md`; App API draft: `docs/developer/app-api.md`): its apps get a Canvas surface (our `Surface`), input events,
 timers (`HostClock`), fs (`Source`/`Storage`), and audio later (HDA; our `AudioSink`). Its D8 rule
 (full keyboard *and* full pointer control, right-click menus, scroll, middle-click, back/forward buttons)
-is a UI requirement here (section 9). Its draft host API v0 has no audio or file-pick yet; M12 tracks that.
+is a UI requirement here (section 9). Its App API (draft v0.3, after our review) has audio, files, now-playing, the visualizer feed and the library; M12 maps to it.
 
 ## 5. Threading model (works with no threads)
 
@@ -1018,13 +1020,48 @@ directory both have them) and shown in the app snapshot (`audio`, `audio_panel`)
   album to be measured; the measurement decodes whole files (a fast native machine does a track in a fraction of a second, WebAssembly several times slower, which is why it is background
   work and only runs while the setting is on); the limiter's true-peak filter is a 12-tap Kaiser design, not the standard's exact table (within 0.1 dB on the Tech 3341 cases).
 
-**M12 Rusty Bucket adapter** (was M10). `rvp-host-rb` against the app ABI (Canvas, input, timers, fs, audio) once it
-exists, mapping `rvp-host` (playback, `NowPlaying`, `VisualizerTap`, `Library`) to the App API whose media
-interfaces rust-os models on ours (ADR-0026); decide runtime vs codec service (wasmi is too slow; see section 5).
-Nothing here may change core, `rvp-host`, `rvp-ui` or `rvp-app` for Rusty Bucket's sake. *Done when:* the player app
-runs inside Rusty Bucket under QEMU, opens a video from the ramdisk/FAT image, and a headless QEMU screendump
-shows decoded frames and the themed UI; **blocked** until `../rust-os` Phase 3 (host API v0) lands, plus
-audio and file APIs.
+**M12 Rusty Bucket adapter** (was M10). **Built against App API draft v0.3, tested against a mock host; waiting for the Bucket Simulator.**
+`rvp-host-rb` maps `rvp-host` (playback, `NowPlaying`, `VisualizerTap`, `Library`) to Rusty Bucket's App API (`bucket_v0`), whose
+media interfaces rust-os models on ours (ADR-0026). Nothing in core, `rvp-host`, `rvp-ui` or `rvp-app` was changed for it; the
+standalone rule holds (none of them knows Rusty Bucket). The API itself took our review (`docs/reviews/app-api-v0-review.md`: 28 items in
+v0.2, 13 deltas in v0.3, all folded in), so the adapter has no workarounds left for ambiguities.
+
+- **Crates.** `bucket-v0-sys` (raw imports of module `bucket_v0`, `#[repr(C)]` structs with compile-time size and offset asserts, constants
+  and error codes, the function table, a WebAssembly import parser and checker; no dependencies and no rvp knowledge, so Rusty Bucket
+  can adopt it), `bucket-v0-mock` (a deterministic mock host on virtual time for native tests), `rvp-host-rb` (the adapter and the loop),
+  `rvp-wave-bucket` (the wasm module: `bucket_main`, `bucket_save_state`, `bucket_thread_start`, the codecs).
+- **What the adapter does.** One loop: tick, then `events_wait(timeout = request_wake - now)`; events become `InputEvent`s and requests
+  (wheel lines are 40 x scale px). Files are non-blocking (`-BUSY` is `Pending`, `IO_READY` ends the sleep; a bounded wait for slow
+  `kv_load` and `file_open_id`, other events kept meanwhile). `Storage` on kv (thumbnails in the cache class). Audio on `audio_open`,
+  `audio_queued` and `audio_latency_us` (derived from `audio_clock` when missing; a clock-driven silent stand-in without a device).
+  `NowPlaying` with `TRANSPORT` commands (strings cut at 4 KiB on a character, covers over the limit or not PNG/JPEG left out, replayed
+  when the shell appears), `VisualizerTap` through `viz_block` and one `viz_summary_n` per tick, `Library` through the listing cursor
+  (partial listings append; escapes in `library_roots`), picks, saves, drops and launch files (one event per file, grouped into one
+  queue), `power_inhibit` (system awake while anything plays, display while a picture does), `launch_reason` (a toast after a crash), `restart`
+  (saves first), `TERMINATE` (save, flush, release the session), `SUSPEND`/`RESUME`/`VISIBILITY` (no frames while hidden, a full redraw
+  after), `MEMORY_PRESSURE` (thumbnail budget), `CAPS_CHANGED` (the optional interfaces follow the bits).
+- **Video.** Plan A: the app composes picture and UI and the adapter calls `canvas_present` (non-blocking; `-BUSY` for a stale size is
+  dropped, the `RESIZE` fixes it). `video_present` exists as `rvp_host_rb::video::VideoLayer` (layout tested, behind `VIDEO_YUV`) but
+  nothing calls it: it needs an app that leaves a transparent hole, which is a change to `rvp-app` we do not make for one host.
+- **Threads** (the threads build only, per the start-up contract): the app allocates each thread's stack and TLS and passes them in
+  `arg`; `bucket_thread_start` switches the stack pointer before it touches the stack, then runs `__wasm_init_tls`; the main thread
+  initialises its own TLS first. Checked in Node with real Workers (`cargo xtask bucket-smoke`; a build that skips the stack switch fails it).
+- **Builds and package.** `cargo xtask bucket` builds `app.wasm` (baseline, no SIMD), `app.threads.wasm` (SIMD128, atomics, shared
+  memory, nightly + `rust-src`; `--simd` adds `app.simd.wasm`), checks every module's imports against the documented set, and packs
+  `target/bucket/Rusty Wave.bucket` (ZIP: `manifest.toml`, modules, icons, `CHECKSUMS`, `SIGNATURE` from `RVP_BUCKET_SIGN_CMD`), then
+  runs the modules in Node. The manifest is `packaging/bucket/manifest.toml.in` (app ID `io.github.idometeor.RustyWave`, class `media`,
+  `[[builds]]`, file types, `restart = "on-trap"`).
+- **Tests** (all native and headless, no Simulator): `bucket-v0-sys` (layout asserts, function table equal to the documented set, the
+  parser and the drift checker), `bucket-v0-mock`, `rvp-host-rb/tests` (lifecycle and events, files with `-BUSY`/`IO_READY`, audio clock and
+  devices, kv, now-playing and transport, visualizer, power, library cursor, video layout, manifest), `rvp-wave-bucket/tests/imports.rs`
+  (builds the module for wasm32 and requires its imports to be exactly the documented functions with the documented signatures).
+- **Waiting for the Simulator** (`../rust-os/tools/bucket-sim`, being built): running the real `.bucket` against the real imports (so far a
+  Node stand-in checks the lifecycle and threads); `cargo xtask bucket-e2e [--sim PATH]` is the hook, skipped when it is not installed,
+  and needs scenarios once its script format exists; QEMU under Rusty Bucket (runtime choice: AOT or interpreter, risk R3); `video_present`
+  in the real pipeline; the Rusty Bucket side of the open questions in `docs/host-api.md`.
+- **Not done / limits.** No `FRAME` pacing (the core presents against `now`), no hot-reload state (everything is in the store), no theme or
+  Bucket Bar commands or clipboard (we draw our own look), no device selection. Found while testing: `Session::pause` never pauses the
+  audio sink, so a paused player keeps feeding and playing (see the notes in `docs/host-api.md`).
 
 ## 12. Risks and open questions
 
@@ -1032,7 +1069,7 @@ audio and file APIs.
 | --- | --- | --- |
 | R1 | `rav1d` 1.1.0 does not compile on `wasm32-unknown-unknown` (libc imports). | **Resolved in M4**: a private `libc` shim module (see `third_party/rav1d/PATCHES.md`) was the only change needed. The vendored copy decodes bit-exact in Node (`cargo xtask wasm-smoke`). Upstreaming the shim is still worthwhile. |
 | R2 | Real-time 1080p in single-threaded wasm for H.264/AV1/VP9. | **Resolved in M9**: SIMD128 kernels (single-threaded build: H.264 typical and VP9 at 0% dropped, H.264 25 Mbit/s 5%, AV1 9.6%) and the opt-in threads build (0% dropped on all four, 60 s each). Numbers in the M9 notes. |
-| R3 | Rusty Bucket's `wasmi` is an interpreter: video will not be realtime there. | M12; native codec service or a JIT/AOT runtime; tracked in `../rust-os/docs/planning/architecture.md` (D12 compile-ahead engine, D16 threads). |
+| R3 | Rusty Bucket's `wasmi` is an interpreter: video will not be realtime there. | M12: the manifest offers a baseline, an optional SIMD and a threads build, so the OS runs the best one its engine loads (Rusty Bucket's own plan: a compile-ahead engine); tracked in `../rust-os/docs/planning/architecture.md` (D12 compile-ahead engine, D16 threads). |
 | R4 | Bit-exact H.264 is long, detail-heavy work. | **Resolved in M6**: staged ffmpeg oracles, generated tables, synthetic streams for features x264 does not emit. |
 | R5 | `opus-decoder` is a 0.1.x crate. | Test vectors in M3; fallback `ropus`. |
 | R6 | Symphonia is MPL-2.0 and `std`. | Fine unmodified (file-level copyleft); audio crate is isolated, so it could be swapped for `nanomp3`/own decoders without touching the core. |
