@@ -20,7 +20,7 @@ mod theme_ui;
 
 pub use restore::{POSITION_KEY, QUEUE_KEY, SavedItem, SavedQueue};
 
-pub use services::{APP_SETTINGS_KEY, AppSettings, IntegrationChoice};
+pub use services::{APP_SETTINGS_KEY, AppSettings, IntegrationChoice, VIZ_CYCLE_STEPS};
 pub use setup::{SETUP_KEY, Setup};
 pub use snapshot::Snapshot;
 
@@ -1333,6 +1333,7 @@ impl App {
         m.now_track = cur_item.and_then(|i| i.track);
         m.now_art = m.now_track.and_then(|t| self.lib.lib.track(t)).map_or(0, |t| t.art);
         m.now_favorite = m.now_track.is_some_and(|t| self.lib.lib.is_favorite(t));
+        m.viz_cycle = self.svc.settings.viz_cycle;
         m.repeat = match self.playlist.repeat() {
             Repeat::Off => 0,
             Repeat::All => 1,

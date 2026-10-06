@@ -958,6 +958,7 @@ impl Ui {
                 1 => Action::Lib(LibAction::VizStep(1)),
                 2 => Action::Lib(LibAction::VizPalette),
                 3 => Action::Lib(LibAction::VizInfo),
+                5 => Action::Lib(LibAction::VizCycle),
                 _ => Action::Lib(LibAction::VizToggle),
             }),
             LibHit::UpNext(i) => {
@@ -1290,6 +1291,10 @@ impl Ui {
         let view = self.lib.view;
         let nav_view = !matches!(view, View::NowPlaying | View::Visualizer);
         let plain = !mods.ctrl && !mods.alt && !mods.logo;
+        // Shift+V on the visualizer: cycle through the effects by itself, or stop.
+        if view == View::Visualizer && plain && mods.shift && matches!(key, Key::Char('v' | 'V')) {
+            return out.push(Action::Lib(LibAction::VizCycle));
+        }
         // Keys that mean the same everywhere in the library.
         match key {
             Key::Escape => {

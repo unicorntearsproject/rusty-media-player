@@ -2204,6 +2204,7 @@ impl Ui {
                 Icon::Sparkles,
                 Icon::Info,
                 if self.lib.viz_on { Icon::Pause } else { Icon::Play },
+                Icon::RefreshCw,
             ];
             let (first, last) = (g.viz_btns.first().map(|b| b.1), g.viz_btns.last().map(|b| b.1));
             if let (Some(f), Some(l)) = (first, last) {
@@ -2218,7 +2219,9 @@ impl Ui {
                 if hot {
                     fb.fill_rrect(*r, r.h * 0.5, Paint::Solid(fade(t::white(), 0.12)), a);
                 }
-                let on = (*i == 3 && self.lib.viz_info) || (*i == 4 && self.lib.viz_on);
+                let on = (*i == 3 && self.lib.viz_info)
+                    || (*i == 4 && self.lib.viz_on)
+                    || (*i == 5 && model.viz_cycle);
                 self.icon(
                     fb,
                     icons[*i as usize],

@@ -125,6 +125,8 @@ pub struct UiModel {
     pub now_track: Option<u32>,
     /// What is playing is a favorite.
     pub now_favorite: bool,
+    /// The visualizer changes its effect by itself (Shift+V on the visualizer; the settings say how often and in what order).
+    pub viz_cycle: bool,
     /// The version of the app, `0.0.5` (the About page).
     pub version: String,
     /// The commit the app was built from, a short hash (the About page).

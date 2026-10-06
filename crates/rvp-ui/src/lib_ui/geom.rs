@@ -434,14 +434,14 @@ impl Ui {
 
     fn geom_viz(&mut self, g: &mut Geom) {
         let s = self.scale;
-        // The switcher: previous, next, palette, info, animation, centred above the bar.
+        // The switcher: previous, next, palette, info, animation, cycle, centred above the bar.
         let w = g.m.w;
         let bw = 44.0 * s;
         let name_gap = 110.0 * s;
-        let total = bw * 5.0 + 8.0 * s * 4.0 + name_gap;
+        let total = bw * 6.0 + 8.0 * s * 5.0 + name_gap;
         let mut x = (w - total) * 0.5;
         let y = g.m.bar.y - 70.0 * s;
-        for (i, wid) in [(0u8, bw), (1, bw), (2, bw), (3, bw), (4, bw)] {
+        for (i, wid) in [(0u8, bw), (1, bw), (2, bw), (3, bw), (4, bw), (5, bw)] {
             g.viz_btns.push((i, RectF::new(x, y, wid, 40.0 * s)));
             x += wid + 8.0 * s + if i == 0 { name_gap } else { 0.0 };
         }

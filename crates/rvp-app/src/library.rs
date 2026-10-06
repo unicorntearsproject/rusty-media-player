@@ -60,6 +60,10 @@ pub(crate) struct LibState {
     pub viz: Viz,
     pub viz_scope: Vec<f32>,
     pub viz_last_us: Timestamp,
+    /// When the effect last changed (by hand or by the cycle), for the cycle.
+    pub viz_cycle_at: Timestamp,
+    /// State of the random order (a small xorshift; the order only has to look unplanned).
+    pub viz_rng: u32,
     pub viz_frame: u64,
     pub now: NowMeta,
     pub imports: Imports,
@@ -91,6 +95,8 @@ impl LibState {
             viz: Viz::new(),
             viz_scope: Vec::new(),
             viz_last_us: 0,
+            viz_cycle_at: 0,
+            viz_rng: 0x9e37_79b9,
             viz_frame: 0,
             now: NowMeta::default(),
             imports: Rc::default(),
@@ -488,6 +494,7 @@ impl App {
         if !wanted {
             return;
         }
+        self.viz_cycle_tick(now, reduce);
         // Big screens (a 2560x1440 canvas) take fewer pictures a second to keep the tick short.
         let (sw, sh) = self.ui.size();
         let every = if sw as u64 * sh as u64 > 2_200_000 { VIZ_EVERY_US * 3 / 2 } else { VIZ_EVERY_US };
@@ -509,6 +516,38 @@ impl App {
             self.base_dirty = true;
             self.force_draw = true;
         }
+    }
+
+    /// The cycle: after the set time on screen, the next effect (in turn, or another one at random). Reduced motion keeps the picture
+    /// still, so nothing changes by itself then.
+    fn viz_cycle_tick(&mut self, now: Timestamp, reduce: bool) {
+        let st = &self.svc.settings;
+        if !st.viz_cycle || reduce {
+            self.lib.viz_cycle_at = now;
+            return;
+        }
+        if self.lib.viz_cycle_at == 0 {
+            self.lib.viz_cycle_at = now;
+        }
+        if now - self.lib.viz_cycle_at < st.viz_secs as Timestamp * 1_000_000 {
+            return;
+        }
+        let random = st.viz_random;
+        self.lib.viz_cycle_at = now;
+        let cur = self.lib.viz.effect;
+        self.lib.viz.effect = if random {
+            // xorshift32; skip the one that is showing.
+            let mut x = self.lib.viz_rng;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.lib.viz_rng = x;
+            cur.step(1 + (x % (rvp_viz::EFFECTS.len() as u32 - 1)) as i32)
+        } else {
+            cur.step(1)
+        };
+        self.base_dirty = true;
+        self.lib.viz_last_us = 0;
     }
 
     // ---- the queue ---------------------------------------------------------------------------------------------------------------
@@ -824,6 +863,7 @@ impl App {
             LibAction::VideoLayout(_) | LibAction::SortVideos(..) => {}
             LibAction::VizStep(d) => {
                 self.lib.viz.effect = self.lib.viz.effect.step(d as i32);
+                self.lib.viz_cycle_at = now;
                 self.base_dirty = true;
                 self.ui.show_toast(self.lib.viz.effect.name(), now);
                 self.lib.viz_last_us = 0;
@@ -836,6 +876,25 @@ impl App {
             LibAction::VizInfo => {
                 let on = !self.ui.lib_state().viz_info();
                 self.ui.set_viz_info(on);
+            }
+            LibAction::VizCycle => {
+                let on = !self.svc.settings.viz_cycle;
+                self.svc.settings.viz_cycle = on;
+                self.lib.viz_cycle_at = now;
+                self.save_app_settings(host);
+                let st = &self.svc.settings;
+                let msg = if on && self.ui.config.reduce_motion {
+                    "Cycling on, but motion is reduced: effects stay put".to_string()
+                } else if on {
+                    format!(
+                        "Cycling effects: {}, every {}",
+                        if st.viz_random { "random" } else { "in turn" },
+                        crate::services::viz_secs_text(st.viz_secs)
+                    )
+                } else {
+                    "Cycling off".to_string()
+                };
+                self.ui.show_toast(&msg, now);
             }
             LibAction::VizToggle => {
                 let on = !self.ui.lib_state().viz_on();

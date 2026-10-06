@@ -182,6 +182,8 @@ pub enum LibAction {
     VizInfo,
     /// Visualizer: turn the animation on or off (it starts off with reduced motion).
     VizToggle,
+    /// Visualizer: switch the automatic change of effect on or off (Shift+V).
+    VizCycle,
 }
 
 /// Something the UI collected that carries text, which an [`crate::Action`] cannot.

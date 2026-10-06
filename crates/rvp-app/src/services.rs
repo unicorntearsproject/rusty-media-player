@@ -26,9 +26,20 @@ pub enum IntegrationChoice {
     Done,
 }
 
+/// The lengths the visualizer's cycle time steps through, seconds (15 s to 10 min).
+pub const VIZ_CYCLE_STEPS: [u16; 6] = [15, 30, 60, 120, 300, 600];
+
 /// What is kept between runs.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppSettings {
+    /// Tooltips on controls (on unless switched off).
+    pub tooltips: bool,
+    /// The visualizer changes its effect by itself.
+    pub viz_cycle: bool,
+    /// ... in random order (else one after the other).
+    pub viz_random: bool,
+    /// ... every this many seconds (one of [`VIZ_CYCLE_STEPS`]).
+    pub viz_secs: u16,
     /// Check for updates by itself, at most once a day (off unless the user switches it on).
     pub auto_check: bool,
     /// When a check last started, Unix seconds (0 = never).
@@ -39,6 +50,27 @@ pub struct AppSettings {
     pub integration: IntegrationChoice,
     /// The default-media-player offer (`Ask` until the user answered it; `Never` after a "no thanks").
     pub default_player: IntegrationChoice,
+}
+
+/// `15 s`, `1 min`, `10 min`.
+pub fn viz_secs_text(secs: u16) -> String {
+    if secs < 60 { format!("{secs} s") } else { format!("{} min", secs / 60) }
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            tooltips: true,
+            viz_cycle: false,
+            viz_random: false,
+            viz_secs: 60,
+            auto_check: false,
+            last_check: 0,
+            skipped: String::new(),
+            integration: IntegrationChoice::default(),
+            default_player: IntegrationChoice::default(),
+        }
+    }
 }
 
 fn choice_name(c: IntegrationChoice) -> &'static str {
@@ -61,12 +93,16 @@ impl AppSettings {
     /// The text to keep.
     pub fn to_text(&self) -> String {
         format!(
-            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\ndefault_player={}\n",
+            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\ndefault_player={}\ntooltips={}\nviz_cycle={}\nviz_random={}\nviz_secs={}\n",
             self.auto_check as u8,
             self.last_check,
             self.skipped.replace(['\n', '\r'], ""),
             choice_name(self.integration),
             choice_name(self.default_player),
+            self.tooltips as u8,
+            self.viz_cycle as u8,
+            self.viz_random as u8,
+            self.viz_secs,
         )
     }
 
@@ -85,6 +121,13 @@ impl AppSettings {
                 "skipped" => s.skipped = v.trim().to_string(),
                 "integration" => s.integration = choice_from(v.trim()),
                 "default_player" => s.default_player = choice_from(v.trim()),
+                "tooltips" => s.tooltips = v.trim() != "0",
+                "viz_cycle" => s.viz_cycle = v.trim() == "1",
+                "viz_random" => s.viz_random = v.trim() == "1",
+                "viz_secs" => {
+                    // Only the offered lengths (a hand-edited file cannot make it flicker); anything else is the default.
+                    s.viz_secs = v.trim().parse().ok().filter(|n| VIZ_CYCLE_STEPS.contains(n)).unwrap_or(60)
+                }
                 _ => {}
             }
         }
@@ -124,6 +167,8 @@ enum Btn {
     OpenDefault,
     ToggleMenu,
     OpenUpdates,
+    VizOrder,
+    VizTime,
     // The default-player dialog.
     SetDefault,
     CheckAll,
@@ -139,6 +184,8 @@ enum Btn {
 enum Tog {
     AutoCheck,
     AppMenu,
+    Tooltips,
+    VizCycle,
     /// Media type `n` of [`MEDIA_TYPES`] in the default-player checklist.
     Type(usize),
 }
@@ -161,7 +208,7 @@ struct Cache {
 #[derive(Debug, Default)]
 pub(crate) struct Services {
     loaded: bool,
-    settings: AppSettings,
+    pub(crate) settings: AppSettings,
     screen: Option<Screen>,
     cache: Cache,
     /// The check in flight was started by the clock, not by the user.
@@ -196,9 +243,17 @@ impl App {
         let loaded = self.svc.loaded;
         let stored =
             if loaded { None } else { rvp_core::task::block_on(host.storage().load(APP_SETTINGS_KEY)) };
+        // What is kept loads whether or not the host has services (a browser has none, and still keeps its settings).
+        if !self.svc.loaded {
+            self.svc.loaded = true;
+            if let Some(s) =
+                stored.as_deref().and_then(|b| core::str::from_utf8(b).ok()).and_then(AppSettings::from_text)
+            {
+                self.svc.settings = s;
+            }
+        }
         let Some(svc) = host.app_services() else {
             self.svc.cache.present = false;
-            self.svc.loaded = true;
             return;
         };
         let mut cache = Cache {
@@ -217,14 +272,6 @@ impl App {
         let now_unix = svc.unix_time();
         let mut persist = false;
         let mut open_screen = None;
-        if !self.svc.loaded {
-            self.svc.loaded = true;
-            if let Some(s) =
-                stored.as_deref().and_then(|b| core::str::from_utf8(b).ok()).and_then(AppSettings::from_text)
-            {
-                self.svc.settings = s;
-            }
-        }
         // An automatic check, when switched on and a day has passed (or the clock is odd: never stay silent forever).
         let s = &mut self.svc;
         let due = s.settings.last_check == 0
@@ -309,7 +356,7 @@ impl App {
         }
     }
 
-    fn save_app_settings<H>(&mut self, host: &mut H)
+    pub(crate) fn save_app_settings<H>(&mut self, host: &mut H)
     where
         H: Host<Video = FrameSink>,
     {
@@ -390,6 +437,13 @@ impl App {
                 };
                 add("Audio settings\u{2026}", false, Btn::OpenAudio);
                 add("Theme\u{2026}", false, Btn::OpenTheme);
+                let st = &self.svc.settings;
+                add(
+                    if st.viz_random { "Visualizer order: random" } else { "Visualizer order: in turn" },
+                    false,
+                    Btn::VizOrder,
+                );
+                add(&format!("Visualizer cycle time: {}", viz_secs_text(st.viz_secs)), false, Btn::VizTime);
                 if matches!(c.default_player, DefaultPlayer::Available { .. }) {
                     add("Set as default media player\u{2026}", false, Btn::OpenDefault);
                 }
@@ -402,6 +456,20 @@ impl App {
                     add("Check for updates\u{2026}", false, Btn::OpenUpdates);
                 }
                 add("Close", true, Btn::Close);
+                spec.compact = true;
+                let st = &self.svc.settings;
+                spec.toggles.push(DialogToggle {
+                    label: "Show tooltips".into(),
+                    desc: "A note on what a control does, with its key, when the pointer rests on it or the keyboard reaches it.".into(),
+                    on: st.tooltips,
+                });
+                toggles.push(Tog::Tooltips);
+                spec.toggles.push(DialogToggle {
+                    label: "Change the visualizer's effect by itself".into(),
+                    desc: "Shift+V on the visualizer does the same. Reduced motion keeps it still.".into(),
+                    on: st.viz_cycle,
+                });
+                toggles.push(Tog::VizCycle);
             }
             Screen::Theme => {
                 spec.title = "Theme".into();
@@ -688,6 +756,19 @@ impl App {
                 self.refresh_model(now);
                 return;
             }
+            Btn::VizOrder => {
+                self.svc.settings.viz_random = !self.svc.settings.viz_random;
+                self.save_app_settings(host);
+                self.refresh_model(now);
+                return;
+            }
+            Btn::VizTime => {
+                let cur = VIZ_CYCLE_STEPS.iter().position(|s| *s == self.svc.settings.viz_secs).unwrap_or(2);
+                self.svc.settings.viz_secs = VIZ_CYCLE_STEPS[(cur + 1) % VIZ_CYCLE_STEPS.len()];
+                self.save_app_settings(host);
+                self.refresh_model(now);
+                return;
+            }
             Btn::OpenAudio => {
                 self.svc.screen = None;
                 self.ui.open_audio_settings();
@@ -767,7 +848,13 @@ impl App {
                     }
                 }
             }
-            Btn::OpenAudio | Btn::OpenTheme | Btn::ThemePreview | Btn::ThemeApply | Btn::ThemeReset => {}
+            Btn::VizOrder
+            | Btn::VizTime
+            | Btn::OpenAudio
+            | Btn::OpenTheme
+            | Btn::ThemePreview
+            | Btn::ThemeApply
+            | Btn::ThemeReset => {}
             Btn::OpenDefault => {
                 self.svc.default_checked = alloc::vec![true; MEDIA_TYPES.len()];
                 self.svc.screen = Some(Screen::Default(false));
@@ -825,6 +912,15 @@ impl App {
         match tog {
             Tog::AutoCheck => {
                 self.svc.settings.auto_check = !self.svc.settings.auto_check;
+                self.save_app_settings(host);
+            }
+            Tog::Tooltips => {
+                self.svc.settings.tooltips = !self.svc.settings.tooltips;
+                self.save_app_settings(host);
+            }
+            Tog::VizCycle => {
+                self.svc.settings.viz_cycle = !self.svc.settings.viz_cycle;
+                self.lib.viz_cycle_at = now;
                 self.save_app_settings(host);
             }
             Tog::AppMenu => {

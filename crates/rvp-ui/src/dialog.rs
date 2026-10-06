@@ -653,6 +653,50 @@ mod tests {
     }
 
     #[test]
+    fn the_biggest_settings_dialog_fits_a_720_and_a_600_pixel_window() {
+        // Every button and switch the Settings dialog can have at once (a desktop with all the services).
+        let labels = [
+            "Audio settings\u{2026}",
+            "Theme\u{2026}",
+            "Visualizer order: random",
+            "Visualizer cycle time: 10 min",
+            "Set as default media player\u{2026}",
+            "Remove from app menu",
+            "Check for updates\u{2026}",
+            "Close",
+        ];
+        let sp = DialogSpec {
+            title: "Settings".into(),
+            body: alloc::vec!["Rusty Wave 0.0.5".into()],
+            toggles: alloc::vec![
+                DialogToggle {
+                    label: "Show tooltips".into(),
+                    desc: "A note on what a control does, with its key, when the pointer rests on it or the keyboard reaches it.".into(),
+                    on: true
+                },
+                DialogToggle {
+                    label: "Change the visualizer's effect by itself".into(),
+                    desc: "Shift+V on the visualizer does the same. Reduced motion keeps it still.".into(),
+                    on: false
+                },
+            ],
+            buttons: labels.iter().map(|l| DialogButton::new(l, *l == "Close")).collect(),
+            compact: true,
+            ..DialogSpec::default()
+        };
+        for (w, h) in [(1280, 720), (1024, 600)] {
+            let mut ui = Ui::new(UiConfig::default());
+            ui.set_size(w, h, 1.0);
+            let g = ui.dialog_geom(&sp);
+            assert!(g.card.y >= -0.5 && g.card.bottom() <= h as f32 + 0.5, "{w}x{h}: {:?}", g.card);
+            assert!(
+                g.buttons.iter().all(|b| b.bottom() <= g.card.bottom() + 0.5),
+                "{w}x{h}: a button outside the card"
+            );
+        }
+    }
+
+    #[test]
     fn drawing_does_not_panic_for_any_shape() {
         let mut ui = ui(800);
         let mut fb = FrameBuffer::new(800, 720);
