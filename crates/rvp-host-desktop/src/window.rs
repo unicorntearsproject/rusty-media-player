@@ -43,6 +43,13 @@ pub fn run(opts: Options, data_dir: PathBuf) -> i32 {
     let mut host = DesktopHost::new(data_dir, opts.no_audio);
     let smoke = Smoke::new(&opts);
     host.surface.keep = smoke.as_ref().is_some_and(|s| s.wants_frames());
+    // Update checks and the app-menu offer; a scripted run is not interrupted by their dialogs unless it asks for them.
+    if smoke.is_none() || opts.app_services {
+        let manifest = crate::services::manifest_url(opts.update_manifest.as_deref());
+        host.services =
+            Some(crate::services::DesktopServices::new(&manifest, std::env::args_os().skip(1).collect()));
+    }
+    let restart = host.services.as_ref().map(|s| s.restart_flag());
     let mut app = App::new(Rc::new(DesktopCodecs), UiConfig { reduce_motion: reduce_motion() });
     app.ui_mut().set_font_loader(crate::fonts::system_font_loader());
     let _ = pool;
@@ -71,7 +78,16 @@ pub fn run(opts: Options, data_dir: PathBuf) -> i32 {
         eprintln!("rusty-wave: {e}");
         return 1;
     }
-    handler.exit_code
+    let code = handler.exit_code;
+    // After "Restart now" the window has closed and its state is saved: only now does the new copy start.
+    if restart.is_some_and(|r| r.get()) {
+        let services = handler.host.services.take();
+        drop(handler);
+        if let Some(Err(e)) = services.map(|s| s.finish_restart()) {
+            eprintln!("rusty-wave: could not start the new version: {e}");
+        }
+    }
+    code
 }
 
 /// The user's reduced-motion setting, where the desktop has one (GNOME's `enable-animations`).
@@ -397,6 +413,10 @@ impl Handler {
             self.open_paths(drops, false);
         }
         self.app.tick(&mut self.host);
+        if self.host.services.as_ref().is_some_and(|s| s.restart_flag().get()) {
+            self.quit(el);
+            return;
+        }
         self.handle_effects();
         self.after_tick();
         if self.opts.paused && !self.started_paused && self.app.model().state.is_active() {

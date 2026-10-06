@@ -238,6 +238,7 @@ impl Ui {
         if self.lib.prompt.is_some() {
             self.draw_prompt(fb, &g);
         }
+        self.draw_app_dialog(fb, model);
         self.lib.animated = animated;
     }
 

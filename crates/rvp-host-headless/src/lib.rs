@@ -376,6 +376,8 @@ pub struct UiHost {
     pub now_playing: Option<RecordingNowPlaying>,
     /// What [`Host::stable_ids`] answers (true: ids are file paths; false acts like a browser's session-bound ids).
     pub stable: bool,
+    /// When set, the host offers update and app-menu services (scripted by the test).
+    pub services: Option<rvp_host::ScriptedServices>,
 }
 
 impl Default for UiHost {
@@ -400,6 +402,7 @@ impl UiHost {
             now_playing: None,
             presents: 0,
             stable: true,
+            services: None,
         }
     }
 
@@ -447,6 +450,9 @@ impl Host for UiHost {
     }
     fn library(&mut self) -> Option<&mut dyn Library> {
         self.library.as_mut().map(|l| l as &mut dyn Library)
+    }
+    fn app_services(&mut self) -> Option<&mut dyn rvp_host::AppServices> {
+        self.services.as_mut().map(|s| s as &mut dyn rvp_host::AppServices)
     }
     fn stable_ids(&self) -> bool {
         self.stable

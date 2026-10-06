@@ -229,6 +229,40 @@ impl App {
             }
             false => "\"audio_panel\":null,".to_string(),
         };
+        j += &format!(
+            "\"app\":{{\"updates\":{},\"integration\":{}}},",
+            m.app.updates,
+            m.app.integration.map_or("null".to_string(), |b| b.to_string())
+        );
+        j += &match &m.dialog {
+            Some(d) => {
+                let join = |v: alloc::vec::Vec<String>| v.join(",");
+                format!(
+                    "\"dialog\":{{\"title\":{},\"body\":[{}],\"progress\":{},\"toggles\":[{}],\"buttons\":[{}]}},",
+                    esc(&d.title),
+                    join(d.body.iter().map(|b| esc(b)).collect()),
+                    d.progress.map_or("null".to_string(), |p| p.to_string()),
+                    join(
+                        d.toggles
+                            .iter()
+                            .map(|t| format!("{{\"label\":{},\"on\":{}}}", esc(&t.label), t.on))
+                            .collect()
+                    ),
+                    join(
+                        d.buttons
+                            .iter()
+                            .map(|b| format!(
+                                "{{\"label\":{},\"primary\":{},\"enabled\":{}}}",
+                                esc(&b.label),
+                                b.primary,
+                                b.enabled
+                            ))
+                            .collect()
+                    ),
+                )
+            }
+            None => "\"dialog\":null,".to_string(),
+        };
         let v = self.viz();
         j += &format!(
             "\"viz\":{{\"effect\":{},\"palette\":{},\"frames\":{}}},",

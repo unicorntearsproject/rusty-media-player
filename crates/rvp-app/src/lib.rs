@@ -13,10 +13,12 @@ extern crate std;
 
 mod library;
 mod restore;
+mod services;
 mod snapshot;
 
 pub use restore::{POSITION_KEY, QUEUE_KEY, SavedItem, SavedQueue};
 
+pub use services::{APP_SETTINGS_KEY, AppSettings, IntegrationChoice};
 pub use snapshot::Snapshot;
 
 use alloc::format;
@@ -125,6 +127,8 @@ pub struct App {
     settings_loaded: bool,
     /// The library revision the playing item's loudness hint was made for.
     hint_rev: u64,
+    /// Update checks and the app-menu offer (only when the host has them).
+    svc: services::Services,
 }
 
 /// What was last told to the host's now-playing sink.
@@ -205,6 +209,7 @@ impl App {
             settings: AudioSettings::default(),
             settings_loaded: false,
             hint_rev: u64::MAX,
+            svc: services::Services::default(),
             codecs,
         }
     }
@@ -783,6 +788,7 @@ impl App {
         let t0 = host.clock().now_us();
         self.pump(host);
         self.settings_tick(host);
+        self.services_tick(host);
         let mut session = self.session.take();
         if let Some(s) = &mut session {
             s.tick(host);
@@ -1064,6 +1070,11 @@ impl App {
             }
             Action::Lib(a) => self.apply_lib(host, a, now),
             Action::ShowAudioSettings => self.ui.open_audio_settings(),
+            Action::CheckForUpdates => self.check_for_updates(host, now),
+            Action::ToggleIntegration => self.toggle_integration(host, now),
+            Action::DialogButton(n) => self.dialog_button(host, n, now),
+            Action::DialogToggle(n) => self.dialog_toggle(host, n, now),
+            Action::DialogClose => self.dialog_close(host, now),
             Action::SetCrossfade(on) => {
                 self.update_settings(host, |s| s.crossfade = on);
                 let secs = self.settings.crossfade_secs;
@@ -1316,6 +1327,8 @@ impl App {
                 self.warnings_seen = warnings.len();
             }
         }
+        m.app = self.app_model();
+        m.dialog = self.dialog_spec();
         self.model = m;
     }
 
@@ -1393,7 +1406,8 @@ impl App {
             && self.model.has_video
             && self.model.subtitle.is_none()
             && self.model.subtitle_cues.is_empty()
-            && !self.ui.has_overlay();
+            && !self.ui.has_overlay()
+            && self.model.dialog.is_none();
         if !bare {
             self.fb.copy_from(&self.base);
             if lib_mode {

@@ -210,6 +210,10 @@ pub struct Ui {
     pub(crate) pressed_lib: Option<crate::lib_ui::LibHit>,
     /// The Audio settings panel, while it is up.
     pub(crate) audio_panel: Option<crate::audio_panel::AudioPanel>,
+    /// The state of the application's modal dialog (focus, hover), while one is up.
+    pub(crate) dialog: crate::dialog::DialogState,
+    /// A dialog was up at the last draw or input.
+    pub(crate) dialog_open: bool,
 }
 
 impl Default for Ui {
@@ -254,6 +258,8 @@ impl Ui {
             lib: crate::lib_ui::LibUi::default(),
             pressed_lib: None,
             audio_panel: None,
+            dialog: crate::dialog::DialogState::default(),
+            dialog_open: false,
         }
     }
 
@@ -388,6 +394,7 @@ impl Ui {
             || self.toast.is_some()
             || self.drag_over
             || self.audio_panel.is_some()
+            || self.dialog_open
     }
 
     /// Whether the transport bar is (becoming) visible.
@@ -623,6 +630,11 @@ impl Ui {
 
     /// Handle one input event; returns what the user asked for.
     pub fn handle(&mut self, ev: &InputEvent, now_us: i64, model: &UiModel) -> Vec<Action> {
+        if let Some(d) = &model.dialog {
+            self.dialog_open = true;
+            return self.dialog_event(ev, now_us, d);
+        }
+        self.dialog_closed();
         if self.audio_panel.is_some() {
             return self.audio_panel_event(ev, now_us, model);
         }

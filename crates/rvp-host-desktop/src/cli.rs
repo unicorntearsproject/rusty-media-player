@@ -21,6 +21,12 @@ OPTIONS:
         --data-dir <DIR>       keep settings, library and queue in DIR (default: the user's data directory)
 
 FOR SCRIPTS AND TESTS:
+        --update-manifest <URL>  look for updates in this manifest (an https:// or file:// URL, or a path) instead of the published one
+        --update-now           check for an update, install it if there is one and exit (no window); exit status 0 installed,
+                               10 up to date, 11 an update this installation cannot apply itself, 1 failed
+        --integration <ACTION> add, remove or show (status) the app-menu entry (AppImage; Start menu and file types on Windows) and exit
+        --app-services         offer update checks and the app-menu entry even in a scripted run (they are off with --exit-after,
+                               --screenshot, --press and --report so tests are not interrupted by their dialogs)
         --exit-after <SEC>     quit after SEC seconds
         --screenshot <PNG>     write the window's picture to PNG (at --screenshot-after, else at exit)
         --screenshot-after <SEC>
@@ -64,6 +70,14 @@ pub struct Options {
     pub paused: bool,
     /// Keys to press: `(seconds into the run, key text)`.
     pub press: Vec<(f64, String)>,
+    /// Another update manifest.
+    pub update_manifest: Option<String>,
+    /// Check, install and exit.
+    pub update_now: bool,
+    /// `add`, `remove` or `status`: change or show the app-menu entry and exit.
+    pub integration: Option<String>,
+    /// Offer the app services in a scripted run.
+    pub app_services: bool,
 }
 
 /// Parse `args` (without the program name).
@@ -91,6 +105,16 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--no-audio" => o.no_audio = true,
             "--no-media-keys" => o.no_media_keys = true,
             "--paused" => o.paused = true,
+            "--update-now" => o.update_now = true,
+            "--app-services" => o.app_services = true,
+            "--update-manifest" => o.update_manifest = Some(value("a URL or a path")?),
+            "--integration" => {
+                let v = value("add, remove or status")?;
+                if !matches!(v.as_str(), "add" | "remove" | "status") {
+                    return Err("--integration needs add, remove or status".into());
+                }
+                o.integration = Some(v);
+            }
             "--window" => {
                 let v = value("WxH")?;
                 let (w, h) = v.split_once(['x', 'X']).ok_or("--window needs WxH, for example 1280x720")?;
@@ -184,6 +208,18 @@ mod tests {
         assert!(p(&["--screenshot"]).is_err());
         assert_eq!(p(&["--", "-odd.mkv"]).unwrap().inputs, ["-odd.mkv"]);
         assert!(p(&["-h"]).unwrap().help && p(&["--version"]).unwrap().version);
+        let u = p(&[
+            "--update-now",
+            "--update-manifest",
+            "/tmp/m.json",
+            "--integration=status",
+            "--app-services",
+        ])
+        .unwrap();
+        assert!(u.update_now && u.app_services);
+        assert_eq!(u.update_manifest.as_deref(), Some("/tmp/m.json"));
+        assert_eq!(u.integration.as_deref(), Some("status"));
+        assert!(p(&["--integration", "sideways"]).is_err());
     }
 
     #[test]

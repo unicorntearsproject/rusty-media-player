@@ -180,6 +180,8 @@ pub struct DesktopHost {
     pub library: DesktopLibrary,
     /// The system media controls, if they could be started.
     pub media: Option<DesktopNowPlaying>,
+    /// Update checks and the app-menu entry (off in scripted runs unless asked for).
+    pub services: Option<crate::services::DesktopServices>,
 }
 
 impl DesktopHost {
@@ -194,6 +196,7 @@ impl DesktopHost {
             storage: FileStorage::new(data_dir),
             library: DesktopLibrary::new(),
             media: None,
+            services: None,
         }
     }
 }
@@ -233,6 +236,9 @@ impl Host for DesktopHost {
     }
     fn library(&mut self) -> Option<&mut dyn Library> {
         Some(&mut self.library)
+    }
+    fn app_services(&mut self) -> Option<&mut dyn rvp_host::AppServices> {
+        self.services.as_mut().map(|s| s as &mut dyn rvp_host::AppServices)
     }
     fn stable_ids(&self) -> bool {
         true

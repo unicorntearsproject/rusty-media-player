@@ -251,7 +251,12 @@ impl Updater {
                     if let Ok(mut g) = me2.inner.lock()
                         && matches!(g.state, State::Downloading { .. })
                     {
-                        g.state = State::Downloading { done, total };
+                        // Everything is here: what follows is checking it and putting it in place.
+                        g.state = if total > 0 && done >= total {
+                            State::Installing
+                        } else {
+                            State::Downloading { done, total }
+                        };
                     }
                 }
             };

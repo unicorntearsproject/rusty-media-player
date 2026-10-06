@@ -96,6 +96,16 @@ pub enum Action {
     GoBack,
     /// An action of the library (play, queue, playlists, folders, visualizer).
     Lib(LibAction),
+    /// Look for a newer version (and show what was found).
+    CheckForUpdates,
+    /// Add the app to the desktop's app menu, or take it out again.
+    ToggleIntegration,
+    /// Press button `n` of the application's dialog.
+    DialogButton(u8),
+    /// Flip switch `n` of the application's dialog.
+    DialogToggle(u8),
+    /// Close the application's dialog (Escape, the X).
+    DialogClose,
     /// Show the Audio settings panel (crossfade and automatic level).
     ShowAudioSettings,
     /// Crossfade on or off.
@@ -560,7 +570,7 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::act("Quieter", Action::VolumeBy(-5)),
         MenuItem::act(if model.muted { "Unmute" } else { "Mute" }, Action::ToggleMute).sep(),
     ];
-    alloc::vec![
+    let mut v = alloc::vec![
         MenuItem::act("Open file\u{2026}", Action::OpenFile),
         play.sep(),
         MenuItem::parent("Seek", seek).enabled(has),
@@ -590,7 +600,18 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
             Action::ToggleFullscreen
         )
         .sep(),
-    ]
+    ];
+    // What the host offers beyond playback: only where it applies.
+    if model.app.updates {
+        v.push(MenuItem::act("Check for updates\u{2026}", Action::CheckForUpdates).sep());
+    }
+    if let Some(on) = model.app.integration {
+        let label = if on { "Remove from the app menu" } else { "Add to the app menu" };
+        let mut m = MenuItem::act(label, Action::ToggleIntegration);
+        m.separator = !model.app.updates;
+        v.push(m);
+    }
+    v
 }
 
 /// All actions reachable from a menu, submenus included.

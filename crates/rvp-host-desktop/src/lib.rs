@@ -13,9 +13,11 @@ pub mod fonts;
 pub mod host;
 pub mod input;
 pub mod media;
+pub mod services;
 pub mod smoke;
 pub mod source;
 pub mod storage;
+pub mod update_cli;
 pub mod walk;
 pub mod window;
 
@@ -37,6 +39,12 @@ pub fn main_with_args(args: Vec<String>) -> i32 {
     if opts.version {
         println!("rusty-wave {}", env!("CARGO_PKG_VERSION"));
         return 0;
+    }
+    if opts.update_now {
+        return update_cli::update_now(&opts);
+    }
+    if let Some(action) = opts.integration.clone() {
+        return update_cli::integration(&opts, &action);
     }
     let dir = window::data_dir(&opts);
     window::run(opts, dir)

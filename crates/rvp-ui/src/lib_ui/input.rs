@@ -551,6 +551,11 @@ impl Ui {
         model: &UiModel,
         ctx: &LibCtx<'_>,
     ) -> Vec<Action> {
+        if let Some(d) = &model.dialog {
+            self.dialog_open = true;
+            return self.dialog_event(ev, now_us, d);
+        }
+        self.dialog_closed();
         if self.audio_panel.is_some() {
             return self.audio_panel_event(ev, now_us, model);
         }

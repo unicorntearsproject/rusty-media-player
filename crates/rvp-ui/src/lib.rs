@@ -17,6 +17,7 @@ extern crate std;
 
 pub mod actions;
 pub mod audio_panel;
+pub mod dialog;
 mod draw;
 pub mod font;
 pub mod gfx;
@@ -30,8 +31,9 @@ pub mod ui;
 
 pub use actions::{Action, MenuItem, SHORTCUTS, SPEEDS, Shortcut};
 pub use audio_panel::{AudioControl, AudioPanelGeom};
+pub use dialog::{DialogButton, DialogControl, DialogGeom, DialogSpec, DialogToggle};
 pub use font::{FontData, FontLoader};
 pub use gfx::{FrameBuffer, Paint, RectF};
 pub use lib_ui::{Detail, Enqueue, LibAction, LibCtx, LibHit, LibUi, Mode, Scope, UiCommand, View};
-pub use model::{ChapterItem, MediaState, PlaylistEntry, TrackItem, UiModel, format_time};
+pub use model::{AppModel, ChapterItem, MediaState, PlaylistEntry, TrackItem, UiModel, format_time};
 pub use ui::{Cursor, HIDE_AFTER_US, Layout, Target, Ui, UiConfig};

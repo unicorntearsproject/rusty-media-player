@@ -113,7 +113,10 @@ fn run(settings: AudioSettings, chain: &[&str], when: When, hold_us: i64, seek_t
             }
         }
         if let Some(to) = seek_to {
-            assert!((session.position_us(clock.now_us()) - to).abs() < 200_000, "paused seek lands at the target");
+            assert!(
+                (session.position_us(clock.now_us()) - to).abs() < 200_000,
+                "paused seek lands at the target"
+            );
             assert!(host.audio.is_paused());
         }
         session.play();

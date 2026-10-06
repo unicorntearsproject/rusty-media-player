@@ -67,6 +67,15 @@ pub struct PlaylistEntry {
     pub art: u64,
 }
 
+/// What the host app offers beyond playback (menus show only what is offered).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AppModel {
+    /// "Check for updates" is offered.
+    pub updates: bool,
+    /// The host can add the app to the desktop's app menu: `Some(true)` when it is there now.
+    pub integration: Option<bool>,
+}
+
 /// Everything the UI needs to draw and to build its menus.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct UiModel {
@@ -130,6 +139,10 @@ pub struct UiModel {
     pub audio: rvp_core::AudioSettings,
     /// The gain the automatic level applies to what is playing, dB (`None` when it is off or nothing plays).
     pub level_gain_db: Option<f32>,
+    /// Update and app-menu services the host offers.
+    pub app: AppModel,
+    /// A modal dialog to show over everything (an update prompt), if any.
+    pub dialog: Option<crate::dialog::DialogSpec>,
 }
 
 impl UiModel {

@@ -24,3 +24,6 @@ zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 rand = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_UI_Shell"] }

@@ -517,7 +517,7 @@ impl Ui {
         }
     }
 
-    fn draw_switch(&mut self, fb: &mut FrameBuffer, r: RectF, on: bool, hot: bool) {
+    pub(crate) fn draw_switch(&mut self, fb: &mut FrameBuffer, r: RectF, on: bool, hot: bool) {
         let s = self.scale;
         let rad = r.h * 0.5;
         if on {

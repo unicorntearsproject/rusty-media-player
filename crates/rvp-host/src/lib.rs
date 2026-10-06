@@ -15,6 +15,7 @@ pub mod input;
 pub mod library;
 pub mod media;
 pub mod mock;
+pub mod services;
 
 pub use frame::FrameSink;
 
@@ -24,6 +25,7 @@ pub use media::{
     Art, NowPlaying, NowPlayingMeta, PlayState, Playback, RecordingNowPlaying, RecordingTap,
     TransportCommand, VIZ_BANDS, VisualizerTap, VizBlock, VizSummary,
 };
+pub use services::{AppServices, Integration, ScriptedServices, UpdateHow, UpdateState};
 
 use alloc::{string::String, vec::Vec};
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
@@ -156,6 +158,10 @@ pub trait Host {
     }
     /// Directory access for the library view, if the host has any.
     fn library(&mut self) -> Option<&mut dyn Library> {
+        None
+    }
+    /// Update checks and adding the app to the desktop's menus, if the host has them.
+    fn app_services(&mut self) -> Option<&mut dyn AppServices> {
         None
     }
     /// True when the ids this host gives to [`OpenRequest::Id`] still open the same file after a restart (file paths).
