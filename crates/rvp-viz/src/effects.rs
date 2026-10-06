@@ -79,10 +79,12 @@ pub enum Palette {
     Sunset,
     /// Violet, cyan and lime.
     Aurora,
+    /// The whole spectrum, red round to violet and back (bars run across it).
+    Rainbow,
 }
 
 /// Every palette.
-pub const PALETTES: [Palette; 3] = [Palette::Tears, Palette::Sunset, Palette::Aurora];
+pub const PALETTES: [Palette; 4] = [Palette::Tears, Palette::Sunset, Palette::Aurora, Palette::Rainbow];
 
 impl Palette {
     /// Name for the switcher.
@@ -91,6 +93,7 @@ impl Palette {
             Palette::Tears => "Tears",
             Palette::Sunset => "Sunset",
             Palette::Aurora => "Aurora",
+            Palette::Rainbow => "Rainbow",
         }
     }
 
@@ -115,6 +118,17 @@ fn build_lut(p: Palette) -> [[u8; 3]; 256] {
         Palette::Tears => &[rgb(t::MAGENTA_500), rgb(t::VIOLET_500), rgb(t::CYAN_500), rgb(t::VIOLET_500)],
         Palette::Sunset => &[rgb(t::INK_600), rgb(t::MAGENTA_500), [255.0, 194.0, 77.0], rgb(t::MAGENTA_500)],
         Palette::Aurora => &[rgb(t::VIOLET_500), rgb(t::CYAN_500), rgb(t::LIME_500), rgb(t::CYAN_500)],
+        // Saturated but not harsh: red, orange, yellow, green, cyan, blue, violet, magenta, and round again.
+        Palette::Rainbow => &[
+            [255.0, 59.0, 74.0],
+            [255.0, 142.0, 36.0],
+            [255.0, 214.0, 51.0],
+            [86.0, 224.0, 92.0],
+            [34.0, 211.0, 224.0],
+            [66.0, 120.0, 255.0],
+            [152.0, 96.0, 255.0],
+            [236.0, 64.0, 200.0],
+        ],
     };
     let mut lut = [[0u8; 3]; 256];
     for (i, c) in lut.iter_mut().enumerate() {
@@ -477,7 +491,12 @@ impl Viz {
             let hgt = powf(v, 1.25) * max_h;
             let x0 = margin + (i as f32 * slot) as i32;
             let x1 = margin + ((i as f32 + 1.0) * slot) as i32 - 1;
-            let col = self.col(i * 256 / n / 2 + 8);
+            // The bars use half the colour cycle (a calm gradient); the rainbow gives them the whole of it, red to violet.
+            let col = if self.palette == Palette::Rainbow {
+                self.col(i * 232 / n)
+            } else {
+                self.col(i * 256 / n / 2 + 8)
+            };
             let top = base - hgt as i32;
             // Halo, then the body brighter towards the top, then the reflection.
             self.rect_add(x0 - 1, top - 2, x1 + 1, base, col, 0.10 * g);
@@ -802,7 +821,16 @@ mod tests {
         assert_eq!(Effect::Spectrum.step(-1), Effect::Plasma);
         assert_eq!(Effect::Plasma.step(1), Effect::Spectrum);
         assert_eq!(EFFECTS.len(), 5);
-        assert_eq!(Palette::Tears.next().next().next(), Palette::Tears);
+        assert_eq!(Palette::Tears.next().next().next().next(), Palette::Tears);
+        assert_eq!(Palette::Aurora.next(), Palette::Rainbow);
+        // The rainbow runs through every hue and its ends meet (it is cyclic), so bars across it show red to violet.
+        let rb = build_lut(Palette::Rainbow);
+        assert!(rb[0][0] > 200 && rb[0][1] < 100, "starts red: {:?}", rb[0]);
+        let hues = [0usize, 64, 100, 136, 170, 210];
+        assert!(hues.windows(2).all(|w| rb[w[0]] != rb[w[1]]));
+        let dist =
+            |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).map(|(x, y)| (*x as i32 - y as i32).abs()).sum::<i32>();
+        assert!(dist(rb[255], rb[0]) < 40, "the last colour leads back into the first");
         let lut = build_lut(Palette::Tears);
         assert_eq!(lut[0], [255, 43, 214]);
         assert!(lut.iter().all(|c| c.iter().any(|&v| v > 0)));
