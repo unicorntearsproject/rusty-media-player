@@ -41,6 +41,11 @@ pub fn info(msg: &str) {
     log(sys::log_level::INFO, msg);
 }
 
+/// Log a trace line (level 4: the OS prints it only when asked, so the simulator tests can follow what the adapter did).
+pub fn trace(msg: &str) {
+    log(sys::log_level::TRACE, msg);
+}
+
 /// The name of an error code, for messages.
 pub fn code_name(code: i32) -> &'static str {
     match code {

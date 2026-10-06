@@ -164,6 +164,10 @@ impl AudioSink for RbAudio {
             self.stream = Some(h);
             self.params = Some(got);
             self.capacity.set(info.capacity_frames.max(got.sample_rate));
+            api::trace(&format!(
+                "audio.open want={}x{} got={}x{} stream={h} capacity={}",
+                want.sample_rate, want.channels, got.sample_rate, got.channels, info.capacity_frames
+            ));
             // SAFETY: no pointers.
             unsafe { sys::audio_volume(h, self.volume) };
             return Ok(got);
@@ -252,6 +256,9 @@ impl AudioSink for RbAudio {
     fn set_paused(&mut self, paused: bool) {
         if self.silent.is_some() {
             self.drain_silent();
+        }
+        if self.paused.get() != paused {
+            api::trace(&format!("audio.paused {paused}"));
         }
         self.paused.set(paused);
         if let Some(h) = self.stream {

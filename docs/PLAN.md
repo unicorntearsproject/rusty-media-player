@@ -1020,7 +1020,7 @@ directory both have them) and shown in the app snapshot (`audio`, `audio_panel`)
   album to be measured; the measurement decodes whole files (a fast native machine does a track in a fraction of a second, WebAssembly several times slower, which is why it is background
   work and only runs while the setting is on); the limiter's true-peak filter is a 12-tap Kaiser design, not the standard's exact table (within 0.1 dB on the Tech 3341 cases).
 
-**M12 Rusty Bucket adapter** (was M10). **Built against App API draft v0.3, tested against a mock host; waiting for the Bucket Simulator.**
+**M12 Rusty Bucket adapter** (was M10). **Done against App API v0.3: tested on a mock host and run in the real Bucket Simulator (`cargo xtask bucket-e2e`); running on the OS itself is left (QEMU, runtime choice).**
 `rvp-host-rb` maps `rvp-host` (playback, `NowPlaying`, `VisualizerTap`, `Library`) to Rusty Bucket's App API (`bucket_v0`), whose
 media interfaces rust-os models on ours (ADR-0026). Nothing in core, `rvp-host`, `rvp-ui` or `rvp-app` was changed for it; the
 standalone rule holds (none of them knows Rusty Bucket). The API itself took our review (`docs/reviews/app-api-v0-review.md`: 28 items in
@@ -1055,13 +1055,20 @@ v0.2, 13 deltas in v0.3, all folded in), so the adapter has no workarounds left 
   parser and the drift checker), `bucket-v0-mock`, `rvp-host-rb/tests` (lifecycle and events, files with `-BUSY`/`IO_READY`, audio clock and
   devices, kv, now-playing and transport, visualizer, power, library cursor, video layout, manifest), `rvp-wave-bucket/tests/imports.rs`
   (builds the module for wasm32 and requires its imports to be exactly the documented functions with the documented signatures).
-- **Waiting for the Simulator** (`../rust-os/tools/bucket-sim`, being built): running the real `.bucket` against the real imports (so far a
-  Node stand-in checks the lifecycle and threads); `cargo xtask bucket-e2e [--sim PATH]` is the hook, skipped when it is not installed,
-  and needs scenarios once its script format exists; QEMU under Rusty Bucket (runtime choice: AOT or interpreter, risk R3); `video_present`
-  in the real pipeline; the Rusty Bucket side of the open questions in `docs/host-api.md`.
-- **Not done / limits.** No `FRAME` pacing (the core presents against `now`), no hot-reload state (everything is in the store), no theme or
-  Bucket Bar commands or clipboard (we draw our own look), no device selection. Found while testing: `Session::pause` never pauses the
-  audio sink, so a paused player keeps feeding and playing (see the notes in `docs/host-api.md`).
+- **Bucket Simulator** (`../rust-os/tools/bucket-sim`, built with `CARGO_TARGET_DIR=/tmp/... cargo build --release --manifest-path ../rust-os/tools/bucket-sim/Cargo.toml`):
+  `cargo xtask bucket-e2e [--sim PATH] [--only NAME] [-v]` (or `$BUCKET_SIM`; skipped when there is none) runs the packed `Rusty Wave.bucket` headless on
+  the virtual clock through 15 scenarios (`xtask/src/bucket_e2e.rs`): the empty state; H.264 + AAC (threads build) and the baseline build; FLAC with tags and
+  cover with the audio clock at 1x; pause and resume (the audio device stops with the clock, checked on the captured audio); seeking by key and by click;
+  now-playing and every `TRANSPORT` command; several launch files as one queue; the library (add folder, one OS walk, listing, play, launch listing,
+  restart restores the queue paused); hot reload; a cold volume (`-BUSY`/`IO_READY`) for video and library; failing fetches (`-IO`); an audio device change
+  and failure; resize, scale, fullscreen, hidden windows. Screenshots go to `target/bucket-e2e/<scenario>/`. A run fails on any app warning or unexpected
+  simulator message. The adapter writes level-4 trace lines the scenarios read. Mismatches between the spec, the simulator and our expectations:
+  `docs/reviews/app-api-v0-review.md`, "M12 vs bucket-sim" (found and fixed: a second library walk after `FOLDER_ADDED`, launch files replacing each other,
+  `restart()` read as returning, cover art checked by type only).
+- **v0.3 clarifications** applied in the adapter and in `bucket-v0-mock` (which now reads the pages as the simulator does; `bucket-v0-mock/tests/v03.rs`).
+- **Not done / limits.** No `FRAME` pacing (the core presents against `now`), no hot-reload state (everything is in the store; a reload comes back paused), no theme or
+  Bucket Bar commands or clipboard (we draw our own look), no device selection, no `file_open_sibling` use (the host traits have no sidecar open). Still open:
+  QEMU under Rusty Bucket (runtime choice: AOT or interpreter, risk R3), `video_present` in the real pipeline, the answers to items 8 to 11 of the review section.
 
 ## 12. Risks and open questions
 

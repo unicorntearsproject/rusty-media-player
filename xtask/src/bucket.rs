@@ -20,7 +20,7 @@ use std::process::Command;
 
 pub const USAGE: &str = "usage: cargo xtask bucket [--no-opt] [--no-threads] [--simd] [--no-smoke] [--version V]
        cargo xtask bucket-smoke
-       cargo xtask bucket-e2e [--sim PATH] [--bucket FILE]
+       cargo xtask bucket-e2e [--sim PATH] [--bucket FILE] [--only NAME...] [-v]
 
 bucket         build the baseline (and with --simd the SIMD) module and the threads module, check their imports against the documented
                function set, pack target/bucket/Rusty Wave.bucket, and run the modules in Node (tools/bucket-node-smoke.mjs)
@@ -29,8 +29,9 @@ bucket         build the baseline (and with --simd the SIMD) module and the thre
   Signing hook: RVP_BUCKET_SIGN_CMD is run (sh -c) with BUCKET_CHECKSUMS (the file to sign) and BUCKET_SIGNATURE (the file to write)
   set; whatever it writes becomes SIGNATURE. Without it the bundle is unsigned (it runs on the interpreter with a warning).
 bucket-smoke   the Node checks on quick builds without decoders: lifecycle of both builds and the thread start-up contract
-bucket-e2e     run Rusty Wave.bucket in the Bucket Simulator (--sim, $BUCKET_SIM, ../rust-os/target/release/bucket-sim, or PATH);
-               skipped when there is none. Extra simulator arguments: $RVP_BUCKET_SIM_ARGS (default: --headless)";
+bucket-e2e     run the scenarios of xtask/src/bucket_e2e.rs on Rusty Wave.bucket in the Bucket Simulator, headless (--sim, $BUCKET_SIM,
+               ../rust-os/tools/bucket-sim/target/release/bucket-sim, or PATH; skipped when there is none). --only runs the scenarios
+               whose name contains NAME; -v prints the app's log. Screenshots go to target/bucket-e2e/<scenario>/";
 
 const APP_ID: &str = "io.github.idometeor.RustyWave";
 const MODULE_CRATE: &str = "rvp-wave-bucket";
@@ -210,7 +211,7 @@ fn verify_module(path: &Path, variant: Variant) -> Result<String, String> {
             variant.file()
         ));
     }
-    for name in ["bucket_main", "bucket_save_state", "memory"] {
+    for name in ["bucket_main", "bucket_save_state", "bucket_restore_state", "memory"] {
         if !info.exports.iter().any(|(n, _)| n == name) && !(name == "memory" && threads) {
             return Err(format!("{}: `{name}` is not exported", variant.file()));
         }
@@ -478,8 +479,8 @@ fn find_sim(arg: Option<&str>) -> Option<PathBuf> {
         .into_iter()
         .chain(std::env::var_os("BUCKET_SIM").map(PathBuf::from))
         .chain([
-            root().join("../rust-os/target/release/bucket-sim"),
-            root().join("../rust-os/target/debug/bucket-sim"),
+            root().join("../rust-os/tools/bucket-sim/target/release/bucket-sim"),
+            root().join("../rust-os/tools/bucket-sim/target/debug/bucket-sim"),
         ])
         .collect();
     candidates
@@ -488,12 +489,13 @@ fn find_sim(arg: Option<&str>) -> Option<PathBuf> {
         .or_else(|| have("bucket-sim").then(|| PathBuf::from("bucket-sim")))
 }
 
-/// `cargo xtask bucket-e2e`: run the packed app in the Bucket Simulator (headless, virtual time), skipped when there is none.
+/// `cargo xtask bucket-e2e [--sim PATH] [--bucket FILE] [--only NAME...] [-v] [--only NAME...] [-v]`: run the packed app through the scenarios of
+/// `bucket_e2e.rs` in the Bucket Simulator (headless, virtual time). Skipped, successfully, when there is no simulator.
 pub fn run_e2e(args: &[String]) -> Result<(), String> {
     let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let Some(sim) = find_sim(opt("--sim").as_deref()) else {
         println!(
-            "skipped: no bucket-sim found (--sim PATH, $BUCKET_SIM, ../rust-os/target/release/bucket-sim, or on the PATH)"
+            "skipped: no bucket-sim found (--sim PATH, $BUCKET_SIM, ../rust-os/tools/bucket-sim/target/release/bucket-sim, or on the PATH;\n  build it with `cargo build --release --manifest-path ../rust-os/tools/bucket-sim/Cargo.toml`)"
         );
         return Ok(());
     };
@@ -501,9 +503,35 @@ pub fn run_e2e(args: &[String]) -> Result<(), String> {
     if !bucket.exists() {
         return Err(format!("{} does not exist: run `cargo xtask bucket` first", bucket.display()));
     }
-    let extra = std::env::var("RVP_BUCKET_SIM_ARGS").unwrap_or_else(|_| "--headless".into());
-    println!("+ {} {} {extra}", sim.display(), bucket.display());
-    // The Simulator runs the same imports as the OS; a clean exit means the app started, drew and ended on TERMINATE. Scenarios
-    // (scripted events, canvas dumps, slow volumes) are added here when its script format is final.
-    run(Command::new(&sim).arg(&bucket).args(extra.split_whitespace()), "the Bucket Simulator run")
+    let fixtures = root().join("target/fixtures");
+    if !fixtures.join("h264_aac.mp4").exists() || !fixtures.join("library/music").exists() {
+        println!("== making the fixtures");
+        crate::fixtures(&[])?;
+    }
+    // Scratch data directories: fresh and in the system temp directory (never deleted from here).
+    let nanos =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let tmp = std::env::temp_dir().join(format!("rvp-bucket-e2e-{}-{nanos}", std::process::id()));
+    fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let out = root().join("target/bucket-e2e");
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let only: Vec<String> = args
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| *i > 0 && args[*i - 1] == "--only" && !a.starts_with('-'))
+        .map(|(_, a)| a.clone())
+        .collect();
+    println!("{} runs {} (screenshots in {})", sim.display(), bucket.display(), out.display());
+    let ctx = crate::bucket_e2e::Ctx {
+        sim,
+        bucket: fs::canonicalize(&bucket).unwrap_or(bucket),
+        fixtures: fs::canonicalize(&fixtures).unwrap_or(fixtures),
+        tmp,
+        out,
+        verbose: args.iter().any(|a| a == "-v"),
+    };
+    match crate::bucket_e2e::run_all(&ctx, &only) {
+        0 => Ok(()),
+        n => Err(format!("{n} Simulator scenario(s) failed")),
+    }
 }

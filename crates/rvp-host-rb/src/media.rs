@@ -19,6 +19,12 @@ pub fn truncate_utf8(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
+/// True when `data` starts like a PNG or a JPEG, which is all the OS accepts as cover art (`-INVALID` for anything else).
+pub fn has_image_magic(data: &[u8]) -> bool {
+    data.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
+        || data.starts_with(&[0xFF, 0xD8, 0xFF])
+}
+
 /// `NowPlaying` over `now_playing_metadata`, `now_playing_playback` and `TRANSPORT` events.
 pub struct RbNowPlaying {
     limits: Limits,
@@ -65,6 +71,7 @@ impl RbNowPlaying {
         // Covers the shell cannot take are left out instead of failing the whole report: only PNG and JPEG, within the limit.
         let art = meta.art.as_ref().filter(|a| {
             let ok = matches!(a.mime.as_str(), "image/png" | "image/jpeg")
+                && has_image_magic(&a.data)
                 && !a.data.is_empty()
                 && a.data.len() <= self.limits.art;
             if !ok {
@@ -73,6 +80,12 @@ impl RbNowPlaying {
             ok
         });
         let (mime, bytes): (&str, &[u8]) = art.map_or(("", &[]), |a| (a.mime.as_str(), a.data.as_slice()));
+        api::trace(&format!(
+            "np.meta title={title:?} artist={artist:?} album={album:?} duration_us={} video={} art={}",
+            meta.duration_us.unwrap_or(-1),
+            meta.has_video,
+            bytes.len()
+        ));
         let raw = sys::NowPlayingMetaRaw {
             struct_size: 64,
             flags: 0,
@@ -92,8 +105,8 @@ impl RbNowPlaying {
         };
         // SAFETY: `raw` is the 64-byte struct and the strings it points to outlive the call.
         let r = unsafe { sys::now_playing_metadata((&raw as *const sys::NowPlayingMetaRaw).cast()) };
-        if r == err::TOO_LARGE && !bytes.is_empty() {
-            // The shell's limit is lower than we thought: send it without the cover.
+        if (r == err::TOO_LARGE || r == err::INVALID) && !bytes.is_empty() {
+            // The shell's limit is lower than we thought, or it does not take this picture: send it without the cover.
             self.art_dropped += 1;
             let bare = NowPlayingMeta { art: None, ..meta.clone() };
             self.send_meta(&bare);
@@ -118,12 +131,16 @@ impl RbNowPlaying {
                 flags |= bit;
             }
         }
+        // The OS refuses a negative position and a rate that is not a number (`-INVALID`): say what is meant instead.
+        let rate = if p.rate.is_finite() { p.rate } else { 1.0 };
+        let position_us = p.position_us.max(0);
+        api::trace(&format!("np.playback state={state} position_us={position_us} rate={rate} flags={flags}"));
         let raw = sys::NowPlayingPlaybackRaw {
             struct_size: 40,
             state,
-            rate: p.rate,
+            rate,
             reserved0: 0,
-            position_us: p.position_us,
+            position_us,
             host_time_us: api::now_us(),
             flags,
             reserved1: 0,

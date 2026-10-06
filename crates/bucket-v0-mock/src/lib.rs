@@ -6,7 +6,13 @@
 //! test script what the host does: events, slow files (`-BUSY` then `IO_READY`), an audio device with a clock, a media library
 //! with partial listings, a full key-value store, and functions an older host would answer with `-UNSUPPORTED`.
 //!
-//! It follows the draft v0.3 pages and is not a simulator: no sandbox, no real devices.
+//! It follows the draft v0.3 pages and is not a simulator: no sandbox, no real devices. Where the pages were unclear it reads them
+//! as `bucket-sim` (rust-os `tools/bucket-sim`) does, which is what the v0.3 clarifications wrote down: argument errors of
+//! `events_wait`, `restart` and `exit` that never return ([`AppEnded`], [`catch_end`]), the thread limit that counts the main thread,
+//! a strict `canvas_present` (`-BUSY` for a pending `RESIZE` first), `-NO_SPACE` for counts and `-TOO_LARGE` for sizes, `file_read_at`
+//! with `cap` 0, folder handles, `file_open_sibling`, a new stream for every `audio_open`, `now_playing_*` validation, the library walk
+//! (the OS starts the first walk after `FOLDER_ADDED`; the first `LIBRARY_LISTING` replaces the kept one and the rest append; a rescan
+//! of an unreadable root is `-IO`), cache-class eviction in the key-value store and fetches that fail (`IO_READY`, then `-IO`).
 use bucket_v0_sys as sys;
 use bucket_v0_sys::backend::{Guard, deref32};
 use sys::{Backend, Event, err, ev};
@@ -17,6 +23,41 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub mod events;
 
 const BLOCK: u64 = 64 * 1024;
+
+/// How the app ended itself. `restart()` and `exit()` do not return: the host unwinds the app, which here is a panic with this
+/// payload that [`catch_end`] turns back into a value (and that does not run the panic hook).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppEnded {
+    /// `restart()` took effect.
+    Restart,
+    /// `exit(status)`.
+    Exit(i32),
+}
+
+/// Run `f` (which may call `restart` or `exit`) and report how it ended: its value, or [`AppEnded`] when the mock unwound it. Any
+/// other panic goes on.
+pub fn catch_end<R>(f: impl FnOnce() -> R) -> Result<R, AppEnded> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => Ok(r),
+        Err(p) => match p.downcast::<AppEnded>() {
+            Ok(e) => Err(*e),
+            Err(p) => std::panic::resume_unwind(p),
+        },
+    }
+}
+
+/// What `bucket_save_state` is: the buffer to fill, and the length it reports (negative = failure).
+#[derive(Clone)]
+pub struct SaveHook(pub Arc<SaveFn>);
+
+/// The function of a [`SaveHook`].
+pub type SaveFn = dyn Fn(&mut [u8]) -> i32 + Send + Sync;
+
+impl std::fmt::Debug for SaveHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SaveHook")
+    }
+}
 
 /// A file the host can hand out.
 #[derive(Debug, Clone)]
@@ -31,6 +72,13 @@ pub struct FileSpec {
     pub latency_us: i64,
     /// `file_size` answers `-UNSUPPORTED` (a stream of unknown length).
     pub unknown_size: bool,
+    /// A folder handle (`file_pick` flag bit 1): `file_size` and `file_read_at` answer `-INVALID`, and `file_open_sibling` opens
+    /// a file inside it.
+    pub folder: bool,
+    /// The folder this file is in (or, for a folder handle, its own key): the key of [`State::add_sibling`].
+    pub dir: Option<String>,
+    /// A cold block fails: `IO_READY` still arrives and the retry answers `-IO`.
+    pub fail_io: bool,
 }
 
 impl FileSpec {
@@ -42,7 +90,32 @@ impl FileSpec {
             id: Some(format!("id:{name}")),
             latency_us: 0,
             unknown_size: false,
+            folder: false,
+            dir: None,
+            fail_io: false,
         }
+    }
+
+    /// A folder handle with key `dir`.
+    pub fn folder(name: &str, dir: &str) -> Self {
+        Self {
+            folder: true,
+            dir: Some(dir.into()),
+            id: Some(format!("id:{name}")),
+            ..Self::new(name, Vec::new())
+        }
+    }
+
+    /// Lives in the folder `dir` (see [`State::add_sibling`]).
+    pub fn in_dir(mut self, dir: &str) -> Self {
+        self.dir = Some(dir.into());
+        self
+    }
+
+    /// Reads of cold blocks fail with `-IO` after `IO_READY` (needs [`FileSpec::slow`]).
+    pub fn failing(mut self) -> Self {
+        self.fail_io = true;
+        self
     }
 
     /// Cold blocks take `latency_us` to arrive: the first read returns `-BUSY`, and `IO_READY` follows.
@@ -207,6 +280,8 @@ pub struct SaveRec {
 
 #[derive(Debug, Clone)]
 struct Queued {
+    /// Library listing: when this event is generated, the kept listing of the root shows this many bytes.
+    reveal: Option<(String, usize)>,
     ev: Event,
     /// Text for the payload at this record offset (the handle is made when the event is delivered).
     text: Option<(usize, String)>,
@@ -245,6 +320,11 @@ pub struct State {
     pub kv: BTreeMap<String, (Vec<u8>, i32)>,
     /// Keys whose next `kv_load` is `-BUSY` (an `IO_READY { 0 }` follows after `kv_latency_us`).
     pub kv_cold: HashSet<String>,
+    /// Keys whose cold fetch fails: `IO_READY { 0 }` arrives and the retry answers `-IO` (a key must also be in `kv_cold`).
+    pub kv_fail: HashSet<String>,
+    kv_failed: HashSet<String>,
+    kv_age: HashMap<String, u64>,
+    kv_clock: u64,
     /// Delay of a cold key.
     pub kv_latency_us: i64,
     /// Total bytes the store accepts (`-NO_SPACE` beyond), if limited.
@@ -257,6 +337,11 @@ pub struct State {
     pub known_files: HashMap<String, FileSpec>,
     /// Ids whose next `file_open_id` is `-BUSY`.
     pub open_cold: HashSet<String>,
+    /// Ids whose cold open fails: `IO_READY { 0 }`, then `-IO` (the id must also be in `open_cold`).
+    pub open_fail: HashSet<String>,
+    open_failed: HashSet<String>,
+    /// Files by folder key and name, for `file_open_sibling`.
+    pub siblings: HashMap<String, HashMap<String, FileSpec>>,
     open_files: HashMap<i32, OpenFile>,
     /// Handles closed by the app, in order.
     pub closed: Vec<i32>,
@@ -267,8 +352,10 @@ pub struct State {
     pub audio: BTreeMap<i32, AudioStream>,
     /// Device latency for new streams.
     pub audio_latency_us: i64,
-    /// Rate granted instead of the requested one, if set.
+    /// Rate granted instead of the requested one, if set (always, whatever was asked).
     pub audio_grant_rate: Option<u32>,
+    /// The device's own rate: 44.1, 48, 88.2 and 96 kHz are granted as asked, any other request gets this.
+    pub audio_device_rate: u32,
     /// Ring capacity of new streams, in seconds at the granted rate.
     pub audio_capacity_secs: u32,
     /// Streams the app closed.
@@ -279,6 +366,11 @@ pub struct State {
     pub playback: Vec<PlaybackRec>,
     /// `now_playing_clear` calls.
     pub cleared: u32,
+    /// `now_playing_playback` calls that repeated the last report (same state, rate and flags, the position where the shell would
+    /// extrapolate it): the Simulator warns about them.
+    pub needless_playback: u32,
+    /// `now_playing_metadata` strings that were cut to the limit.
+    pub truncated_strings: u32,
     /// `viz_block` calls (pts, rate, channels, frames).
     pub viz_blocks: Vec<(i64, i32, i32, i32)>,
     /// Summaries received, in order.
@@ -295,8 +387,10 @@ pub struct State {
     pub listings: HashMap<String, KeptListing>,
     /// `library_listing_release` calls.
     pub releases: Vec<String>,
-    /// `library_rescan` calls.
+    /// `library_rescan` calls that started a walk (not the ones that found one running).
     pub rescans: Vec<String>,
+    /// Roots whose walk has not delivered its last `LIBRARY_LISTING` yet.
+    pub walking: HashSet<String>,
     /// `library_forget` calls.
     pub forgets: Vec<String>,
     /// `library_reconnect` calls.
@@ -310,12 +404,24 @@ pub struct State {
     next_request: i32,
     /// Arguments of `thread_spawn` calls.
     pub spawns: Vec<i32>,
-    /// `thread_spawn` fails with `-NO_SPACE` after this many threads.
+    /// The most live threads, **counting the main thread** (default `limit_get(THREADS)`): spawning at the limit is `-NO_SPACE`,
+    /// so with 64 the 63rd spawn works and the 64th fails. Thread ids count up from 1 and are never reused.
     pub thread_limit: Option<usize>,
     /// `thread_priority` calls (tid, level).
     pub priorities: Vec<(i32, i32)>,
-    /// `restart()` calls.
+    /// `restart()` calls that took effect.
     pub restarts: u32,
+    /// `restart()` fails with this error instead of ending the app (`-UNSUPPORTED` on an OS that cannot).
+    pub restart_error: Option<i32>,
+    /// `bucket_save_state`, run in the `events_wait` after the app has read `RELOAD`.
+    pub save_hook: Option<SaveHook>,
+    /// Size of the buffer the host adds for the save (the real one is up to 16 MiB).
+    pub save_buffer: usize,
+    /// What each save returned.
+    pub saves_done: Vec<i32>,
+    /// The bytes of the last successful save.
+    pub saved_state: Vec<u8>,
+    reload_armed: bool,
     /// `exit(status)` calls.
     pub exits: Vec<i32>,
     /// `events_wake()` calls.
@@ -360,12 +466,19 @@ impl State {
             power: Vec::new(),
             kv: BTreeMap::new(),
             kv_cold: HashSet::new(),
+            kv_fail: HashSet::new(),
+            kv_failed: HashSet::new(),
+            kv_age: HashMap::new(),
+            kv_clock: 0,
             kv_latency_us: 2_000,
             kv_quota: None,
             kv_stores: Vec::new(),
             kv_flushes: 0,
             known_files: HashMap::new(),
             open_cold: HashSet::new(),
+            open_fail: HashSet::new(),
+            open_failed: HashSet::new(),
+            siblings: HashMap::new(),
             open_files: HashMap::new(),
             closed: Vec::new(),
             prefetches: Vec::new(),
@@ -373,11 +486,14 @@ impl State {
             audio: BTreeMap::new(),
             audio_latency_us: 40_000,
             audio_grant_rate: None,
+            audio_device_rate: 48_000,
             audio_capacity_secs: 1,
             audio_closed: Vec::new(),
             metadata: Vec::new(),
             playback: Vec::new(),
             cleared: 0,
+            needless_playback: 0,
+            truncated_strings: 0,
             viz_blocks: Vec::new(),
             viz_summaries: Vec::new(),
             viz_single_calls: 0,
@@ -387,6 +503,7 @@ impl State {
             listings: HashMap::new(),
             releases: Vec::new(),
             rescans: Vec::new(),
+            walking: HashSet::new(),
             forgets: Vec::new(),
             reconnects: Vec::new(),
             folder_requests: Vec::new(),
@@ -397,6 +514,12 @@ impl State {
             thread_limit: None,
             priorities: Vec::new(),
             restarts: 0,
+            restart_error: None,
+            save_hook: None,
+            save_buffer: 1 << 20,
+            saves_done: Vec::new(),
+            saved_state: Vec::new(),
+            reload_armed: false,
             exits: Vec::new(),
             wakes: 0,
             misc: Vec::new(),
@@ -428,20 +551,20 @@ impl State {
     /// Queue an event for the next `events_wait` (its time is now).
     pub fn push(&mut self, mut e: Event) {
         e.time_us = self.now_us;
-        self.queue.push_back(Queued { ev: e, text: None });
+        self.queue.push_back(Queued { ev: e, text: None, reveal: None });
     }
 
     /// Queue an event whose payload at `offset` is a text handle for `text`.
     pub fn push_text(&mut self, mut e: Event, offset: usize, text: &str) {
         e.time_us = self.now_us;
-        self.queue.push_back(Queued { ev: e, text: Some((offset, text.into())) });
+        self.queue.push_back(Queued { ev: e, text: Some((offset, text.into())), reveal: None });
     }
 
     /// Deliver an event `delay_us` from now (it arrives during a wait that is long enough).
     pub fn push_after(&mut self, delay_us: i64, mut e: Event) {
         let at = self.now_us + delay_us;
         e.time_us = at;
-        self.scheduled.push((at, Queued { ev: e, text: None }));
+        self.scheduled.push((at, Queued { ev: e, text: None, reveal: None }));
     }
 
     /// Events not yet taken by the app.
@@ -467,6 +590,12 @@ impl State {
             }
         });
         due.sort_by_key(|(at, _)| *at);
+        for (_, q) in &due {
+            if let Some((root, upto)) = &q.reveal {
+                let l = self.listings.entry(root.clone()).or_default();
+                l.visible = (*upto).min(l.blob.len());
+            }
+        }
         self.queue.extend(due.into_iter().map(|(_, q)| q));
         self.sync_audio();
     }
@@ -518,6 +647,60 @@ impl State {
         let mut v: Vec<i32> = self.open_files.keys().copied().collect();
         v.sort_unstable();
         v
+    }
+
+    /// Register `spec` as a file in the folder `dir` (what `file_open_sibling` finds by name).
+    pub fn add_sibling(&mut self, dir: &str, spec: FileSpec) {
+        self.siblings.entry(dir.into()).or_default().insert(spec.name.clone(), spec);
+    }
+
+    /// The OS changed the canvas: `RESIZE` is queued and presents answer `-BUSY` until the app has been handed it.
+    pub fn resize(&mut self, w: u32, h: u32, scale: f32, fullscreen: bool) {
+        self.canvas.width = w;
+        self.canvas.height = h;
+        self.canvas.scale = scale;
+        self.canvas.fullscreen = fullscreen;
+        self.canvas.stale = true;
+        self.push(events::resize(w, h, scale, fullscreen));
+    }
+
+    /// Ask for a hot reload: `RELOAD` is queued; `save_hook` runs in the `events_wait` after the one that hands it out.
+    pub fn request_reload(&mut self) {
+        self.push(events::bare(ev::RELOAD));
+    }
+
+    /// A walk of `root` as the OS does it: the first `LIBRARY_LISTING` **replaces** the kept listing, later ones append, 200 files
+    /// per event, the last without the partial flag; one event every `gap_us`.
+    pub fn walk(&mut self, root: &str, files: &[(&str, &str, u64, i64)], gap_us: i64) {
+        let chunks: Vec<&[(&str, &str, u64, i64)]> =
+            if files.is_empty() { vec![&[][..]] } else { files.chunks(200).collect() };
+        let blob = encode_listing(files);
+        // Where each chunk ends in the blob.
+        let mut ends = Vec::new();
+        let mut at = 0;
+        for c in &chunks {
+            at += encode_listing(c).len();
+            ends.push(at);
+        }
+        self.listings.insert(root.into(), KeptListing { blob, visible: 0 });
+        self.walking.insert(root.into());
+        let n = chunks.len();
+        for (i, end) in ends.into_iter().enumerate() {
+            let mut e = events::library(ev::LIBRARY_LISTING, i + 1 < n);
+            let at = self.now_us + gap_us * (i as i64 + 1);
+            e.time_us = at;
+            self.scheduled.push((
+                at,
+                Queued { ev: e, text: Some((16, root.into())), reveal: Some((root.into(), end)) },
+            ));
+        }
+    }
+
+    /// The user picked a folder: `FOLDER_ADDED { request, root }` and, as the OS does by itself, the first walk of it.
+    pub fn answer_folder(&mut self, request: i32, id: &str, name: &str, files: &[(&str, &str, u64, i64)]) {
+        self.add_root(id, name, true);
+        self.push_text(events::folder_added(request), 20, id);
+        self.walk(id, files, 1_000);
     }
 
     /// Add a library root.
@@ -654,11 +837,21 @@ impl Backend for MockHost {
         self.lock().launch_reason
     }
     unsafe fn restart(&self) -> i32 {
-        self.lock().restarts += 1;
-        0
+        let mut s = self.lock();
+        if s.off("restart") {
+            return err::UNSUPPORTED;
+        }
+        if let Some(e) = s.restart_error {
+            return e;
+        }
+        s.restarts += 1;
+        drop(s);
+        // It does not return: the app ends at once.
+        std::panic::resume_unwind(Box::new(AppEnded::Restart))
     }
     unsafe fn exit(&self, status: i32) {
         self.lock().exits.push(status);
+        std::panic::resume_unwind(Box::new(AppEnded::Exit(status)))
     }
     unsafe fn log(&self, level: i32, ptr: *const u8, len: i32) {
         // SAFETY: the app's range.
@@ -689,7 +882,9 @@ impl Backend for MockHost {
 
     unsafe fn thread_spawn(&self, arg: i32) -> i32 {
         let mut s = self.lock();
-        if s.thread_limit.is_some_and(|l| s.spawns.len() >= l) {
+        // The limit counts the main thread.
+        let limit = s.thread_limit.unwrap_or(s.limit(sys::limit::THREADS).max(1) as usize);
+        if 1 + s.spawns.len() >= limit {
             return err::NO_SPACE;
         }
         s.spawns.push(arg);
@@ -697,12 +892,38 @@ impl Backend for MockHost {
     }
     unsafe fn thread_yield(&self) {}
     unsafe fn thread_priority(&self, tid: i32, level: i32) -> i32 {
-        self.lock().priorities.push((tid, level));
+        let mut s = self.lock();
+        if !(0..=1).contains(&level) {
+            return err::INVALID;
+        }
+        if tid < 0 || tid as usize > s.spawns.len() {
+            return err::NOT_FOUND;
+        }
+        s.priorities.push((tid, level));
         0
     }
 
     unsafe fn events_wait(&self, buf: *mut u8, max: i32, timeout_us: i64) -> i32 {
+        if max < 1 || timeout_us < -1 {
+            return err::INVALID;
+        }
         let mut s = self.lock();
+        // A hot reload: the app has read `RELOAD`, so its loop is parked here and the state is saved now (`bucket_save_state`).
+        if s.reload_armed {
+            s.reload_armed = false;
+            if let Some(hook) = s.save_hook.clone() {
+                let cap = s.save_buffer;
+                drop(s);
+                let mut buf = vec![0u8; cap];
+                let n = (hook.0)(&mut buf);
+                s = self.lock();
+                s.saves_done.push(n);
+                if n > 0 {
+                    buf.truncate((n as usize).min(cap));
+                    s.saved_state = buf;
+                }
+            }
+        }
         s.waits.push(timeout_us);
         s.texts.clear();
         // Bring due events in; if there is nothing and the caller may sleep, sleep until the next scheduled event or the timeout.
@@ -730,6 +951,17 @@ impl Backend for MockHost {
             }
             out[n * 64..n * 64 + 64].copy_from_slice(&q.ev.to_bytes());
             n += 1;
+            match q.ev.kind {
+                // The size is no longer stale once the app has been handed the `RESIZE`.
+                ev::RESIZE => s.canvas.stale = false,
+                ev::RELOAD => s.reload_armed = true,
+                ev::LIBRARY_LISTING if q.ev.flags & ev::FLAG_MORE == 0 => {
+                    if let Some((root, _)) = &q.reveal {
+                        s.walking.remove(root);
+                    }
+                }
+                _ => {}
+            }
         }
         n as i32
     }
@@ -770,11 +1002,21 @@ impl Backend for MockHost {
     unsafe fn canvas_present(&self, rgba: *const u8, len: i32, x: i32, y: i32, w: i32, h: i32) -> i32 {
         let mut s = self.lock();
         let c = &s.canvas;
-        if len as i64 != i64::from(c.width) * i64::from(c.height) * 4 && !c.stale {
-            return err::INVALID;
-        }
+        // A pending `RESIZE` is checked first; then the call is strict about its arguments.
         if c.stale {
             return err::BUSY;
+        }
+        if len as i64 != i64::from(c.width) * i64::from(c.height) * 4 {
+            return err::INVALID;
+        }
+        if x < 0
+            || y < 0
+            || w < 0
+            || h < 0
+            || i64::from(x) + i64::from(w) > i64::from(c.width)
+            || i64::from(y) + i64::from(h) > i64::from(c.height)
+        {
+            return err::INVALID;
         }
         if s.canvas.keep_frame {
             // SAFETY: the app's range.
@@ -826,7 +1068,10 @@ impl Backend for MockHost {
         if !(1..=2).contains(&channels) || rate <= 0 {
             return err::INVALID;
         }
-        let rate = s.audio_grant_rate.unwrap_or(rate as u32);
+        let rate = s.audio_grant_rate.unwrap_or(match rate {
+            44_100 | 48_000 | 88_200 | 96_000 => rate as u32,
+            _ => s.audio_device_rate,
+        });
         let capacity = rate * s.audio_capacity_secs;
         s.next_handle += 1;
         let h = s.next_handle;
@@ -927,8 +1172,11 @@ impl Backend for MockHost {
     }
     unsafe fn audio_volume(&self, h: i32, volume: f32) -> i32 {
         let mut s = self.lock();
+        if volume.is_nan() {
+            return err::INVALID;
+        }
         let Some(a) = s.audio.get_mut(&h) else { return err::NOT_FOUND };
-        a.volume = volume;
+        a.volume = volume.clamp(0.0, 1.0);
         0
     }
     unsafe fn audio_close(&self, h: i32) -> i32 {
@@ -951,11 +1199,29 @@ impl Backend for MockHost {
         if art.len() as i64 > s.limit(sys::limit::ART_BYTES) {
             return err::TOO_LARGE;
         }
+        // Cover art must start like a PNG or a JPEG.
+        if !art.is_empty()
+            && !art.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
+            && !art.starts_with(&[0xFF, 0xD8, 0xFF])
+        {
+            return err::INVALID;
+        }
+        let max = s.limit(sys::limit::STRING_BYTES).max(0) as usize;
         let mut strings = Vec::new();
         for at in [8, 16, 24, 32] {
             match String::from_utf8(field_bytes(&b, at)) {
-                Ok(t) if t.len() as i64 <= s.limit(sys::limit::STRING_BYTES) => strings.push(t),
-                Ok(_) => return err::TOO_LARGE,
+                Ok(mut t) => {
+                    // Too long: cut at a character boundary.
+                    if t.len() > max {
+                        let mut end = max;
+                        while !t.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        t.truncate(end);
+                        s.truncated_strings += 1;
+                    }
+                    strings.push(t);
+                }
                 Err(_) => return err::INVALID,
             }
         }
@@ -982,6 +1248,21 @@ impl Backend for MockHost {
         }
         // SAFETY: the app passes the 40-byte struct.
         let raw = unsafe { std::ptr::read_unaligned(pb as *const sys::NowPlayingPlaybackRaw) };
+        if raw.state > 2 || !raw.rate.is_finite() || raw.position_us < 0 {
+            return err::INVALID;
+        }
+        if let Some(last) = s.playback.last() {
+            // Where the shell would put the position now: it extrapolates a playing item.
+            let elapsed =
+                if last.state == sys::play_state::PLAYING { raw.host_time_us - last.host_time_us } else { 0 };
+            let expected = last.position_us + (elapsed as f64 * f64::from(last.rate)) as i64;
+            if (last.state, last.flags, last.rate.to_bits()) == (raw.state, raw.flags, raw.rate.to_bits())
+                && (raw.position_us - expected).abs() <= 500_000
+            {
+                s.needless_playback += 1;
+                s.logs.push((1, "now_playing_playback sent again with nothing changed".into()));
+            }
+        }
         s.playback.push(raw);
         0
     }
@@ -1060,10 +1341,14 @@ impl Backend for MockHost {
         // SAFETY: the app's range.
         let t = unsafe { text(root, len) };
         let mut s = self.lock();
-        if !s.roots.iter().any(|r| r.id == t) {
-            return err::NOT_FOUND;
+        let Some(root) = s.roots.iter().find(|r| r.id == t) else { return err::NOT_FOUND };
+        if !root.readable {
+            return err::IO;
         }
-        s.rescans.push(t);
+        // A walk of that root is already running: nothing starts.
+        if !s.walking.contains(&t) {
+            s.rescans.push(t);
+        }
         0
     }
     unsafe fn library_forget(&self, root: *const u8, len: i32) -> i32 {
@@ -1100,9 +1385,21 @@ impl Backend for MockHost {
         // SAFETY: the app's range.
         let k = unsafe { text(key, key_len) };
         let mut s = self.lock();
+        if k.is_empty() {
+            return err::INVALID;
+        }
+        if k.len() as i64 > s.limit(sys::limit::KEY_LEN) {
+            return err::TOO_LARGE;
+        }
+        if s.kv_failed.remove(&k) {
+            return err::IO;
+        }
         if s.kv_cold.remove(&k) {
             let d = s.kv_latency_us;
             s.push_after(d, events::io_ready(0));
+            if s.kv_fail.contains(&k) {
+                s.kv_failed.insert(k);
+            }
             return err::BUSY;
         }
         let Some((v, _)) = s.kv.get(&k) else { return err::NOT_FOUND };
@@ -1113,8 +1410,12 @@ impl Backend for MockHost {
         // SAFETY: the app's range.
         let (k, v) = unsafe { (text(key, key_len), bytes(val, val_len).to_vec()) };
         let mut s = self.lock();
-        if k.len() as i64 > s.limit(sys::limit::KEY_LEN) {
+        // 1 to 255 bytes: an empty key is `-INVALID`, a longer one `-TOO_LARGE` (a size, not a count).
+        if k.is_empty() {
             return err::INVALID;
+        }
+        if k.len() as i64 > s.limit(sys::limit::KEY_LEN) {
+            return err::TOO_LARGE;
         }
         if v.len() as i64 > s.limit(sys::limit::VALUE_SIZE) {
             return err::TOO_LARGE;
@@ -1122,14 +1423,30 @@ impl Backend for MockHost {
         s.kv_stores.push((k.clone(), v.len(), flags));
         if v.is_empty() {
             s.kv.remove(&k);
+            s.kv_age.remove(&k);
             return 0;
         }
         if let Some(q) = s.kv_quota {
-            let used: usize = s.kv.iter().filter(|(kk, _)| **kk != k).map(|(_, (vv, _))| vv.len()).sum();
-            if used + v.len() > q {
-                return err::NO_SPACE;
+            // Cache-class entries go first, oldest first, until the value fits; if it still does not, the call fails and what was
+            // evicted for it stays evicted.
+            loop {
+                let used: usize = s.kv.iter().filter(|(kk, _)| **kk != k).map(|(_, (vv, _))| vv.len()).sum();
+                if used + v.len() <= q {
+                    break;
+                }
+                let oldest =
+                    s.kv.iter()
+                        .filter(|(kk, (_, fl))| **kk != k && fl & sys::kv::CACHE != 0)
+                        .min_by_key(|(kk, _)| s.kv_age.get(*kk).copied().unwrap_or(0))
+                        .map(|(kk, _)| kk.clone());
+                let Some(victim) = oldest else { return err::NO_SPACE };
+                s.kv.remove(&victim);
+                s.kv_age.remove(&victim);
             }
         }
+        s.kv_clock += 1;
+        let t = s.kv_clock;
+        s.kv_age.insert(k.clone(), t);
         s.kv.insert(k, (v, flags));
         0
     }
@@ -1160,6 +1477,11 @@ impl Backend for MockHost {
         let (name, mime, data) =
             unsafe { (text(name, name_len), text(mime, mime_len), bytes(data, len).to_vec()) };
         let mut s = self.lock();
+        // Only the last component of the name is used.
+        let name = name.rsplit(['/', '\\']).next().unwrap_or("").to_string();
+        if name.is_empty() {
+            return err::INVALID;
+        }
         s.next_request += 1;
         let request = s.next_request;
         s.saves.push(SaveRec { request, name, mime, data });
@@ -1169,18 +1491,42 @@ impl Backend for MockHost {
         // SAFETY: the app's range.
         let id = unsafe { text(id, len) };
         let mut s = self.lock();
+        if s.open_failed.remove(&id) {
+            return err::IO;
+        }
         if s.open_cold.remove(&id) {
             let d = s.kv_latency_us;
             s.push_after(d, events::io_ready(0));
+            if s.open_fail.contains(&id) {
+                s.open_failed.insert(id);
+            }
             return err::BUSY;
         }
         let Some(spec) = s.known_files.get(&id).cloned() else { return err::NOT_FOUND };
+        if s.open_files.len() as i64 >= s.limit(sys::limit::HANDLES) {
+            return err::NO_SPACE;
+        }
+        s.new_handle(spec)
+    }
+    unsafe fn file_open_sibling(&self, h: i32, name: *const u8, name_len: i32) -> i32 {
+        // SAFETY: the app's range.
+        let name = unsafe { text(name, name_len) };
+        let mut s = self.lock();
+        let Some(f) = s.open_files.get(&h) else { return err::NOT_FOUND };
+        let Some(dir) = f.spec.dir.clone() else { return err::UNSUPPORTED };
+        let Some(spec) = s.siblings.get(&dir).and_then(|m| m.get(&name)).cloned() else {
+            return err::NOT_FOUND;
+        };
+        if s.open_files.len() as i64 >= s.limit(sys::limit::HANDLES) {
+            return err::NO_SPACE;
+        }
         s.new_handle(spec)
     }
     unsafe fn file_size(&self, h: i32) -> i64 {
         let s = self.lock();
         match s.open_files.get(&h) {
             None => err::NOT_FOUND as i64,
+            Some(f) if f.spec.folder => err::INVALID as i64,
             Some(f) if f.spec.unknown_size => err::UNSUPPORTED as i64,
             Some(f) => f.spec.data.len() as i64,
         }
@@ -1189,9 +1535,16 @@ impl Backend for MockHost {
         let mut s = self.lock();
         let (now, max) = (s.now_us, s.limit(sys::limit::READ_PER_CALL) as usize);
         let Some(f) = s.open_files.get_mut(&h) else { return err::NOT_FOUND };
+        if f.spec.folder {
+            return err::INVALID;
+        }
         let len = f.spec.data.len() as u64;
         if offset < 0 {
             return err::INVALID;
+        }
+        // Nothing to read: 0, which is not the end of the file.
+        if cap == 0 {
+            return 0;
         }
         let offset = offset as u64;
         if offset >= len {
@@ -1200,7 +1553,11 @@ impl Backend for MockHost {
         let block = offset / BLOCK;
         if f.spec.latency_us > 0 {
             match f.blocks.get(&block).copied() {
-                Some(ready) if ready <= now => {}
+                Some(ready) if ready <= now => {
+                    if f.spec.fail_io {
+                        return err::IO;
+                    }
+                }
                 Some(_) => return err::BUSY,
                 None => {
                     let ready = now + f.spec.latency_us;

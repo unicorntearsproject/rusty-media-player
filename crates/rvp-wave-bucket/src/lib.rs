@@ -73,7 +73,8 @@ mod module {
             // SAFETY: no arguments.
             let cpus = unsafe { sys::cpu_count() }.max(1) as usize;
             let max = rvp_host_rb::shared::Limits::read().threads;
-            rvp_host_rb::threads::init(cpus, max);
+            let pool = rvp_host_rb::threads::init(cpus, max);
+            rvp_host_rb::api::trace(&format!("threads: pool={pool} cpus={cpus} limit={max}"));
         }
         let mut player = RbPlayer::new(Rc::new(RbCodecs), UiConfig { reduce_motion: false });
         player.run()
@@ -84,6 +85,14 @@ mod module {
     #[unsafe(no_mangle)]
     pub extern "C" fn bucket_save_state(_buf: *mut u8, _cap: i32) -> i32 {
         rvp_host_rb::save_state_hook()
+    }
+
+    /// Called by the OS in the new instance of a hot reload, before `bucket_main`, with what `bucket_save_state` returned. There is
+    /// nothing (the queue, the position and the library are in the key-value store), but a module that exports the save without the
+    /// restore makes the Simulator note that it drops state, so the pair is complete. Returns 0.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn bucket_restore_state(_ptr: *const u8, _len: i32) -> i32 {
+        0
     }
 
     /// The first code of every thread but the main one (the threads build only).

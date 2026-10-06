@@ -178,12 +178,14 @@ impl RbPlayer {
     }
 
     /// Ask the OS for a clean relaunch (`restart`), after saving everything: for a worker that stopped answering, where a trap
-    /// would lose the state of the other threads. Returns false if the OS refused.
+    /// would lose the state of the other threads. `restart` does not return when it works (the app ends at once, and the OS counts
+    /// the restart against the manifest's `restart_limit`), so coming back means the OS refused: the result is always false.
     pub fn restart(&mut self) -> bool {
         self.save_everything();
         // SAFETY: no arguments.
         let r = unsafe { sys::restart() };
-        r >= 0
+        api::warn(&format!("restart was refused: {}", api::code_name(r)));
+        false
     }
 
     fn save_everything(&mut self) {
@@ -193,6 +195,9 @@ impl RbPlayer {
 
     /// Save, give up the media session, release the sleep inhibitors and set the exit status.
     fn shutdown(&mut self) {
+        if let Some(c) = self.host.audio.clock() {
+            api::trace(&format!("audio.exit frames_played={} underruns={}", c.frames_played, c.underruns));
+        }
         self.save_everything();
         if self.host.shared.has(caps::NOW_PLAYING) {
             self.host.now_playing.clear();
@@ -203,10 +208,15 @@ impl RbPlayer {
 
     // ---- events ----
 
-    /// Handle decoded events.
+    /// Handle decoded events. `OPEN` has no "more follows" flag (a `DROP` has), and the OS queues one per file before the first
+    /// `events_wait`, so the ones that arrive together are one queue: all but the last say "more".
     pub fn dispatch(&mut self, evs: Vec<Ev>) {
-        for e in evs {
-            self.on_event(e);
+        let last_open = evs.iter().rposition(|e| matches!(e, Ev::Open { .. }));
+        for (i, e) in evs.into_iter().enumerate() {
+            match e {
+                Ev::Open { file, .. } => self.on_file(file, last_open.is_some_and(|l| i < l), false, true),
+                e => self.on_event(e),
+            }
         }
     }
 
@@ -297,6 +307,7 @@ impl RbPlayer {
             Ev::CpuCount(n) => self.cpu_count = n.max(1),
             Ev::Transport { command, value_us, value_f32 } => {
                 if let Some(c) = transport_command(command, value_us, value_f32) {
+                    api::trace(&format!("np.command {c:?}"));
                     self.host.now_playing.push_command(c);
                 }
             }
@@ -304,21 +315,14 @@ impl RbPlayer {
                 let Some(i) = self.folder_requests.iter().position(|r| *r == request) else { return };
                 self.folder_requests.remove(i);
                 match root {
-                    // The OS adds the folder; ask for its walk (a rescan is incremental, so a walk it started itself costs little).
-                    Ok(root) => {
-                        let r = self.host.library.rescan(&root);
-                        if r < 0 {
-                            self.toast("Couldn't read that folder.");
-                        }
-                    }
+                    // The OS starts the first walk itself; its `LIBRARY_LISTING` is what the player waits for.
+                    Ok(root) => api::trace(&format!("library.folder_added root={root}")),
                     Err(err::CANCELLED) => {}
                     Err(_) => self.toast("Couldn't add that folder."),
                 }
             }
             Ev::LibraryListing { root, partial } => self.host.library.on_listing(&root, partial),
-            Ev::LibraryChanged { root } => {
-                self.host.library.rescan(&root);
-            }
+            Ev::LibraryChanged { root } => self.rescan(&root),
             Ev::FileSaved { request, status } => {
                 if let Some(name) = self.saves.remove(&request) {
                     match status {
@@ -376,6 +380,7 @@ impl RbPlayer {
             _ => self.host.shared.stash_handle(handle),
         };
         let name = if name.is_empty() { id.clone() } else { name };
+        api::trace(&format!("open name={name:?} id_len={} more={more}", id.len()));
         let now = self.now();
         let b =
             self.batch.get_or_insert_with(|| Batch { items: Vec::new(), append, from_drop, last_us: now });
@@ -409,9 +414,7 @@ impl RbPlayer {
                 Effect::AddFiles => self.request_pick(true),
                 Effect::ImportPlaylist => self.pick(PickKind::Import, "m3u,m3u8,pls"),
                 Effect::AddFolder => self.request_folder(),
-                Effect::Rescan(root) => {
-                    self.host.library.rescan(&root);
-                }
+                Effect::Rescan(root) => self.rescan(&root),
                 Effect::Forget(root) => self.host.library.forget(&root),
                 Effect::Download { name, mime, data } => {
                     // SAFETY: the ranges are the strings' and the slice's.
@@ -432,6 +435,16 @@ impl RbPlayer {
                     }
                 }
             }
+        }
+    }
+
+    /// Ask for a new walk of `root`; an unreadable root says `-IO` and the user is told.
+    fn rescan(&mut self, root: &str) {
+        let r = self.host.library.rescan(root);
+        if r == err::IO {
+            self.toast("Couldn't read that folder.");
+        } else if r < 0 {
+            api::warn(&format!("library_rescan `{root}` failed: {}", api::code_name(r)));
         }
     }
 

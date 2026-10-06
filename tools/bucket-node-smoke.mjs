@@ -127,7 +127,7 @@ if (!isMainThread) {
   };
   const instance = await instantiate(module, memory, host);
   const ex = instance.exports;
-  check(typeof ex.bucket_main === 'function' && typeof ex.bucket_save_state === 'function', 'bucket_main and bucket_save_state are exported');
+  check(typeof ex.bucket_main === 'function' && typeof ex.bucket_save_state === 'function' && typeof ex.bucket_restore_state === 'function', 'bucket_main, bucket_save_state and bucket_restore_state are exported');
   check(threads === (typeof ex.bucket_thread_start === 'function'), threads ? 'bucket_thread_start is exported' : 'no thread entry in the plain build');
 
   if (threads && smokeThreads > 0 && typeof ex.bucket_smoke_threads === 'function') {
@@ -149,6 +149,7 @@ if (!isMainThread) {
   check(host.waits > 3, `the loop waited for events ${host.waits} times`);
   check(host.flushes >= 1, `kv_flush was called on TERMINATE (${host.flushes})`);
   check(ex.bucket_save_state(0, 0) === 0, 'bucket_save_state reports no state');
+  check(ex.bucket_restore_state(0, 0) === 0, 'bucket_restore_state takes nothing');
   for (const w of workers) w.terminate();
   process.exit(failed ? 1 : 0);
 }

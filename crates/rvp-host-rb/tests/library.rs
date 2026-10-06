@@ -152,7 +152,11 @@ fn a_damaged_listing_is_dropped_not_trusted() {
     listing_event(&h, "dir:Gone", false);
     deliver(&mut h);
     assert!(take(&mut h).is_none());
-    assert!(h.mock.with(|s| s.logs.iter().any(|(_, t)| t.contains("dir:Gone") && t.contains("NOT_FOUND"))));
+    // Not a warning: another walk replaced and released the listing, and its own event follows.
+    assert!(h.mock.with(|s| {
+        s.logs.iter().any(|(lvl, t)| *lvl == 4 && t.contains("dir:Gone") && t.contains("nothing kept"))
+    }));
+    assert!(!h.mock.with(|s| s.logs.iter().any(|(lvl, t)| *lvl <= 1 && t.contains("dir:Gone"))));
 }
 
 #[test]
@@ -160,27 +164,38 @@ fn folders_rescans_and_forgetting_reach_the_os() {
     let mut h = Harness::new();
     h.mock.with(|s| s.add_root("dir:Music", "Music", true));
     h.run_ms(20);
-    // The user adds a folder: a picker request; the answer names the root and the app asks for its walk.
+    // The user adds a folder: a picker request; the OS answers and starts the first walk itself, so the app does not ask for one.
     h.player.request_folder();
     let req = h.mock.with(|s| s.folder_requests[0]);
-    h.mock.with(|s| s.push_text(events::folder_added(req), 20, "dir:Music"));
+    h.mock.with(|s| s.answer_folder(req, "dir:Music", "Music", &[("a", "a.mp3", 5, 1)]));
     h.run_ms(20);
-    assert_eq!(h.mock.with(|s| s.rescans.clone()), vec!["dir:Music".to_string()]);
+    assert!(h.mock.with(|s| s.rescans.is_empty()), "a second walk was asked for after FOLDER_ADDED");
+    assert_eq!(h.player.host.library.listings, 1);
     // Cancelled: nothing. An answer to a request we did not make: nothing.
     h.player.request_folder();
     let req2 = h.mock.with(|s| *s.folder_requests.last().unwrap());
     h.push(events::folder_cancelled(req2));
     h.mock.with(|s| s.push_text(events::folder_added(4242), 20, "dir:Music"));
     h.run_ms(20);
-    assert_eq!(h.mock.with(|s| s.rescans.len()), 1);
+    assert!(h.mock.with(|s| s.rescans.is_empty()));
     // Files changed on disk: the walk is asked for again (it is incremental).
     h.mock.with(|s| s.push_text(events::library(ev::LIBRARY_CHANGED, false), 16, "dir:Music"));
     h.mock.with(|s| s.push_text(events::library(ev::LIBRARY_PROGRESS, false), 16, "dir:Music"));
     h.run_ms(20);
-    assert_eq!(h.mock.with(|s| s.rescans.len()), 2);
+    assert_eq!(h.mock.with(|s| s.rescans.len()), 1);
+    // A rescan while a walk of that root is running does nothing and says 0; an unreadable root is `-IO`.
+    h.mock.with(|s| {
+        s.walking.insert("dir:Music".into());
+    });
+    assert_eq!(h.player.host.library.rescan("dir:Music"), 0);
+    assert_eq!(h.mock.with(|s| s.rescans.len()), 1);
+    h.mock.with(|s| {
+        s.add_root("usb:off", "Unplugged", false);
+    });
+    assert_eq!(h.player.host.library.rescan("usb:off"), sys::err::IO);
     // Forgetting a root revokes it; a rescan of a root the OS does not know fails quietly.
     h.player.host.library.forget("dir:Music");
-    assert_eq!(h.mock.with(|s| (s.forgets.clone(), s.roots.len())), (vec!["dir:Music".to_string()], 0));
+    assert_eq!(h.mock.with(|s| (s.forgets.clone(), s.roots.len())), (vec!["dir:Music".to_string()], 1));
     assert!(h.player.host.library.rescan("dir:Music") < 0);
     h.player.host.library.reconnect("usb:x");
     assert_eq!(h.mock.with(|s| s.reconnects.clone()), vec!["usb:x".to_string()]);

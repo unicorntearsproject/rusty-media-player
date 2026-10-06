@@ -131,7 +131,12 @@ impl RbLibrary {
                 )
             };
             if total < 0 {
-                api::warn(&format!("library_listing `{root}` failed: {}", api::code_name(total as i32)));
+                // `-NOT_FOUND`: another walk replaced the listing and released it (or the root is gone). Its own event follows.
+                if total as i32 == err::NOT_FOUND {
+                    api::trace(&format!("library_listing `{root}` has nothing kept"));
+                } else {
+                    api::warn(&format!("library_listing `{root}` failed: {}", api::code_name(total as i32)));
+                }
                 self.assembling.remove(root);
                 return;
             }
@@ -166,6 +171,7 @@ impl RbLibrary {
         }
         let name =
             Self::roots().into_iter().find(|r| r.id == root).map_or_else(|| root.to_string(), |r| r.name);
+        api::trace(&format!("library.listing root={root} files={}", asm.files.len()));
         self.ready.push_back(Listing { root: root.to_string(), name, files: asm.files });
         self.listings += 1;
         self.release(root);

@@ -157,3 +157,10 @@ pub fn audio_error(stream: i32, error: i32) -> Event {
     e.put_i32(20, error);
     e
 }
+
+/// `FRAME`: `time_us` is the vblank just passed and `vblank_us` (at 16) the next one, the one to target.
+pub fn frame(time_us: i64, vblank_us: i64) -> Event {
+    let mut e = Event::new(ev::FRAME, 0, time_us);
+    e.put_i64(16, vblank_us);
+    e
+}

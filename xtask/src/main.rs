@@ -1,5 +1,6 @@
 //! Repo automation. Run as `cargo xtask <command>`.
 mod bucket;
+mod bucket_e2e;
 mod dist;
 mod theme;
 mod web;
@@ -31,7 +32,8 @@ const USAGE: &str = "usage: cargo xtask <command>
                    build the Rusty Bucket app: the wasm module(s), their imports checked against the documented App API, and
                    target/bucket/Rusty Wave.bucket; then run them in Node (cargo xtask bucket for the details)
   bucket-smoke     the Node checks alone, on quick builds (lifecycle of both builds, thread start-up contract)
-  bucket-e2e [--sim PATH]   run the packed app in the Bucket Simulator (skipped when it is not installed)
+  bucket-e2e [--sim PATH] [--only NAME...] [-v]
+                   run the packed app through the Bucket Simulator scenarios, headless (skipped when it is not installed)
   licenses         not implemented yet (see docs/PLAN.md)";
 
 fn main() -> ExitCode {

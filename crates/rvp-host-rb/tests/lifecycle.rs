@@ -148,19 +148,11 @@ fn a_present_for_a_stale_size_is_dropped_and_the_resize_fixes_it() {
     let mut h = Harness::new();
     h.run_ms(100);
     // The OS changed the size; until the app has seen RESIZE its presents return -BUSY and draw nothing.
-    h.mock.with(|s| {
-        s.canvas.stale = true;
-        s.canvas.width = 400;
-        s.canvas.height = 200;
-    });
-    h.push(events::pointer_move(50.0, 50.0));
-    h.run_ms(60);
     let n = h.mock.with(|s| s.canvas.presents.len());
-    h.mock.with(|s| {
-        s.canvas.stale = false;
-        s.push(events::resize(400, 200, 1.0, false));
-    });
-    h.run_ms(100);
+    h.mock.with(|s| s.resize(400, 200, 1.0, false));
+    h.push(events::pointer_move(50.0, 50.0));
+    // The first wait hands out the RESIZE (which makes the size current); the app then draws at the new size.
+    h.run_ms(160);
     let after = h.mock.with(|s| s.canvas.presents.clone());
     assert!(after.len() > n);
     assert_eq!(after.last().unwrap().len, 400 * 200 * 4);
@@ -209,15 +201,53 @@ fn capabilities_gate_the_optional_interfaces_and_can_change_at_run_time() {
 }
 
 #[test]
-fn restart_saves_first() {
+fn restart_saves_first_and_never_returns_when_it_works() {
     let mut h = Harness::new();
     h.run_ms(20);
-    assert!(h.player.restart());
+    // `restart` does not return: the mock unwinds the app, as the OS ends it at once.
+    let ended = bucket_v0_mock::catch_end(|| h.player.restart());
+    assert_eq!(ended, Err(bucket_v0_mock::AppEnded::Restart));
     assert_eq!(h.mock.with(|s| s.restarts), 1);
-    assert!(h.mock.with(|s| s.kv_flushes) >= 1);
-    // An OS that refuses reports it.
-    h.mock.with(|s| {
-        s.unsupported.insert("restart");
-    });
+    assert!(h.mock.with(|s| s.kv_flushes) >= 1, "everything is stored before the call");
+    // An OS that refuses: the call comes back with an error, so `restart` says false.
+    h.mock.with(|s| s.restart_error = Some(sys::err::UNSUPPORTED));
+    assert_eq!(bucket_v0_mock::catch_end(|| h.player.restart()), Ok(false));
+    assert_eq!(h.mock.with(|s| s.restarts), 1);
     let _ = transport::PLAY;
+}
+
+#[test]
+fn files_opened_together_are_one_queue() {
+    use bucket_v0_mock::FileSpec;
+    use common::tone_wav;
+    let mut h = Harness::new();
+    h.run_ms(20);
+    // `OPEN` has no "more follows" flag; the OS queues one per launch file before the first wait, so they arrive together.
+    for n in ["a.wav", "b.wav", "c.wav"] {
+        h.open_file(FileSpec::new(n, tone_wav(0.5)));
+    }
+    assert!(
+        h.run_until(3000, |h| h.player.app.playlist().len() == 3),
+        "queue: {}",
+        h.player.app.playlist().len()
+    );
+}
+
+#[test]
+fn a_hot_reload_saves_in_the_wait_after_reload_is_read() {
+    use bucket_v0_mock::SaveHook;
+    use std::sync::Arc;
+    let mut h = Harness::new();
+    h.run_ms(20);
+    // The module's `bucket_save_state`: make the queued stores durable and report no state.
+    h.mock.with(|s| s.save_hook = Some(SaveHook(Arc::new(|_buf| rvp_host_rb::save_state_hook()))));
+    let flushes = h.mock.with(|s| s.kv_flushes);
+    h.mock.with(|s| s.request_reload());
+    // One turn: the wait hands out RELOAD (the app reacts: it stores its state); the save has not run yet.
+    h.player.run_once();
+    assert!(h.mock.with(|s| s.saves_done.is_empty()));
+    // The next wait runs it, after the app's reaction.
+    h.player.run_once();
+    assert_eq!(h.mock.with(|s| s.saves_done.clone()), vec![0]);
+    assert!(h.mock.with(|s| s.kv_flushes) > flushes);
 }

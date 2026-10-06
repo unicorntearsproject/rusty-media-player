@@ -114,7 +114,13 @@ fn text_is_cut_at_a_character_and_covers_the_shell_cannot_take_are_left_out() {
     let _g = mock.install();
     mock.with(|s| s.limits.insert(sys::limit::STRING_BYTES, 20));
     let mut np = RbNowPlaying::new(limits());
-    let png = Art { mime: "image/png".into(), data: vec![7; 500] };
+    // The OS takes a cover only if its bytes start like a PNG or a JPEG.
+    let png_of = |n: usize| {
+        let mut d = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        d.resize(n, 7);
+        d
+    };
+    let png = Art { mime: "image/png".into(), data: png_of(500) };
     let meta = NowPlayingMeta {
         title: "日本語日本語日本語日本語".into(),
         artist: "A".into(),
@@ -132,7 +138,7 @@ fn text_is_cut_at_a_character_and_covers_the_shell_cannot_take_are_left_out() {
     assert!(m.has_video);
     // Over the art limit, or not PNG/JPEG: the cover is dropped and the rest is still reported.
     np.set_metadata(&NowPlayingMeta {
-        art: Some(Art { mime: "image/png".into(), data: vec![1; 5000] }),
+        art: Some(Art { mime: "image/png".into(), data: png_of(5000) }),
         ..meta.clone()
     });
     np.set_metadata(&NowPlayingMeta {
@@ -150,6 +156,36 @@ fn text_is_cut_at_a_character_and_covers_the_shell_cannot_take_are_left_out() {
     assert_eq!(all.len(), 4);
     assert!(all[3].art.is_empty());
     assert_eq!(all[3].title, all[0].title);
+    // A picture whose bytes are not a PNG or a JPEG is `-INVALID` for the OS: it is left out before the call.
+    np.set_metadata(&NowPlayingMeta {
+        art: Some(Art { mime: "image/png".into(), data: vec![1; 50] }),
+        ..meta.clone()
+    });
+    let all = mock.with(|s| s.metadata.clone());
+    assert_eq!(all.len(), 5);
+    assert!(all[4].art.is_empty());
+    assert_eq!(mock.with(|s| s.truncated_strings), 0, "the strings were cut by us, not by the OS");
+}
+
+#[test]
+fn reports_the_os_would_refuse_are_made_valid() {
+    let mock = MockHost::new();
+    let _g = mock.install();
+    let mut np = RbNowPlaying::new(limits());
+    let base = Playback {
+        state: PlayState::Playing,
+        position_us: 5,
+        rate: 1.0,
+        can_next: false,
+        can_prev: false,
+        can_seek: true,
+    };
+    // A negative position and a rate that is not a number are `-INVALID`; the adapter sends 0 and 1 instead.
+    np.set_playback(&Playback { position_us: -40, rate: f32::NAN, ..base });
+    let p = mock.with(|s| s.playback.clone());
+    assert_eq!(p.len(), 1, "the mock accepted the report");
+    assert_eq!((p[0].position_us, p[0].rate), (0, 1.0));
+    assert!(mock.with(|s| s.logs.iter().all(|(l, _)| *l > 1)));
 }
 
 #[test]

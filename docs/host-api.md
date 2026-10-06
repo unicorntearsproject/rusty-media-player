@@ -170,20 +170,22 @@ mapping table is in the crate's docs and in `../rust-os/docs/developer/app-api.m
   (bounded to 5 s) while other events are kept for the next tick.
 - **Power**: the adapter calls `power_inhibit` from the player state (system awake while anything plays, display while a picture does).
 
-Open questions for the Rusty Bucket side (answers change only small things in the adapter):
+Answers from the Rusty Bucket side (v0.3 clarifications, 2026-10-05) and what the adapter does about them; run against the Simulator
+(`cargo xtask bucket-e2e`, see `docs/reviews/app-api-v0-review.md`, "M12 vs bucket-sim"):
 
-1. After `library_add_folder` and `FOLDER_ADDED`, does the OS start the first walk by itself? We call `library_rescan(root)`, which is a second walk if it does.
-2. `AUDIO_ERROR`: is the stream closed by the OS, or does it stay open and may recover? We close it and play on silently (the user is told once).
-3. A multi-select pick that is cancelled: one `FILE_PICKED` with `-CANCELLED`, or none? We handle both.
-4. `OPEN { while_running }`: should the app replace its queue or append? We replace (as a drop).
-5. `bucket_save_state`: may it be called while the main thread is inside `events_wait` (re-entrantly)? We only call `kv_flush` there and keep no state in memory, so this is safe either way; we need to know whether a hot reload keeps the shared memory.
-6. Threads: a new instance starts with `__stack_pointer` at the module's initial value, the same as the main thread's, so the entry export must switch stacks before it uses any (ours does, with no stack use at all). Is that the intended contract? Please state it in the threads section.
-7. `thread_priority(tid, 1)`: the adapter does not call it yet (the loudness analysis runs on the main thread in 4 ms slices); a threaded analysis would.
-8. Wake-up when the OS is slow to deliver `IO_READY` for `kv_load`/`file_open_id` (`file = 0`): is there an upper bound we can rely on instead of our 5 s?
+1. After `library_add_folder` and `FOLDER_ADDED` the OS starts the first walk itself: **the adapter no longer rescans** (it had caused a second walk).
+2. `AUDIO_ERROR` closes the stream (`-CLOSED` after it): the adapter closes its handle and plays on silently, telling the user once.
+3. A cancelled multi-select pick: handled both ways, unchanged.
+4. `OPEN` while running: the app's choice; we replace the queue (as a drop). Files that arrive together in one `events_wait` are one queue.
+5. `bucket_save_state` runs in the next `events_wait` after `RELOAD`, re-entrantly, with memory the host adds; the adapter reacts to `RELOAD` by storing its
+   state, and `bucket_save_state` only flushes the key-value store and returns 0. `bucket_restore_state` is exported and takes nothing; the new instance restores
+   from the store (queue paused at the position). Fresh memory: nothing is kept in it.
+6. Threads: a new instance starts at the module's initial stack pointer; the entry switches stacks first (stated in the threads section of the API pages; the limit counts the main thread).
+7. `thread_priority(tid, 1)`: still unused.
+8. `IO_READY` only means "retry now"; a retry may return `-IO` (a failed fetch): the player shows the error (files) or starts without the value (keys, with a log line).
 
-Found while testing: the core's `Session::pause` only stops the clock; it never calls `AudioSink::set_paused(true)`, and the feeding task keeps
-filling the sink, so on every host a paused player goes on playing what is queued and keeps queueing. It matters here because the `media` class
-and the OS's own now-playing state follow the audio stream, not the UI. Not changed in M12 (it is core behaviour).
+`restart()` and `exit()` do not return; the adapter's `restart` therefore returns only when the OS refused. The adapter writes trace lines (log level 4: `np.meta`,
+`np.playback`, `np.command`, `audio.open`, `audio.paused`, `audio.exit`, `library.*`, `threads:`, `open`), which the Simulator scenarios read.
 
 ## Changes
 
@@ -193,3 +195,4 @@ and the OS's own now-playing state follow the audio stream, not the UI. Not chan
 - 2026-10-05: audio settings (crossfade, automatic level) under `settings/audio`; library index version 2 (loudness).
 - 2026-10-05: the Rusty Bucket mapping and its open questions (M12). No trait changed.
 - 2026-10-06: optional `AppServices` capability (update checks, app-menu entry); `settings/app` key.
+- 2026-10-06: M12 against the Bucket Simulator: answers to the open questions recorded; the pause fix (`Session` pauses the audio sink with the clock) is verified there.

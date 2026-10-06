@@ -480,3 +480,67 @@ We will adopt `video_present` as soon as the app has a video layer, so keep `VID
 
 Our side (not requests): idle wake when paused, wake-lock and screensaver inhibit in the browser and desktop hosts, a non-SIMD build for the baseline, a core-side presentation target for `FRAME`,
 restart-audio-at-heard-position for a device change, more now-playing fields (shuffle, repeat, volume, track).
+
+## M12 vs bucket-sim
+
+Run 2026-10-06 against `../rust-os` 66ad17e (the v0.3 clarifications) with `tools/bucket-sim` built into a scratch target directory
+(`CARGO_TARGET_DIR=/tmp/... cargo build --release --manifest-path ../rust-os/tools/bucket-sim/Cargo.toml`), the real
+`Rusty Wave.bucket` (`cargo xtask bucket`), headless and on the virtual clock. `cargo xtask bucket-e2e` runs the scenarios (`xtask/src/bucket_e2e.rs`):
+empty state; H.264 + AAC to the end (threads build, pool started); the baseline build (`--no-threads --no-simd`); FLAC with tags and cover,
+audio clock at 1x; pause and resume (the device stops with the clock); seek by key and by click on the bar; now-playing and every `TRANSPORT`
+command; three launch files; library add-folder, listing, play a track and the launch listing at the next start; restart restores the queue
+paused at the position; hot reload; cold volume (video and library); failing fetches (file, `library/index`); audio device change and error;
+resize, scale, fullscreen, hidden and a burst of resizes. Every run must also be quiet: any app warning or simulator message that is not a known
+routine one fails it. The adapter writes trace lines (level 4) that the scenarios read.
+
+**Mismatches, in the order found.** "Ours" = our adapter or tests were wrong and are fixed; "Spec/sim" = a question for the Rusty Bucket side.
+
+1. **Ours.** After `FOLDER_ADDED` we called `library_rescan`. The OS starts the first walk itself (the answer we had asked for), so there were two
+   walks; we released the first listing after reading it, which dropped the second's kept listing (`library_listing` gave `-NOT_FOUND`, two
+   warnings). Dropped the rescan; a `-NOT_FOUND` for a listing event is now a trace (another walk replaced it), not a warning.
+2. **Ours.** `OPEN` has no "more follows" flag (`DROP` has). We opened each `OPEN` as its own queue, so `bucket-sim app a b c` played only `c`.
+   Events that arrive together from one `events_wait` are now one queue. **Spec question:** state that launch files arrive together and in
+   argument order, and how a group is marked if a shell sends several `OPEN`s while running.
+3. **Ours.** `restart()` was treated as returning success. It does not return (v0.3); coming back means it failed. `RbPlayer::restart` is now
+   false after any return.
+4. **Ours.** Cover art was checked by MIME type only; the OS refuses bytes that do not start like a PNG or a JPEG (`-INVALID`). Checked by
+   magic now, a refusal retries without the cover, and a negative position or non-finite rate in `now_playing_playback` is sent as 0 and 1.
+5. **Ours.** We exported `bucket_save_state` without `bucket_restore_state`; the simulator notes that the module "drops state". Added the
+   restore export (it takes nothing: queue, position and library are in the key-value store). The save runs in the `events_wait` after
+   `RELOAD` is read, which is where our state-saving reaction to `RELOAD` already ends in a `kv_flush`.
+6. **Ours (docs).** The thread limit counts the main thread; our pool takes at most `limit - 4` workers, which leaves room for the decoders.
+7. **Ours (mock).** `bucket-v0-mock` differed from the simulator on: `events_wait` arguments (`-INVALID`), the thread limit and `thread_priority`
+   validation, `restart`/`exit` returning, `canvas_present` argument checks and the `-BUSY` order (a `RESIZE` is no longer pending once it is
+   handed out), `-TOO_LARGE`/`-INVALID` for key length, over-long now-playing strings (cut, not refused), art magic, `now_playing_playback`
+   validation, handle limit `-NO_SPACE`, `file_read_at` with `cap` 0, folder handles and `file_open_sibling`, `file_save` names, rate grants
+   of `audio_open` and volume clamping, cache-class eviction oldest first, library walks (the first listing replaces, the rest append,
+   rescan of an unreadable root `-IO`, a walk already running), and failing fetches (`IO_READY`, then `-IO`). All match now; `tests/v03.rs`.
+8. **Spec/sim.** After a hot reload the simulator hands the **launch files** to the new instance as `OPEN` again. Our app then treats the run as
+   "opened from outside" and the queue restore is skipped (only the per-file resume position applies). Is that what the OS does for a
+   reload or a `restart()`? If not, the simulator should not; if so, say so, so apps know a relaunch looks like a first launch with files.
+9. **Spec/sim.** `now_playing_playback` after `now_playing_metadata` of a **new item** within 0.5 s of the old item's extrapolated position gets the
+   "sent again with nothing changed" warning (our library fixtures are 0.4 to 0.6 s long). The report is needed (the position restarts at 0).
+   Please let a metadata change reset the baseline, or say in the page that a new item's first report is always a change.
+10. **Spec/sim.** `--library DIR` registers a root but starts no walk, and there is no launch `LIBRARY_LISTING` for a root that was never scanned,
+    so nothing in the API says a never-scanned root needs a walk (the OS starts the first walk only after `FOLDER_ADDED`). We do not rescan on
+    launch. Say who starts the walk for a root added before its first scan finished (a crash, `--library`).
+11. **Spec/sim.** `bucket_save_state` returning 0 prints a level-1 note ("saved 0 bytes of state") although 0 is the documented "nothing"; it
+    fails a quiet-run check. Suggest level 2 or 3.
+12. **Spec/sim.** `audio_clock.underruns` counts one underrun when a stream that has ended drains before the app pauses it (frames played
+    stop 20 ms short, then `audio_pause`). The page does not define an underrun; say whether an ended stream's drain counts. The
+    scenarios therefore stop before the end of the item when they check for underruns.
+13. **Not exercised.** The adapter never calls `file_open_sibling` or opens a folder handle (the library comes from `library_add_folder`, and the host
+    traits have no sidecar open for subtitles or `cover.jpg`), and `FRAME` is unused (no vblank pacing), so those v0.3 points are covered by the mock
+    only. `video_present` is not driven by the app. `THEME`, `BAR_COMMANDS` and `AUDIO_IN` are off in the simulator and unused.
+14. **Matched the spec without change.** `FRAME` timing, the never-dropped events, `-NO_SPACE` vs `-TOO_LARGE` (no count or size limit is hit),
+    every `audio_open` a new stream (we reuse a stream of the same format with `audio_flush`, which restarts `frames_played`), the ring of one
+    second at the granted rate, strict `canvas_present` with `-BUSY` for a pending resize first (a burst of resizes ends at the final
+    size), `IO_READY` as "retry now" with a retry that may return `-IO` (shown as "Couldn't read the file (IO)" and as a logged
+    `kv_load` failure; the player starts without the saved library and the launch listing refills it), key-value edge cases.
+
+**Findings that are not Bucket specific** (not changed: they change what the user sees): at 1280x720 the library sidebar has no room for the
+folder rows, so "FOLDERS" shows nothing under it; the restored-queue comment in `rvp-app` says "whatever the length" but a position under 5 s, or with
+under 10 s left, is not restored; after a hot reload or a restart the item comes back paused, not playing.
+
+**M12 status:** the adapter runs the real `.bucket` on the simulator in all scenarios above, with the threads and the baseline builds. Open
+items are 8 to 11 (answers from the Rusty Bucket side, none blocks us) and the runs on the OS itself (QEMU, wasmi or AOT).

@@ -42,7 +42,7 @@ fn the_module_imports_exactly_the_documented_api() {
     assert!(report.ok(), "the imports drifted from the documented API:\n{}", report.problems.join("\n"));
     assert!(!report.shared_memory, "the plain build must not import a shared memory");
     assert_eq!(report.bucket_functions, bucket_v0_sys::FUNCTIONS.len());
-    for name in ["bucket_main", "bucket_save_state", "memory"] {
+    for name in ["bucket_main", "bucket_save_state", "bucket_restore_state", "memory"] {
         assert!(info.exports.iter().any(|(n, _)| n == name), "`{name}` is not exported: {:?}", info.exports);
     }
     assert!(
