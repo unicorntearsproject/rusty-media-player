@@ -1,0 +1,15 @@
+{
+  "npm.autoDetect": "off",
+  "search.followSymlinks": false,
+  "search.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    ".claude/worktrees": true,
+    "third_party/**/target": true
+  },
+  "files.watcherExclude": {
+    "**/target/**": true,
+    "**/node_modules/**": true,
+    ".claude/worktrees/**": true
+  }
+}
