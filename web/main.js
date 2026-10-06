@@ -3,7 +3,7 @@
 import { RvpAudio } from "./audio.js";
 import { RvpMediaSession } from "./mediasession.js";
 import { Threads } from "./threads.js";
-import { setupPwa } from "./pwa.js";
+import { setupPwa, install, installState } from "./pwa.js";
 import { RvpStore, hasDirectoryPicker, listFromInput, rootId, walkEntry, walkHandle } from "./library.js";
 
 const canvas = document.getElementById("screen");
@@ -366,15 +366,6 @@ canvas.addEventListener("pointermove", (e) => {
 });
 canvas.addEventListener("pointerdown", (e) => {
   audio.unlock();
-  // The installable app: service worker, install and update buttons, files opened with the app or shared to it.
-setupPwa({ openFiles, status: (t) => { statusEl.textContent = t; } });
-// The manifest's "Music library" shortcut opens on the Library face.
-if (new URLSearchParams(location.search).get("face") === "library") {
-  player.key_down("b", false, false, false, false, false);
-  player.key_up("b", false, false, false, false);
-}
-canvas.focus({ preventScroll: true });
-restoreFolders();
   if (e.button === 0) canvas.setPointerCapture(e.pointerId);
   const [x, y] = pos(e);
   player.pointer_down(x, y, e.button);
@@ -580,6 +571,10 @@ window.rvp = {
   /** Test hook: crash the player (`main`: panic now; `decoder`: the next video packet crashes its decoder). */
   debugCrash: (what) => (what === "decoder" ? player.debug_crash_decoder() : player.debug_panic()),
   threadInfo: () => threadInfo,
+  /** Install as an app: the browser's prompt where it offered one, else shows how to from the browser's menu. */
+  install,
+  /** `{ state: "installed" | "available" | "hint" | "pending", hint, dismissed }`. */
+  installState,
 };
 // The installable app: service worker, install and update buttons, files opened with the app or shared to it.
 setupPwa({ openFiles, status: (t) => { statusEl.textContent = t; } });
@@ -589,3 +584,5 @@ if (new URLSearchParams(location.search).get("face") === "library") {
   player.key_up("b", false, false, false, false);
 }
 canvas.focus({ preventScroll: true });
+// The folders the browser remembers (read permission already granted) are scanned again at start.
+restoreFolders();

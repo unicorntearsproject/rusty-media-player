@@ -6,7 +6,7 @@ html, body { margin: 0; height: 100%; background: var(--ink-900); overflow: hidd
 
 /* The two little buttons of the installable app (pwa.js): install, and update. Tokens of the Unicorn Tears system. */
 .pwa-pill {
-  position: fixed; top: 14px; right: 16px; z-index: 5;
+  position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; white-space: nowrap;
   font: 600 13px/1 "Space Grotesk", system-ui, sans-serif; letter-spacing: 0.02em;
   color: #fff; background: linear-gradient(120deg, #ff2bd6, #9d4eff 55%, #19e3ff);
   border: 0; border-radius: 999px; padding: 9px 16px; cursor: pointer;
@@ -15,5 +15,32 @@ html, body { margin: 0; height: 100%; background: var(--ink-900); overflow: hidd
 .pwa-pill:hover { filter: brightness(1.1); }
 .pwa-pill:focus-visible { outline: 2px solid #19e3ff; outline-offset: 2px; }
 .pwa-pill[hidden] { display: none; }
+/* The install button and its small cross: one pill-shaped group, centred at the top where neither the library's search nor the player's
+   controls sit. */
+.pwa-bar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 6px; }
+.pwa-bar[hidden] { display: none; }
+.pwa-bar .pwa-pill { position: static; transform: none; }
+.pwa-x {
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(244, 241, 255, 0.35); cursor: pointer; padding: 0;
+  font: 400 16px/1 system-ui, sans-serif; color: #f4f1ff; background: rgba(20, 16, 42, 0.85);
+}
+.pwa-x:hover { background: rgba(244, 241, 255, 0.18); }
+.pwa-x:focus-visible { outline: 2px solid #19e3ff; outline-offset: 2px; }
 .pwa-pill-update { top: 56px; }
+.pwa-card {
+  position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 6; width: min(340px, calc(100vw - 32px)); box-sizing: border-box;
+  font: 400 14px/1.45 "Space Grotesk", system-ui, sans-serif; color: #f4f1ff; background: #14102a;
+  border: 1px solid rgba(157, 78, 255, 0.6); border-radius: 14px; padding: 14px 16px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+.pwa-card[hidden] { display: none; }
+.pwa-card strong { font-weight: 700; }
+.pwa-card p { margin: 6px 0 12px; }
+.pwa-card-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.pwa-card button {
+  font: 600 13px/1 "Space Grotesk", system-ui, sans-serif; color: #f4f1ff; background: transparent; cursor: pointer;
+  border: 1px solid rgba(244, 241, 255, 0.35); border-radius: 999px; padding: 8px 14px;
+}
+.pwa-card button:hover { background: rgba(244, 241, 255, 0.1); }
+.pwa-card button:focus-visible { outline: 2px solid #19e3ff; outline-offset: 2px; }
+body:has(#update) .pwa-card { top: 94px; }
 @media (prefers-reduced-motion: no-preference) { .pwa-pill { transition: filter 120ms ease-out; } }
