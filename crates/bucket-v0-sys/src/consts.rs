@@ -145,6 +145,8 @@ pub mod ev {
     pub const FLAG_MORE: u16 = 1;
     /// Flag bit 0 of `OPEN`: the app was already running.
     pub const FLAG_WHILE_RUNNING: u16 = 1;
+    /// Flag bit 1 of `OPEN`: more follow (the rest of the same group).
+    pub const FLAG_OPEN_MORE: u16 = 2;
 }
 
 /// Keys: a Unicode scalar value for keys that type a character (Space is U+0020), or `NAMED_BASE + n`.

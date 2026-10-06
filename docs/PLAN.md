@@ -1066,6 +1066,9 @@ v0.2, 13 deltas in v0.3, all folded in), so the adapter has no workarounds left 
   `docs/reviews/app-api-v0-review.md`, "M12 vs bucket-sim" (found and fixed: a second library walk after `FOLDER_ADDED`, launch files replacing each other,
   `restart()` read as returning, cover art checked by type only).
 - **v0.3 clarifications** applied in the adapter and in `bucket-v0-mock` (which now reads the pages as the simulator does; `bucket-v0-mock/tests/v03.rs`).
+  Decision 102 (rust-os `e00194b`, simulator `96963ee`) is applied too: `OPEN` groups by flag bit 1 (our batching stays as the fallback for older hosts), launch files only on
+  `launch_reason` 0, the first now-playing report after metadata counts as a change, the OS walks a never-finished root at launch, a 0-byte save is not logged, an
+  underrun is a mid-play gap only. The `bucket-e2e` workarounds are gone and the 15 scenarios pass against the current simulator.
 - **Not done / limits.** No `FRAME` pacing (the core presents against `now`), no hot-reload state (everything is in the store; a reload comes back paused), no theme or
   Bucket Bar commands or clipboard (we draw our own look), no device selection, no `file_open_sibling` use (the host traits have no sidecar open). Still open:
   QEMU under Rusty Bucket (runtime choice: AOT or interpreter, risk R3), `video_present` in the real pipeline, the answers to items 8 to 11 of the review section.

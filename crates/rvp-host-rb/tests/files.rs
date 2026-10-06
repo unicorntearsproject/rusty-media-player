@@ -231,3 +231,48 @@ fn picks_ask_with_the_open_types_and_a_cancel_is_quiet() {
     assert_eq!(h.player.app.playlist().len(), 2);
     let _ = Effect::PickFile;
 }
+
+fn two_handles(h: &mut Harness) -> Vec<i32> {
+    h.mock.with(|s| {
+        (0..2)
+            .map(|i| {
+                let spec = FileSpec::new(&format!("o{i}.wav"), tone_wav(0.2));
+                s.add_file(spec.clone());
+                s.new_handle(spec)
+            })
+            .collect()
+    })
+}
+
+#[test]
+fn an_open_group_flagged_with_bit_one_is_one_group_even_across_waits() {
+    let mut h = Harness::new();
+    h.run_ms(50);
+    let handles = two_handles(&mut h);
+    h.push(events::open(handles[0], true, true));
+    h.run_ms(40);
+    assert_eq!(h.player.app.playlist().len(), 0, "waiting for the rest of the group");
+    h.push(events::open(handles[1], true, false));
+    h.run_ms(100);
+    assert_eq!(h.player.app.playlist().len(), 2);
+}
+
+#[test]
+fn an_older_host_that_never_sets_the_open_bit_is_still_grouped_by_the_queue() {
+    let mut h = Harness::new();
+    h.run_ms(50);
+    let handles = two_handles(&mut h);
+    h.push(events::open(handles[0], false, false));
+    h.push(events::open(handles[1], false, false));
+    h.run_ms(100);
+    assert_eq!(h.player.app.playlist().len(), 2);
+}
+
+#[test]
+fn launch_files_are_sent_only_on_a_normal_launch() {
+    let mut h = Harness::with(|s| s.launch_reason = bucket_v0_sys::launch::AFTER_KILL);
+    let handles = two_handles(&mut h);
+    h.mock.with(|s| s.launch_opens(&handles));
+    h.run_ms(100);
+    assert_eq!(h.player.app.playlist().len(), 0);
+}

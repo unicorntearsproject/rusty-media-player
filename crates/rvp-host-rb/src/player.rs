@@ -208,13 +208,18 @@ impl RbPlayer {
 
     // ---- events ----
 
-    /// Handle decoded events. `OPEN` has no "more follows" flag (a `DROP` has), and the OS queues one per file before the first
-    /// `events_wait`, so the ones that arrive together are one queue: all but the last say "more".
+    /// Handle decoded events. `OPEN` groups its files with flag bit 1 ("more follow"). A host that never sets the bit (older
+    /// ones) is told by a batch of several `OPEN`s with no bit at all: those arrive together as one queue, so all but the
+    /// last say "more".
     pub fn dispatch(&mut self, evs: Vec<Ev>) {
         let last_open = evs.iter().rposition(|e| matches!(e, Ev::Open { .. }));
+        let flagged = evs.iter().any(|e| matches!(e, Ev::Open { more: true, .. }));
         for (i, e) in evs.into_iter().enumerate() {
             match e {
-                Ev::Open { file, .. } => self.on_file(file, last_open.is_some_and(|l| i < l), false, true),
+                Ev::Open { file, more, .. } => {
+                    let more = more || (!flagged && last_open.is_some_and(|l| i < l));
+                    self.on_file(file, more, false, true)
+                }
                 e => self.on_event(e),
             }
         }
@@ -275,7 +280,7 @@ impl RbPlayer {
             Ev::Focus(on) => self.push(InputEvent::Focus(on)),
             Ev::DragOver(on) => self.push(InputEvent::DragOver(on)),
             Ev::Drop { file, more } => self.on_file(file, more, true, true),
-            Ev::Open { file, while_running: _ } => self.on_file(file, false, false, true),
+            Ev::Open { file, more, .. } => self.on_file(file, more, false, true),
             Ev::FilePicked { request, file, more } => {
                 let kind = self.picks.get(&request).copied();
                 if !more || file < 0 {

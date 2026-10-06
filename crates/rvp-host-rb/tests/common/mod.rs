@@ -1,7 +1,7 @@
 //! Shared set-up for the adapter tests: a mock Rusty Bucket host on virtual time and a player running against it.
 #![allow(dead_code)]
 use bucket_v0_mock::{FileSpec, MockHost, State, events};
-use bucket_v0_sys::{self as sys, backend::Guard, ev};
+use bucket_v0_sys::{self as sys, backend::Guard};
 use rvp_core::{AudioDecoder, CodecFactory, Error, Result as CoreResult, StreamInfo, VideoDecoder};
 use rvp_host_rb::RbPlayer;
 use rvp_ui::UiConfig;
@@ -112,7 +112,7 @@ impl Harness {
             s.add_file(spec.clone());
             s.new_handle(spec)
         });
-        self.push(events::file(ev::OPEN, h, false));
+        self.push(events::open(h, false, false));
     }
 
     /// Start playing a tone of `secs` seconds.

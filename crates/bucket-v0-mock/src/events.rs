@@ -91,9 +91,17 @@ pub fn transport_f32(command: u32, value: f32) -> Event {
     e
 }
 
-/// `DROP`, `OPEN` or `FILE_PICKED`-style file event: a handle at 16 (`DROP`, `OPEN`) and `more` follow flag.
+/// `DROP`-style file event: a handle at 16 and the `more` follow flag (bit 0). For `OPEN`, whose flags differ, use [`open`].
 pub fn file(kind: u16, handle: i32, more: bool) -> Event {
     let mut e = Event::new(kind, if more { ev::FLAG_MORE } else { 0 }, 0);
+    e.put_i32(16, handle);
+    e
+}
+
+/// `OPEN`: a handle at 16; flag bit 0 while the app is running, bit 1 more of the same group follow.
+pub fn open(handle: i32, running: bool, more: bool) -> Event {
+    let flags = if running { ev::FLAG_WHILE_RUNNING } else { 0 } | if more { ev::FLAG_OPEN_MORE } else { 0 };
+    let mut e = Event::new(ev::OPEN, flags, 0);
     e.put_i32(16, handle);
     e
 }

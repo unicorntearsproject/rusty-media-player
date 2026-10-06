@@ -270,3 +270,53 @@ fn frame_events_carry_the_vblank_just_passed_and_the_next() {
     let e = events::frame(16_667, 33_333);
     assert_eq!((e.time_us, e.i64_at(16)), (16_667, 33_333));
 }
+
+#[test]
+fn an_underrun_is_a_gap_the_app_then_fills_not_a_drained_end() {
+    let mock = MockHost::new();
+    let _g = mock.install();
+    let mut info = sys::AudioOpenInfo { struct_size: 16, ..Default::default() };
+    // SAFETY: the struct is 16 bytes; the write range is 100 frames of silence.
+    let h = unsafe { sys::audio_open(44_100, 2, (&mut info as *mut sys::AudioOpenInfo).cast()) };
+    let pcm = vec![0f32; 200];
+    // SAFETY: as above.
+    let write = || unsafe { sys::audio_write(h, pcm.as_ptr(), 100) };
+    assert_eq!(write(), 100);
+    // It drains at the end and stays dry: no underrun.
+    mock.with(|s| s.advance(1_000_000));
+    // SAFETY: plain call.
+    unsafe { sys::audio_queued(h) };
+    assert_eq!(mock.with(|s| s.audio[&h].underruns), 0);
+    // The app writes more after the dry spell: that was a gap.
+    assert_eq!(write(), 100);
+    assert_eq!(mock.with(|s| s.audio[&h].underruns), 1);
+}
+
+#[test]
+fn the_first_playback_report_after_metadata_counts_as_a_change() {
+    let mock = MockHost::new();
+    let _g = mock.install();
+    let pb = |t: i64| {
+        let raw = sys::NowPlayingPlaybackRaw {
+            struct_size: 40,
+            state: 1,
+            rate: 1.0,
+            reserved0: 0,
+            position_us: t,
+            host_time_us: t,
+            flags: 4,
+            reserved1: 0,
+        };
+        // SAFETY: the 40-byte struct.
+        unsafe { sys::now_playing_playback((&raw as *const sys::NowPlayingPlaybackRaw).cast()) }
+    };
+    assert_eq!(pb(0), 0);
+    let mut meta = [0u8; 64];
+    meta[..4].copy_from_slice(&64u32.to_le_bytes());
+    // SAFETY: the 64-byte struct.
+    assert_eq!(unsafe { sys::now_playing_metadata(meta.as_ptr()) }, 0);
+    assert_eq!(pb(1_000_000), 0, "unchanged, but the first after metadata");
+    assert_eq!(mock.with(|s| s.needless_playback), 0);
+    assert_eq!(pb(2_000_000), 0);
+    assert_eq!(mock.with(|s| s.needless_playback), 1);
+}

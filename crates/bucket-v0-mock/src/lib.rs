@@ -369,6 +369,7 @@ pub struct State {
     /// `now_playing_playback` calls that repeated the last report (same state, rate and flags, the position where the shell would
     /// extrapolate it): the Simulator warns about them.
     pub needless_playback: u32,
+    playback_fresh: bool,
     /// `now_playing_metadata` strings that were cut to the limit.
     pub truncated_strings: u32,
     /// `viz_block` calls (pts, rate, channels, frames).
@@ -517,6 +518,7 @@ impl State {
             restart_error: None,
             save_hook: None,
             save_buffer: 1 << 20,
+            playback_fresh: false,
             saves_done: Vec::new(),
             saved_state: Vec::new(),
             reload_armed: false,
@@ -611,16 +613,13 @@ impl State {
             let room = a.written as f64 - a.consumed;
             let want = dt * f64::from(a.rate) / 1e6;
             if want >= room && a.written > 0 && room >= 0.0 {
-                if !a.starved && want > room {
-                    a.underruns += 1;
+                // The ring ran dry while playing: it is a gap (an underrun) only if the app then writes more.
+                if want > room {
                     a.starved = true;
                 }
                 a.consumed = a.written as f64;
             } else {
                 a.consumed += want;
-                if room > 0.0 {
-                    a.starved = false;
-                }
             }
         }
     }
@@ -706,6 +705,41 @@ impl State {
     /// Add a library root.
     pub fn add_root(&mut self, id: &str, name: &str, readable: bool) {
         self.roots.push(Root { id: id.into(), name: name.into(), readable });
+    }
+
+    /// Files the app was launched with: `OPEN` events (one group, bit 1 on all but the last) queued only on a normal launch
+    /// (`launch_reason` 0); after a hot reload or a restart the OS sends none.
+    pub fn launch_opens(&mut self, handles: &[i32]) {
+        if self.launch_reason != 0 {
+            return;
+        }
+        for (i, h) in handles.iter().enumerate() {
+            self.push(events::open(*h, false, i + 1 < handles.len()));
+        }
+    }
+
+    /// What the OS does for the library at launch: a `LIBRARY_LISTING` per readable root from the last scan, and for a root whose
+    /// first walk never finished (the kept listing is not all visible) a new walk: `LIBRARY_PROGRESS`, then the full listing.
+    pub fn launch_library(&mut self, gap_us: i64) {
+        let roots: Vec<String> = self.roots.iter().filter(|r| r.readable).map(|r| r.id.clone()).collect();
+        for root in roots {
+            let l = self.listings.entry(root.clone()).or_default();
+            let (unfinished, len) = (l.visible < l.blob.len(), l.blob.len());
+            if unfinished && !self.walking.contains(&root) {
+                self.walking.insert(root.clone());
+                let at = self.now_us + gap_us;
+                let mut p = events::library(ev::LIBRARY_PROGRESS, false);
+                p.time_us = at;
+                self.scheduled.push((at, Queued { ev: p, text: Some((16, root.clone())), reveal: None }));
+                let at = at + gap_us;
+                let mut e = events::library(ev::LIBRARY_LISTING, false);
+                e.time_us = at;
+                self.scheduled
+                    .push((at, Queued { ev: e, text: Some((16, root.clone())), reveal: Some((root, len)) }));
+            } else if !unfinished {
+                self.push_text(events::library(ev::LIBRARY_LISTING, false), 16, &root);
+            }
+        }
     }
 
     /// Set the kept listing of `root` to these files (id, path, size, mtime_ms), all visible.
@@ -918,6 +952,10 @@ impl Backend for MockHost {
                 let n = (hook.0)(&mut buf);
                 s = self.lock();
                 s.saves_done.push(n);
+                // 0 is "nothing to save" and is not logged; a negative value is.
+                if n < 0 {
+                    s.logs.push((2, format!("bucket_save_state failed ({n}); the app starts without state")));
+                }
                 if n > 0 {
                     buf.truncate((n as usize).min(cap));
                     s.saved_state = buf;
@@ -1115,6 +1153,10 @@ impl Backend for MockHost {
         let samples = unsafe { std::slice::from_raw_parts(ptr, n * a.channels as usize) };
         a.samples.extend_from_slice(samples);
         a.written += n as u64;
+        if a.starved && n > 0 {
+            a.underruns += 1;
+            a.starved = false;
+        }
         n as i32
     }
     unsafe fn audio_clock(&self, h: i32, out: *mut u8) -> i32 {
@@ -1168,6 +1210,9 @@ impl Backend for MockHost {
         s.sync_audio();
         let Some(a) = s.audio.get_mut(&h) else { return err::NOT_FOUND };
         a.paused = paused != 0;
+        if a.paused {
+            a.starved = false;
+        }
         0
     }
     unsafe fn audio_volume(&self, h: i32, volume: f32) -> i32 {
@@ -1239,6 +1284,8 @@ impl Backend for MockHost {
             duration_us: rd64(&b, 48),
             has_video: rd32(&b, 56) != 0,
         });
+        // The first playback report after metadata always counts as a change.
+        s.playback_fresh = true;
         0
     }
     unsafe fn now_playing_playback(&self, pb: *const u8) -> i32 {
@@ -1251,7 +1298,8 @@ impl Backend for MockHost {
         if raw.state > 2 || !raw.rate.is_finite() || raw.position_us < 0 {
             return err::INVALID;
         }
-        if let Some(last) = s.playback.last() {
+        let fresh = std::mem::take(&mut s.playback_fresh);
+        if let Some(last) = s.playback.last().filter(|_| !fresh) {
             // Where the shell would put the position now: it extrapolates a playing item.
             let elapsed =
                 if last.state == sys::play_state::PLAYING { raw.host_time_us - last.host_time_us } else { 0 };

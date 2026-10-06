@@ -73,7 +73,7 @@ const ROUTINE: &[&str] = &[
     "bucket-sim: some threads are still blocked",
     "bucket-sim: script: ",
     // `bucket_save_state` returns 0 (nothing is kept in memory: the queue and the position are in the key-value store).
-    "bucket-sim: hot reload: the app saved 0 bytes of state",
+    "bucket-sim: hot reload: no state saved",
     "bucket-sim: SIGNATURE",
     "bucket-sim: unsigned",
 ];
@@ -519,7 +519,7 @@ fn transport(ctx: &Ctx) -> Result<String, String> {
     Ok(format!("{} commands, states {st:?}", cmds.len()))
 }
 
-/// Several files given at launch become one queue (one `OPEN` each, no "more" flag).
+/// Several files given at launch become one queue (one `OPEN` each, one group: flag bit 1 on all but the last).
 fn queue_open(ctx: &Ctx) -> Result<String, String> {
     let mut j = base("queue-open", "1s key q\n1.5s screenshot {out}/queue.png\n2s terminate 2000\n");
     j.files =
@@ -552,7 +552,6 @@ fn library(ctx: &Ctx) -> Result<String, String> {
     j.data = Some(data.clone());
     // The fixture tracks are 0.4 to 0.6 s long, so the next item starts within 0.5 s of where the shell would have extrapolated
     // the last one and the Simulator reads the report that follows the new metadata as a needless repeat (see the review).
-    j.allow = vec!["now_playing_playback sent again with nothing changed"];
     let r = ctx.run(&j)?;
     ensure!(r.trace_with("library.folder_added").len() == 1, "FOLDER_ADDED: {:?}", r.trace_with("library."));
     let listings = r.trace_with("library.listing ");
@@ -618,8 +617,8 @@ fn restore(ctx: &Ctx) -> Result<String, String> {
 /// A hot reload while playing: `RELOAD` first, the state saved in the next `events_wait`, a fresh instance with fresh memory and
 /// `launch_reason() = 1`. Nothing is kept in memory, so the new instance restores from the key-value store like a restart.
 fn hot_reload(ctx: &Ctx) -> Result<String, String> {
-    // Opened while running (an `OPEN` with the flag): the Simulator hands the launch arguments to every new instance, this
-    // reaches only the first, so the second has to restore the queue on its own.
+    // Opened while running (an `OPEN` with the flag). The OS sends launch files only on a normal launch, so the new instance
+    // (`launch_reason` 1) has to restore the queue on its own.
     let file = ctx.fixture("av1_opus_60s.webm")?;
     let script = format!(
         "0.5s open \"{}\"\n7.5s reload\n9.5s screenshot {{out}}/reloaded.png\n10s terminate 2000\n",

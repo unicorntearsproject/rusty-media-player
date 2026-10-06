@@ -151,6 +151,8 @@ pub enum Ev {
         file: i32,
         /// The app was already running.
         while_running: bool,
+        /// More files of the same group follow (flag bit 1; older hosts never set it).
+        more: bool,
     },
     /// A save finished.
     FileSaved {
@@ -252,7 +254,11 @@ pub fn decode(e: &Event) -> Ev {
         }
         ev::LIBRARY_LISTING => Ev::LibraryListing { root: root(16), partial: e.flags & ev::FLAG_MORE != 0 },
         ev::IO_READY => Ev::IoReady { file: e.i32_at(16) },
-        ev::OPEN => Ev::Open { file: e.i32_at(16), while_running: e.flags & ev::FLAG_WHILE_RUNNING != 0 },
+        ev::OPEN => Ev::Open {
+            file: e.i32_at(16),
+            while_running: e.flags & ev::FLAG_WHILE_RUNNING != 0,
+            more: e.flags & ev::FLAG_OPEN_MORE != 0,
+        },
         ev::FILE_SAVED => Ev::FileSaved { request: e.i32_at(16), status: e.i32_at(20) },
         ev::LIBRARY_PROGRESS => Ev::LibraryProgress { root: root(16), files_seen: e.u64_at(24) },
         ev::WAKE => Ev::Wake,
