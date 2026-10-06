@@ -20,7 +20,7 @@
 - **Codecs v1:** containers MP4/MKV/WebM; video H.264 (our own pure-Rust decoder), AV1 (rav1d), VP9; audio AAC, MP3, FLAC, Opus, Vorbis.
 - **Target:** portable `no_std + alloc` player core behind a small host trait. Dev/test hosts: browser (wasm32 page) and headless native. Rusty Bucket adapter comes once its app ABI exists.
 - **UI:** drawn by us (Unicorn Tears tokens), so it renders the same in the browser and in Rusty Bucket's Canvas surface.
-- Repo: private `iDoMeteor/rusty-video-player`.
+- Repo: private `unicorntearsproject/rusty-video-player` (the account was renamed from iDoMeteor on 2026-10-06).
 - Rust toolchain lives in `~/.cargo/bin` (not on PATH): run `source ~/.cargo/env` first.
 - **Standalone (user, 2026-10-05):** RVP is Rusty Bucket's built-in Media app (audio + video), but it must remain a shippable independent app that never requires Rusty Bucket. Targets: an installable web app (PWA) and a native desktop app (Linux first). Rusty Bucket is just one more host; nothing in core/ui/app may depend on it. Separate builds/editions per target are fine (user OK); prefer one shared codebase with per-host crates.
 - **Packaging (user, 2026-10-05), at the end (M11):** Flatpak, AppImage, .deb, .rpm, and a Windows .exe with an Inno Setup installer. Full app polish: logo, icon set at every size (.ico/.icns/hicolor PNG+SVG), .desktop file, AppStream metainfo, MIME/file associations, signing hooks. Reference: `../unicorn-viz` packaging. The desktop host must therefore support Windows as well as Linux.
