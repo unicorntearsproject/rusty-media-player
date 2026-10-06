@@ -140,6 +140,9 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           cargo install --locked cargo-generate-rpm
+          # `cargo install` puts the binary in $HOME/.cargo/bin (/github/home in a job container), which is not on PATH here.
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo generate-rpm --version
           chmod +x target/dist/linux/stage/usr/bin/rusty-wave
           RVP_TOOLCHAIN='' cargo xtask dist rpm --version "${{ needs.version.outputs.version }}" --no-build
       - name: Install it in this clean Fedora and run it
