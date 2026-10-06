@@ -125,6 +125,15 @@ impl Ui {
                 rect(g.mode[1])
             );
             j += &format!("\"add_folder\":{},\"search\":{},", rect(g.add_folder), rect(g.search));
+            j += &format!("\"settings\":{},", rect(g.settings));
+            let msg: Vec<String> = l
+                .msg_btns
+                .iter()
+                .map(|(id, r, label)| {
+                    format!("{{\"id\":{id},\"label\":{},\"rect\":{}}}", esc(label), rect(*r))
+                })
+                .collect();
+            j += &format!("\"message_buttons\":[{}],\"player_empty\":{},", msg.join(","), l.player_empty);
             let bar: Vec<String> =
                 g.bar_btns.iter().map(|(b, r)| format!("\"{b:?}\":{}", rect(*r))).collect();
             j += &format!("\"bar\":{{{}}},\"seek\":{},", bar.join(","), rect(g.seek_hit));

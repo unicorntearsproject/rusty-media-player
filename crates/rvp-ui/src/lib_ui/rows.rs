@@ -81,6 +81,7 @@ pub(crate) struct RowsKey {
     pub query: String,
     pub sort: (TrackSort, bool),
     pub video: (bool, VideoSort, bool),
+    pub player_empty: bool,
     pub width: u32,
     pub queue: u64,
     pub scale: u32,
@@ -184,6 +185,18 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
         _p: Default::default(),
     };
     let empty_lib = lib.track_count() == 0;
+    // The Player face with nothing loaded: the open-a-video card, inside the same frame.
+    if ui.player_empty && ui.mode == super::Mode::Player {
+        b.push(
+            340.0 * s,
+            RowKind::Message(
+                "Drop a video here".into(),
+                "MP4, MKV and WebM. Everything plays right here on your device.".into(),
+            ),
+        );
+        b.push(24.0 * s, RowKind::Gap);
+        return Rows { key, rows: b.rows, ents: b.ents, total: b.y, list: b.list, video_list: ui.video_list };
+    }
     match (ui.view, ui.detail) {
         (_, Some(Detail::Album(id))) => {
             if let Some(a) = lib.album(id) {

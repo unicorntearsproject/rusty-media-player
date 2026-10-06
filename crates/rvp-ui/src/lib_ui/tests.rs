@@ -1100,3 +1100,41 @@ fn resume_markers_and_the_empty_message_are_drawn() {
     // The marker is a bar along the foot of the second poster: the two pictures differ there and nowhere in the first poster's row.
     assert_ne!(with.pixels, without.pixels, "the resume marker is drawn");
 }
+
+#[test]
+fn the_empty_player_sits_inside_the_apps_frame_with_an_open_a_video_card() {
+    let mut r = Rig::new();
+    r.ui.set_mode(Mode::Player);
+    r.ui.set_player_empty(true);
+    assert!(r.ui.lib_chrome());
+    let fb = r.draw();
+    assert!(fb.pixels.iter().any(|&b| b != 0));
+    // The card's two buttons: opening a video leads, adding a folder follows.
+    let btns = r.ui.lib_state().msg_btns.clone();
+    assert_eq!(
+        btns.iter().map(|b| (b.0, b.2.as_str())).collect::<Vec<_>>(),
+        [(11, "Open a video"), (10, "Add folder")]
+    );
+    let (x, y) = center(btns[0].1);
+    assert_eq!(r.click(x, y), [Action::OpenFile]);
+    let (x, y) = center(btns[1].1);
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::AddFolder)]);
+    // The frame is the library's: the rail, with the Player side of the switch on; a rail entry goes to the Library face.
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    assert!(!g.nav.is_empty() && g.settings.w > 0.0 && g.add_folder.w > 0.0);
+    assert_eq!(r.ui.lib_state().mode(), Mode::Player);
+    r.ui.show_view(View::Albums);
+    assert_eq!(r.ui.lib_state().mode(), Mode::Library);
+    // Once something is loaded the Player is the player again.
+    r.ui.set_player_empty(false);
+    r.ui.set_mode(Mode::Player);
+    assert!(!r.ui.lib_chrome());
+}

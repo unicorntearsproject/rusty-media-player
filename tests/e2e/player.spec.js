@@ -340,8 +340,11 @@ test.describe("player", () => {
     await page.goto("/");
     await waitFor(page, () => window.rvp && window.rvp.ready);
     await toFace(page, "player"); // the first run opens on the Library
+    // The empty Player face sits inside the app's frame (rail and bar), with the open-a-video card in the body.
+    await waitFor(page, () => window.rvp.snapshot().lib.player_empty === true && window.rvp.snapshot().lib.message_buttons.length === 2);
     const s = await snap(page);
-    const b = s.buttons.Welcome;
+    expect(s.lib.rail && s.lib.bar).toBeTruthy();
+    const b = s.lib.message_buttons.find((m) => m.id === 11).rect; // "Open a video"
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.mouse.click(b.x + b.w / 2, b.y + b.h / 2)]);
     await chooser.setFiles(SHORT);
     await waitState(page, "playing");

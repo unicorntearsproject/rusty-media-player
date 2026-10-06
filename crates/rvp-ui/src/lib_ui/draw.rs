@@ -255,6 +255,7 @@ impl Ui {
         self.lib.last_geom = Some(g.clone());
         self.lib.visible.clear();
         self.lib.hero.clear();
+        self.lib.msg_btns.clear();
         let l = self.lib_layout();
         let view = self.lib.view;
         let mut animated = false;
@@ -568,6 +569,9 @@ impl Ui {
                     (p.name.clone(), plural(p.entries.len(), "track", "tracks"))
                 }),
             };
+        }
+        if self.lib.player_empty && self.lib.mode == Mode::Player {
+            return ("Player".into(), "Nothing playing".into());
         }
         match self.lib.view {
             View::Albums => ("Albums".into(), plural(lib.albums().len(), "album", "albums")),
@@ -943,6 +947,14 @@ impl Ui {
         let s = self.scale;
         let cx = rect.cx();
         let mut y = rect.y + 70.0 * s;
+        // While a file hovers over the empty Player, the card invites the drop.
+        let hovering = self.drag_over && self.lib.player_empty && self.lib.mode == Mode::Player;
+        let head = if hovering { "Let go to play" } else { head };
+        if hovering {
+            let card = RectF::new(rect.x + 16.0 * s, rect.y + 8.0 * s, rect.w - 32.0 * s, rect.h - 16.0 * s);
+            fb.glow_rrect(card, 24.0 * s, 28.0 * s, t::magenta_500(), 0.45);
+            fb.stroke_rrect(card, 24.0 * s, 2.0 * s, t::magenta_500(), 1.0);
+        }
         if self.empty_view(ctx) {
             // The empty library: the logo.
             crate::logo::draw(fb, RectF::new(cx - 46.0 * s, y - 46.0 * s, 92.0 * s, 92.0 * s), 1.0);
@@ -970,6 +982,7 @@ impl Ui {
         }
         if self.empty_view(ctx) && self.lib.detail.is_none() {
             for b in self.message_buttons(rect) {
+                self.lib.msg_btns.push((b.id, b.rect, b.label.clone()));
                 let h = LibHit::Button(b.id);
                 self.draw_pill(fb, &b, self.lib.hover == h, self.lib_pressed(h), false);
             }
@@ -979,24 +992,27 @@ impl Ui {
     /// The buttons of the empty-library message (ids 10 and 11).
     pub(crate) fn message_buttons(&mut self, rect: RectF) -> Vec<PillBtn> {
         let s = self.scale;
-        let wa = self.text_w(Face::SansMedium, 13.0, "Add folder", 0.0) + 58.0 * s;
-        let wb = self.text_w(Face::SansMedium, 13.0, "Open files", 0.0) + 58.0 * s;
+        // The Player face with nothing loaded leads with opening a video; the empty library leads with adding a folder.
+        let player = self.lib.player_empty && self.lib.mode == Mode::Player;
+        let (la, lb) = if player { ("Open a video", "Add folder") } else { ("Add folder", "Open files") };
+        let wa = self.text_w(Face::SansMedium, 13.0, la, 0.0) + 58.0 * s;
+        let wb = self.text_w(Face::SansMedium, 13.0, lb, 0.0) + 58.0 * s;
         let total = wa + wb + 12.0 * s;
         let y = rect.y + 70.0 * s + 62.0 * s + 30.0 * s + 22.0 * s * 2.0 + 30.0 * s;
         let x = rect.cx() - total * 0.5;
         alloc::vec![
             PillBtn {
-                id: 10,
+                id: if player { 11 } else { 10 },
                 rect: RectF::new(x, y, wa, 42.0 * s),
-                label: "Add folder".into(),
-                icon: Icon::FolderPlus,
+                label: la.into(),
+                icon: if player { Icon::FolderOpen } else { Icon::FolderPlus },
                 primary: true
             },
             PillBtn {
-                id: 11,
+                id: if player { 10 } else { 11 },
                 rect: RectF::new(x + wa + 12.0 * s, y, wb, 42.0 * s),
-                label: "Open files".into(),
-                icon: Icon::FolderOpen,
+                label: lb.into(),
+                icon: if player { Icon::FolderPlus } else { Icon::FolderOpen },
                 primary: false
             },
         ]

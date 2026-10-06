@@ -109,6 +109,9 @@ pub enum Enqueue {
 impl crate::ui::Ui {
     /// The view on screen is one of the library's lists and the library has nothing for it (the message offers to add a folder).
     pub(crate) fn empty_view(&self, ctx: &LibCtx<'_>) -> bool {
+        if self.lib.player_empty && self.lib.mode == Mode::Player {
+            return true;
+        }
         match self.lib.view {
             View::Videos => ctx.lib.video_count() == 0,
             View::Albums | View::Artists | View::Tracks => ctx.lib.track_count() == 0,
@@ -322,6 +325,9 @@ pub(crate) struct VizReturn {
 /// The library mode's share of the UI state.
 pub struct LibUi {
     pub(crate) mode: Mode,
+    /// The Player face has nothing loaded: it is drawn inside the same frame as the library (rail and bar), with the open-a-video card
+    /// in the body (set by the application every frame).
+    pub(crate) player_empty: bool,
     pub(crate) view: View,
     pub(crate) detail: Option<Detail>,
     pub(crate) history: Vec<NavEntry>,
@@ -365,12 +371,15 @@ pub struct LibUi {
     pub(crate) dim: Vec<u8>,
     /// The hero block's buttons as drawn last: id, rectangle, label.
     pub(crate) hero: Vec<(u8, RectF, String)>,
+    /// The buttons of the empty-view message as drawn last: id, rectangle, label.
+    pub(crate) msg_btns: Vec<(u8, RectF, String)>,
 }
 
 impl Default for LibUi {
     fn default() -> Self {
         Self {
             mode: Mode::Player,
+            player_empty: false,
             view: View::Albums,
             detail: None,
             history: Vec::new(),
@@ -403,6 +412,7 @@ impl Default for LibUi {
             last_geom: None,
             visible: Vec::new(),
             hero: Vec::new(),
+            msg_btns: Vec::new(),
             dim: Vec::new(),
         }
     }
@@ -552,6 +562,7 @@ pub(crate) fn rows_key(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metric
         query: ui.query.clone(),
         sort: (ui.track_sort, ui.track_asc),
         video: (ui.video_list, ui.video_sort, ui.video_asc),
+        player_empty: ui.player_empty && ui.mode == Mode::Player,
         width: m.body.w as u32,
         queue: model.queue_rev,
         scale: (m.s * 100.0) as u32,

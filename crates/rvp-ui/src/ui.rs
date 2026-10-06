@@ -344,9 +344,22 @@ impl Ui {
         )
     }
 
+    /// Tell the UI whether the Player face has nothing loaded (then it is drawn and handled inside the library's frame).
+    pub fn set_player_empty(&mut self, empty: bool) {
+        if self.lib.player_empty != empty {
+            self.lib.player_empty = empty;
+            self.dirty = true;
+        }
+    }
+
+    /// The library's frame (rail, header, bar) is what is on screen: the Library face, or the Player face with nothing loaded.
+    pub fn lib_chrome(&self) -> bool {
+        self.lib.mode == crate::lib_ui::Mode::Library || self.lib.player_empty
+    }
+
     /// The cursor the host should show.
     pub fn cursor(&self, model: &UiModel) -> Cursor {
-        if self.lib.mode == crate::lib_ui::Mode::Library {
+        if self.lib_chrome() {
             use crate::lib_ui::{LibDrag, LibHit};
             if matches!(
                 self.lib.drag,
@@ -388,7 +401,7 @@ impl Ui {
 
     /// True if anything is drawn over the picture right now (controls, a menu, a toast, the drop outline).
     pub fn has_overlay(&self) -> bool {
-        self.lib.mode == crate::lib_ui::Mode::Library
+        self.lib_chrome()
             || self.controls_alpha > 0.005
             || !self.menu.is_empty()
             || self.toast.is_some()
@@ -399,7 +412,7 @@ impl Ui {
 
     /// Whether the transport bar is (becoming) visible.
     pub fn controls_visible(&self) -> bool {
-        self.lib.mode == crate::lib_ui::Mode::Library || self.controls_alpha > 0.01
+        self.lib_chrome() || self.controls_alpha > 0.01
     }
 
     /// Current controls opacity (0.0..=1.0), for tests and screenshots.
@@ -572,7 +585,7 @@ impl Ui {
         {
             redraw = true; // the spinner
         }
-        if self.lib.mode == crate::lib_ui::Mode::Library {
+        if self.lib_chrome() {
             // The equaliser bars and the text caret.
             if self.lib.animated && !self.config.reduce_motion && now_us - self.lib.anim_at >= 120_000 {
                 self.lib.anim_at = now_us;
@@ -589,7 +602,7 @@ impl Ui {
     }
 
     fn controls_wanted(&self, model: &UiModel) -> bool {
-        if self.lib.mode == crate::lib_ui::Mode::Library {
+        if self.lib_chrome() {
             // The library's bar is always there; the visualizer's floats and hides like the player's.
             if self.lib.view != crate::lib_ui::View::Visualizer {
                 return true;
