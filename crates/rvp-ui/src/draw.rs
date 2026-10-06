@@ -651,7 +651,9 @@ impl Ui {
             Btn::ModeSwitch => ("Library", "B"),
             Btn::Shuffle => (model.shuffle_label(), "Z"),
             Btn::Repeat => (model.repeat_label(), "R"),
-            Btn::Welcome | Btn::Prev | Btn::Next | Btn::QueueView | Btn::VizView => return None,
+            Btn::Welcome | Btn::Prev | Btn::Next | Btn::QueueView | Btn::VizView | Btn::Favorite => {
+                return None;
+            }
         };
         Some((label.into(), key))
     }

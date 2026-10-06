@@ -910,9 +910,11 @@ fn the_added_folders_show_in_the_rail_at_every_size() {
                 continue; // the narrow rail has icons only
             }
             let n = g.folders.len();
-            if h >= 720 {
+            // The rail also holds Favorites, Settings and About RW now: at 720 high one folder row is guaranteed, more as the window
+            // grows.
+            if h >= 900 {
                 assert!(n >= roots.min(3), "{w}x{h}, {roots} folders: only {n} rows");
-            } else if h >= 660 {
+            } else if h >= 720 {
                 assert!(n >= 1, "{w}x{h}, {roots} folders: no row");
             }
             if n > 0 {
@@ -944,7 +946,8 @@ fn the_rail_has_a_settings_button_that_opens_settings_and_never_overlaps_the_oth
         };
         let g = r.ui.lib_geom(&r.m, &ctx);
         assert!(g.settings.y >= g.add_folder.bottom(), "{w}x{h}: the Settings button sits under Add folder");
-        assert!(g.settings.bottom() <= g.m.rail.bottom());
+        assert!(g.about.y >= g.settings.bottom(), "{w}x{h}: About RW comes last, under Settings");
+        assert!(g.about.bottom() <= g.m.rail.bottom());
         let (x, y) = (g.settings.cx(), g.settings.cy());
         assert_eq!(r.click(x, y), [Action::ShowSettings], "{w}x{h}");
     }
@@ -1023,7 +1026,7 @@ fn the_videos_view_shows_posters_in_a_grid_and_plays_them() {
     };
     let items = super::menus::ent_menu(&r.ui, 1, &r.m, &ctx);
     let labels: Vec<_> = items.iter().map(|m| m.label.as_str()).collect();
-    assert_eq!(labels, ["Play", "Play next", "Add to queue"]);
+    assert_eq!(labels, ["Play", "Play next", "Add to queue", "Add to favorites"]);
     let mut reach = Vec::new();
     menu_actions(&items, &mut reach);
     assert!(reach.contains(&Action::Lib(LibAction::Play(Scope::Video(id1), Enqueue::Next))));
@@ -1137,4 +1140,217 @@ fn the_empty_player_sits_inside_the_apps_frame_with_an_open_a_video_card() {
     r.ui.set_player_empty(false);
     r.ui.set_mode(Mode::Player);
     assert!(!r.ui.lib_chrome());
+}
+
+fn heart_of(r: &mut Rig, i: usize) -> crate::gfx::RectF {
+    let rect = r.ent_rect(i);
+    let video_list = r.ui.lib.rows.as_ref().unwrap().video_list;
+    super::rows::heart_rect(r.ui.lib.rows.as_ref().unwrap().ents[i].kind, video_list, rect, 1.0).unwrap()
+}
+
+#[test]
+fn hearts_on_songs_and_videos_toggle_favorites_by_click_and_by_h() {
+    let mut r = Rig::new();
+    with_videos(&mut r, 6);
+    // A song's heart, left of its time.
+    r.ui.show_view(View::Tracks);
+    let id = match r.ents()[2].kind {
+        super::EntKind::Track { id, .. } => id,
+        k => panic!("{k:?}"),
+    };
+    let (x, y) = center(heart_of(&mut r, 2));
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::ToggleFavorite(id))]);
+    // A click on the row beside the heart is not the heart (it only selects).
+    let row = r.ent_rect(2);
+    assert!(r.click(row.x + row.w * 0.5, y).is_empty());
+    // H hearts the selected row.
+    assert_eq!(r.key(Key::Char('h')), [Action::Lib(LibAction::ToggleFavorite(id))]);
+    // A video poster has its heart in the top right corner of the poster, and a list row at its right end.
+    r.ui.show_view(View::Videos);
+    let vid = video_id(&mut r, 1);
+    let (x, y) = center(heart_of(&mut r, 1));
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::ToggleFavorite(vid))]);
+    r.ui.lib.video_list = true;
+    let (x, y) = center(heart_of(&mut r, 1));
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::ToggleFavorite(vid))]);
+    // The context menu says what the click would do.
+    r.lib.set_favorite(vid, true);
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let items = super::menus::ent_menu(&r.ui, 1, &r.m, &ctx);
+    assert!(items.iter().any(|m| m.label == "Remove from favorites"));
+    // Albums and artists have no heart of their own.
+    r.ui.show_view(View::Albums);
+    let k = r.ents()[0].kind;
+    assert!(super::rows::heart_rect(k, false, r.ent_rect(0), 1.0).is_none());
+}
+
+#[test]
+fn the_favorites_view_lists_music_and_videos_and_plays_them_as_one_queue() {
+    let mut r = Rig::new();
+    with_videos(&mut r, 4);
+    // Empty at first, with a message.
+    r.key(Key::Char('9'));
+    assert_eq!(r.ui.lib_state().view(), View::Favorites);
+    assert!(r.ents().is_empty());
+    let songs: Vec<u32> = r.lib.all_tracks().iter().take(3).map(|t| t.id).collect();
+    let film = r.lib.all_videos()[1].id;
+    for &s in &songs {
+        r.lib.set_favorite(s, true);
+    }
+    r.lib.set_favorite(film, true);
+    let ents = r.ents();
+    assert_eq!(ents.len(), 4, "three songs and a film");
+    assert!(matches!(ents[0].kind, super::EntKind::Track { .. }));
+    assert!(matches!(ents[3].kind, super::EntKind::Video { .. }));
+    // Double click: the list from there; the header buttons play all or shuffle.
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    assert_eq!(r.ui.scope_tracks(Scope::FavoriteTracks, &ctx, &r.m).len(), 3);
+    assert_eq!(r.ui.scope_tracks(Scope::FavoriteVideos, &ctx, &r.m), [film]);
+    assert_eq!(r.ui.scope_tracks(Scope::List, &ctx, &r.m).len(), 4);
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let names: Vec<_> = g.header_btns.iter().map(|b| b.label.as_str()).collect();
+    assert_eq!(names, ["Shuffle", "Play all"], "drawn right to left");
+    let (x, y) = center(g.header_btns[1].rect);
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::Play(Scope::ListFrom(0), Enqueue::Now))]);
+    let (x, y) = center(g.header_btns[0].rect);
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::Play(Scope::List, Enqueue::ShuffleNow))]);
+    // It draws, and the rail has the entry.
+    let _ = r.draw();
+    let (x, y) = center(r.rail_item(View::Favorites));
+    r.ui.show_view(View::Albums);
+    r.click(x, y);
+    assert_eq!(r.ui.lib_state().view(), View::Favorites);
+}
+
+#[test]
+fn the_bar_and_the_now_playing_card_have_a_heart_for_what_is_playing() {
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let heart =
+        g.bar_btns.iter().find(|(b, _)| *b == crate::ui::Btn::Favorite).expect("a heart in the bar").1;
+    let (x, y) = center(heart);
+    assert_eq!(r.click(x, y), [Action::ToggleFavorite]);
+    // The card of the song that is playing.
+    r.ui.show_view(View::NowPlaying);
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let hr = r.ui.now_playing_rects(&g, &r.m).heart.expect("a heart on the card");
+    let (x, y) = center(hr);
+    assert_eq!(r.click(x, y), [Action::ToggleFavorite]);
+    // Nothing playing: no heart.
+    r.m = model();
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    assert!(g.bar_btns.iter().all(|(b, _)| *b != crate::ui::Btn::Favorite));
+}
+
+#[test]
+fn about_rw_is_last_in_the_rail_and_opens_a_page_with_links_and_the_version() {
+    for (w, h) in [(1280, 720), (800, 500)] {
+        let mut r = Rig::new();
+        r.ui.set_size(w, h, 1.0);
+        r.m.version = "0.0.5".into();
+        r.m.commit = "abc1234def".into();
+        r.m.app.links = true;
+        let (x, y) = {
+            let ctx = LibCtx {
+                lib: &r.lib,
+                now_art: None,
+                scan: None,
+                viz: None,
+                video: None,
+                resume: crate::lib_ui::no_resume(),
+            };
+            let g = r.ui.lib_geom(&r.m, &ctx);
+            assert!(g.about.y >= g.settings.bottom());
+            center(g.about)
+        };
+        r.click(x, y);
+        assert_eq!(r.ui.lib_state().view(), View::About, "{w}x{h}");
+        // Three paragraphs fit in the body's block, and every button is on screen inside it.
+        let ctx = LibCtx {
+            lib: &r.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
+        let g = r.ui.lib_geom(&r.m, &ctx);
+        r.ui.ensure_rows(&r.m, &ctx, &g);
+        let body = g.m.body;
+        let btns = r.ui.about_page(None, body, &r.m);
+        let ids: Vec<u8> = btns.iter().map(|b| b.id).collect();
+        assert_eq!(ids, [0, 1, 2], "Rusty Bucket, X, Licenses");
+        for b in &btns {
+            assert!(b.rect.x >= body.x && b.rect.right() <= body.right(), "{w}x{h}: {b:?}");
+        }
+        // The block fits in the estimate that sets the page's height (so it can always be scrolled to the end).
+        let total = r.ui.lib.rows.as_ref().unwrap().total;
+        let last = btns.iter().map(|b| b.rect.bottom()).fold(0.0, f32::max) - body.y;
+        assert!(last + 60.0 <= total, "{w}x{h}: buttons end at {last}, the page is {total} high");
+        // A click on a button is an About action; the page draws.
+        // Scroll the page until the button is on screen (a short window shows only part of it).
+        let b = &btns[1];
+        r.ui.lib.scroll = (b.rect.bottom() - body.bottom() + 24.0).max(0.0);
+        let (bx, by) = center(b.rect);
+        assert_eq!(r.click(bx, by - r.ui.lib.scroll), [Action::Lib(LibAction::About(1))]);
+        let _ = r.draw();
+        // F1 gets there from anywhere.
+        r.ui.show_view(View::Albums);
+        r.key(Key::Other("F1".into()));
+        assert_eq!(r.ui.lib_state().view(), View::About);
+    }
+    // Where the host cannot open a link, the addresses are text and only Licenses is a button.
+    let mut r = Rig::new();
+    r.ui.show_view(View::About);
+    r.m.app.links = false;
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let ids: Vec<u8> = r.ui.about_page(None, g.m.body, &r.m).iter().map(|b| b.id).collect();
+    assert_eq!(ids, [2]);
 }

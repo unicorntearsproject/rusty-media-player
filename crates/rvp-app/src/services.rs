@@ -332,6 +332,7 @@ impl App {
                 Integration::Off => Some(false),
                 Integration::On => Some(true),
             },
+            links: self.links,
         }
     }
 

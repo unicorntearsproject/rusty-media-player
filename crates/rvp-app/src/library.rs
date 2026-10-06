@@ -11,8 +11,8 @@ use core::cell::RefCell;
 use rvp_core::{Error, Timestamp};
 use rvp_host::{FrameSink, Host, OpenRequest, Storage};
 use rvp_library::{
-    INDEX_KEY, Image, Library, ListFormat, PLAYLISTS_KEY, ScanEvent, ScanReport, ScanStatus, Scanner,
-    VIDEOS_KEY, art_key, encode_thumb,
+    FAVORITES_KEY, INDEX_KEY, Image, Library, ListFormat, PLAYLISTS_KEY, ScanEvent, ScanReport, ScanStatus,
+    Scanner, VIDEOS_KEY, art_key, encode_thumb,
 };
 use rvp_player::exec::Executor;
 use rvp_ui::{Enqueue, LibAction, LibCtx, Mode, PlaylistEntry, Scope, UiCommand, View};
@@ -20,6 +20,13 @@ use rvp_viz::{FrameInput, Viz};
 
 /// Longest side of the cover shown on the now-playing screen, pixels.
 const NOW_ART_SIDE: u32 = 640;
+
+/// The About page's links.
+pub const ABOUT_BUCKET_URL: &str = "https://rustybucket.ai";
+/// The About page's link to DJ Unicorn Tears on X.
+pub const ABOUT_X_URL: &str = "https://x.com/djunicorntears";
+/// The licenses of everything the app is made of (the About page's Licenses button saves this).
+const LICENSES: &str = include_str!("../../../THIRD_PARTY_LICENSES.md");
 /// Playlist files bigger than this are not read.
 const MAX_PLAYLIST_FILE: usize = 8 << 20;
 /// Pictures loaded from storage per tick.
@@ -166,6 +173,9 @@ impl App {
         if let Some(bytes) = rvp_core::task::block_on(host.storage().load(PLAYLISTS_KEY)) {
             let _ = self.lib.lib.load_playlists(&bytes);
         }
+        if let Some(bytes) = rvp_core::task::block_on(host.storage().load(FAVORITES_KEY)) {
+            let _ = self.lib.lib.load_favorites(&bytes);
+        }
         // The videos name their folders by id, so they are read once the index has its roots.
         if let Some(bytes) = rvp_core::task::block_on(host.storage().load(VIDEOS_KEY)) {
             let _ = self.lib.lib.load_videos(&bytes);
@@ -207,6 +217,7 @@ impl App {
             self.lib_save_art(host);
         }
         self.lib_save_playlists(host);
+        self.lib_save_favorites(host);
     }
 
     /// Save the thumbnails that are new, and delete the ones nothing uses any more.
@@ -216,6 +227,13 @@ impl App {
         }
         for id in self.lib.lib.take_dropped_art() {
             rvp_core::task::block_on(host.storage().store(&art_key(id), &[]));
+        }
+    }
+
+    fn lib_save_favorites<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
+        if self.lib.lib.favorites_dirty() {
+            let bytes = self.lib.lib.save_favorites();
+            rvp_core::task::block_on(host.storage().store(FAVORITES_KEY, &bytes));
         }
     }
 
@@ -685,6 +703,48 @@ impl App {
                     now,
                 );
                 self.lib_save_playlists(host);
+            }
+            LibAction::About(n) => match n {
+                0 => self.effects.push(Effect::OpenUrl(ABOUT_BUCKET_URL.into())),
+                1 => self.effects.push(Effect::OpenUrl(ABOUT_X_URL.into())),
+                _ => self.effects.push(Effect::Download {
+                    name: "rusty-wave-licenses.md".into(),
+                    mime: "text/markdown".into(),
+                    data: LICENSES.as_bytes().to_vec(),
+                }),
+            },
+            LibAction::ToggleFavorite(id) => {
+                if let Some(on) = self.lib.lib.toggle_favorite(id) {
+                    let what = match (self.lib.lib.track(id), self.lib.lib.video(id)) {
+                        (Some(t), _) => t.display_title().to_string(),
+                        (_, Some(v)) => v.display_title().to_string(),
+                        _ => String::new(),
+                    };
+                    self.ui.show_toast(
+                        &if on {
+                            format!("Added {what} to favorites")
+                        } else {
+                            format!("Removed {what} from favorites")
+                        },
+                        now,
+                    );
+                    self.lib_save_favorites(host);
+                }
+            }
+            LibAction::FavoriteScope(scope) => {
+                let (ids, _) = self.lib_scope(scope);
+                if !ids.is_empty() {
+                    // Every one hearted already: take them all out; else heart the rest.
+                    let all = ids.iter().all(|&i| self.lib.lib.is_favorite(i));
+                    let n = self.lib.lib.set_favorites(&ids, !all);
+                    let msg = if all {
+                        format!("Removed {} from favorites", crate::plural(n, "song", "songs"))
+                    } else {
+                        format!("Added {} to favorites", crate::plural(n, "song", "songs"))
+                    };
+                    self.ui.show_toast(&msg, now);
+                    self.lib_save_favorites(host);
+                }
             }
             LibAction::NewPlaylistFrom(scope) => self.ui.ask_playlist_name(Some(scope)),
             LibAction::NewPlaylist => self.ui.ask_playlist_name(None),

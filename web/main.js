@@ -197,6 +197,10 @@ function effects() {
     } else if (e === "import") {
       playlistInput.value = "";
       playlistInput.click();
+    } else if (e.startsWith("open:")) {
+      const url = e.slice(5);
+      // Only web addresses, in a new tab that cannot reach back into the player.
+      if (/^https:\/\//.test(url)) window.open(url, "_blank", "noopener,noreferrer");
     } else if (e === "download") {
       for (const [name, mime, data] of player.take_downloads()) download(name, mime, data);
     } else if (e.startsWith("fullscreen:")) {

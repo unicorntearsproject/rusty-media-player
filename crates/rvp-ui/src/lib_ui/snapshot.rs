@@ -34,10 +34,12 @@ fn view_name(v: View) -> &'static str {
         View::Artists => "artists",
         View::Tracks => "tracks",
         View::Videos => "videos",
+        View::Favorites => "favorites",
         View::Playlists => "playlists",
         View::Queue => "queue",
         View::Search => "search",
         View::Visualizer => "visualizer",
+        View::About => "about",
     }
 }
 
@@ -72,9 +74,10 @@ impl Ui {
             None => "\"detail\":null,".into(),
         };
         j += &format!(
-            "\"tracks\":{},\"videos\":{},\"posters\":{},\"albums\":{},\"artists\":{},\"playlists\":{},\"queue\":{},\"viz_on\":{},\"viz_info\":{},",
+            "\"tracks\":{},\"videos\":{},\"favorites\":{},\"posters\":{},\"albums\":{},\"artists\":{},\"playlists\":{},\"queue\":{},\"viz_on\":{},\"viz_info\":{},",
             lib.track_count(),
             lib.video_count(),
+            lib.favorite_tracks().len() + lib.favorite_videos().len(),
             lib.all_videos().iter().filter(|v| v.poster != 0).count(),
             lib.albums().len(),
             lib.artists().len(),
@@ -184,6 +187,10 @@ impl Ui {
                         ("plentry", e.title.clone().unwrap_or_else(|| e.path.clone()), idx as i64)
                     }
                 };
+                let fav = match self.ent_item(e.kind, ctx, model) {
+                    Some(item) if ctx.lib.is_favorite(item) => ",\"fav\":true".to_string(),
+                    _ => String::new(),
+                };
                 let resume = match e.kind {
                     EntKind::Video { id, .. } => {
                         ctx.resume.get(&id).map_or(String::new(), |f| format!(",\"resume\":{f:.3}"))
@@ -191,7 +198,7 @@ impl Ui {
                     _ => String::new(),
                 };
                 Some(format!(
-                    "{{\"i\":{i},\"kind\":\"{kind}\",\"id\":{id},\"label\":{},\"rect\":{}{resume}}}",
+                    "{{\"i\":{i},\"kind\":\"{kind}\",\"id\":{id},\"label\":{},\"rect\":{}{resume}{fav}}}",
                     esc(&label),
                     rect(*r)
                 ))

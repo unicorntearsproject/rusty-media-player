@@ -66,6 +66,9 @@ pub enum Icon {
     AudioWaveform,
     LayoutGrid,
     House,
+    Heart,
+    ExternalLink,
+    Tag,
 }
 
 impl Icon {
@@ -134,6 +137,9 @@ impl Icon {
             Icon::AudioWaveform => d::AUDIO_WAVEFORM,
             Icon::LayoutGrid => d::LAYOUT_GRID,
             Icon::House => d::HOUSE,
+            Icon::Heart => d::HEART,
+            Icon::ExternalLink => d::EXTERNAL_LINK,
+            Icon::Tag => d::TAG,
         }
     }
 }

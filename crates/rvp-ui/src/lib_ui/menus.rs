@@ -37,6 +37,16 @@ fn add_to_playlist(scope: Scope, ctx: &LibCtx<'_>) -> MenuItem {
     MenuItem::parent("Add to playlist", sub)
 }
 
+/// The heart entry for a song or video.
+fn favorite(id: u32, ctx: &LibCtx<'_>) -> MenuItem {
+    let on = ctx.lib.is_favorite(id);
+    hinted(
+        if on { "Remove from favorites" } else { "Add to favorites" },
+        "H",
+        Action::Lib(LibAction::ToggleFavorite(id)),
+    )
+}
+
 fn go_to(track: Option<u32>, ctx: &LibCtx<'_>) -> Vec<MenuItem> {
     let mut v = Vec::new();
     if let Some(a) = track.and_then(|t| ctx.lib.album_of(t)) {
@@ -60,6 +70,7 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
                 play("Play next", "Ctrl+Enter", Scope::Track(id), Enqueue::Next),
                 play("Add to queue", "Shift+Enter", Scope::Track(id), Enqueue::Append),
                 add_to_playlist(Scope::Track(id), ctx),
+                favorite(id, ctx).sep(),
             ];
             v.extend(go_to(Some(id), ctx));
             v
@@ -68,6 +79,7 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
             play("Play", "Enter", Scope::ListFrom(pos as u32), Enqueue::Now),
             play("Play next", "Ctrl+Enter", Scope::Video(id), Enqueue::Next),
             play("Add to queue", "Shift+Enter", Scope::Video(id), Enqueue::Append),
+            favorite(id, ctx).sep(),
         ],
         EntKind::Album(ai) => {
             let Some(a) = lib.albums().get(ai) else { return global_menu(ui, model, ctx) };
@@ -79,7 +91,8 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
                 play("Play next", "", Scope::Album(id), Enqueue::Next).sep(),
                 play("Add to queue", "", Scope::Album(id), Enqueue::Append),
                 add_to_playlist(Scope::Album(id), ctx),
-                item("Go to artist", Action::OpenDetail(Detail::Artist(a.artist_id))).sep(),
+                item("Favorite all or none", Action::Lib(LibAction::FavoriteScope(Scope::Album(id)))).sep(),
+                item("Go to artist", Action::OpenDetail(Detail::Artist(a.artist_id))),
             ]
         }
         EntKind::Artist(ai) => {
@@ -115,6 +128,9 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
                 item("Clear queue", Action::ClearPlaylist).sep(),
                 item("Save queue as playlist\u{2026}", Action::Lib(LibAction::NewPlaylistFrom(Scope::Queue))),
             ];
+            if let Some(t) = track {
+                v.push(favorite(t, ctx).sep());
+            }
             v.extend(go_to(track, ctx));
             v
         }
@@ -149,6 +165,9 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
                 hinted("Move up", "Alt+Up", Action::Lib(LibAction::MovePlaylistEntry(pl, idx as u32, -1))),
                 hinted("Move down", "Alt+Down", Action::Lib(LibAction::MovePlaylistEntry(pl, idx as u32, 1))),
             ];
+            if let Some(t) = track {
+                v.push(favorite(t, ctx).sep());
+            }
             v.extend(go_to(track, ctx));
             v
         }
@@ -197,9 +216,12 @@ pub(crate) fn global_menu(_ui: &Ui, model: &UiModel, ctx: &LibCtx<'_>) -> Vec<Me
         item("Albums", Action::ShowView(View::Albums)).sep(),
         item("Artists", Action::ShowView(View::Artists)),
         item("Tracks", Action::ShowView(View::Tracks)),
+        item("Videos", Action::ShowView(View::Videos)),
+        hinted("Favorites", "9", Action::ShowView(View::Favorites)),
         item("Playlists", Action::ShowView(View::Playlists)),
         item("Queue", Action::ShowView(View::Queue)),
         item("Visualizer", Action::ShowView(View::Visualizer)).sep(),
+        hinted("About RW", "F1", Action::ShowView(View::About)),
     ];
     let has_root = !ctx.lib.roots().is_empty();
     let mut v = alloc::vec![

@@ -21,6 +21,8 @@ pub(crate) struct NpRects {
     pub text_w: f32,
     pub up_next: Vec<RectF>,
     pub browse: Option<RectF>,
+    /// The heart of what is playing, on the status line.
+    pub heart: Option<RectF>,
 }
 
 /// The tints of a cover that has no picture (they follow the theme).
@@ -171,7 +173,14 @@ impl Ui {
     }
 
     /// A pill button.
-    fn draw_pill(&mut self, fb: &mut FrameBuffer, b: &PillBtn, hot: bool, pressed: bool, focused: bool) {
+    pub(crate) fn draw_pill(
+        &mut self,
+        fb: &mut FrameBuffer,
+        b: &PillBtn,
+        hot: bool,
+        pressed: bool,
+        focused: bool,
+    ) {
         let s = self.scale;
         let r = if pressed { b.rect.scaled(0.97) } else { b.rect };
         let rad = r.h * 0.5;
@@ -213,7 +222,7 @@ impl Ui {
         fb.stroke_rrect(r.inflate(1.0 * s), radius + 1.0 * s, 2.0 * s, t::focus_ring(), a);
     }
 
-    fn lib_pressed(&self, h: LibHit) -> bool {
+    pub(crate) fn lib_pressed(&self, h: LibHit) -> bool {
         self.pressed_lib == Some(h) && self.lib.hover == h
     }
 
@@ -526,16 +535,18 @@ impl Ui {
                 }
             }
         }
-        let hot = self.lib.hover == LibHit::AddFolder;
-        let b = PillBtn {
-            id: 0,
-            rect: g.add_folder,
-            label: if compact { String::new() } else { "Add folder".into() },
-            icon: Icon::FolderPlus,
-            primary: false,
-        };
-        let pressed = self.lib_pressed(LibHit::AddFolder);
-        self.draw_pill(fb, &b, hot, pressed, false);
+        if g.add_folder.w > 0.0 {
+            let hot = self.lib.hover == LibHit::AddFolder;
+            let b = PillBtn {
+                id: 0,
+                rect: g.add_folder,
+                label: if compact { String::new() } else { "Add folder".into() },
+                icon: Icon::FolderPlus,
+                primary: false,
+            };
+            let pressed = self.lib_pressed(LibHit::AddFolder);
+            self.draw_pill(fb, &b, hot, pressed, false);
+        }
         let hot = self.lib.hover == LibHit::Settings;
         let b = PillBtn {
             id: 0,
@@ -545,6 +556,17 @@ impl Ui {
             primary: false,
         };
         let pressed = self.lib_pressed(LibHit::Settings);
+        self.draw_pill(fb, &b, hot, pressed, false);
+        let hot = self.lib.hover == LibHit::About;
+        let on = self.lib.view == View::About;
+        let b = PillBtn {
+            id: 0,
+            rect: g.about,
+            label: if compact { String::new() } else { "About RW".into() },
+            icon: Icon::Info,
+            primary: on,
+        };
+        let pressed = self.lib_pressed(LibHit::About);
         self.draw_pill(fb, &b, hot, pressed, false);
         let _ = model;
     }
@@ -598,6 +620,14 @@ impl Ui {
                     long_duration(lib.total_video_duration_us())
                 ),
             ),
+            View::Favorites => (
+                "Favorites".into(),
+                alloc::format!(
+                    "{} \u{b7} {}",
+                    plural(lib.favorite_tracks().len(), "song", "songs"),
+                    plural(lib.favorite_videos().len(), "video", "videos")
+                ),
+            ),
             View::Playlists => ("Playlists".into(), plural(lib.playlists().len(), "playlist", "playlists")),
             View::Queue => {
                 let total: i64 = model.playlist.iter().map(|e| e.duration_us).sum();
@@ -629,6 +659,7 @@ impl Ui {
                     },
                 )
             }
+            View::About => ("About RW".into(), "Rusty Wave".into()),
             View::NowPlaying => ("Now playing".into(), String::new()),
             View::Visualizer => ("Visualizer".into(), String::new()),
         }
@@ -908,6 +939,9 @@ impl Ui {
                     );
                 }
                 RowKind::Gap => {}
+                RowKind::About => {
+                    self.about_page(Some(fb), RectF::new(body.x, y, body.w, row.h), model);
+                }
                 RowKind::Message(head, sub) => {
                     let rect = RectF::new(body.x, y, body.w, row.h);
                     self.draw_message(fb, rect, head, sub, ctx);
@@ -1139,7 +1173,7 @@ impl Ui {
                     let poster = RectF::new(r.x + 12.0 * s, r.y + 8.0 * s, ph * 16.0 / 9.0, ph);
                     self.draw_poster(fb, ctx, poster, 8.0 * s, v.poster, v.id);
                     let tx = poster.right() + 16.0 * s;
-                    let right = r.right() - 20.0 * s;
+                    let right = r.right() - 52.0 * s;
                     let dur = dur_text(v.duration_us);
                     let dw = self.text_w(Face::Mono, 12.0, &dur, 0.0);
                     self.text(fb, Face::Mono, 12.0, right - dw, r.cy(), &dur, t::text_dim(), 1.0, 0.0);
@@ -1170,6 +1204,9 @@ impl Ui {
                     );
                     let sub = self.fonts.fit(Face::Sans, 12.5 * s, &video_sub(v), room.max(40.0 * s));
                     self.text(fb, Face::Sans, 12.5, tx, r.cy() + 11.0 * s, &sub, t::text_dim(), 1.0, 0.0);
+                    let hr = super::rows::heart_rect(rows.ents[ei].kind, true, r, s).unwrap_or_default();
+                    let hot = self.lib.hover == LibHit::EntHeart(ei);
+                    self.draw_heart(fb, hr, lib.is_favorite(id), hover_row || selected || kb, hot, 1.0);
                 } else {
                     let cw = r.w;
                     let poster = RectF::new(r.x, r.y, cw, cw * 9.0 / 16.0);
@@ -1241,6 +1278,16 @@ impl Ui {
                         );
                         fb.fill_rrect(pb, pb.h * 0.5, Paint::Gradient(t::gradient_tears()), 1.0);
                         self.icon(fb, Icon::Play, pb.cx() + 1.5 * s, pb.cy(), 22.0, t::white(), 1.0, true);
+                    }
+                    {
+                        let hr = super::rows::heart_rect(rows.ents[ei].kind, false, r, s).unwrap_or_default();
+                        let hot = self.lib.hover == LibHit::EntHeart(ei);
+                        let fav = lib.is_favorite(id);
+                        if fav || hover_row || kb {
+                            // A dark disc so the heart reads on any poster.
+                            fb.fill_rrect(hr, hr.h * 0.5, Paint::Solid(fade(t::ink_900(), 0.62)), 1.0);
+                        }
+                        self.draw_heart(fb, hr, fav, hover_row || kb, hot, 1.0);
                     }
                     let ty = poster.bottom() + 20.0 * s;
                     let title = self.fonts.fit(Face::SansMedium, 14.0 * s, v.display_title(), cw);
@@ -1338,8 +1385,9 @@ impl Ui {
                         thumbs,
                         show_artist,
                         show_album,
+                        heart: Some(lib.is_favorite(tr.id)),
                     },
-                    (hover_row, play_hot, selected, kb),
+                    (hover_row, play_hot, selected, kb, ei),
                 );
             }
             EntKind::PlEntry { pl, idx } => {
@@ -1366,8 +1414,9 @@ impl Ui {
                                 thumbs: true,
                                 show_artist: true,
                                 show_album: true,
+                                heart: Some(lib.is_favorite(tr.id)),
                             },
-                            (hover_row, play_hot, selected, kb),
+                            (hover_row, play_hot, selected, kb, ei),
                         );
                     }
                     None => {
@@ -1394,8 +1443,9 @@ impl Ui {
                                 thumbs: true,
                                 show_artist: true,
                                 show_album: true,
+                                heart: None,
                             },
-                            (hover_row, false, selected, kb),
+                            (hover_row, false, selected, kb, ei),
                         );
                     }
                 }
@@ -1475,6 +1525,11 @@ impl Ui {
                     1.0,
                     0.0,
                 );
+                if let Some(item) = q.track {
+                    let hr = super::rows::heart_rect(rows.ents[ei].kind, false, r, s).unwrap_or_default();
+                    let hot = self.lib.hover == LibHit::EntHeart(ei);
+                    self.draw_heart(fb, hr, lib.is_favorite(item), hover_row || selected || kb, hot, 1.0);
+                }
             }
             EntKind::Playlist(id) => {
                 let Some(p) = lib.playlist(id) else { return false };
@@ -1548,6 +1603,32 @@ impl Ui {
         animated
     }
 
+    /// A heart: filled when the item is a favorite, an outline when not (drawn only while the row is hot, selected or hearted).
+    pub(crate) fn draw_heart(
+        &mut self,
+        fb: &mut FrameBuffer,
+        r: RectF,
+        on: bool,
+        show: bool,
+        hot: bool,
+        a: f32,
+    ) {
+        if !on && !show {
+            return;
+        }
+        let col = if on {
+            t::magenta_400()
+        } else if hot {
+            t::white()
+        } else {
+            t::text_dim()
+        };
+        if hot {
+            fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::white(), 0.10)), a);
+        }
+        self.icon(fb, Icon::Heart, r.cx(), r.cy(), 17.0, col, a, on);
+    }
+
     fn row_background(&mut self, fb: &mut FrameBuffer, r: RectF, hover: bool, selected: bool, kb: bool) {
         let s = self.scale;
         if hover || selected {
@@ -1571,10 +1652,10 @@ impl Ui {
         g: &Geom,
         ctx: &LibCtx<'_>,
         row: TrackRow<'_>,
-        state: (bool, bool, bool, bool),
+        state: (bool, bool, bool, bool, usize),
     ) -> bool {
         let s = self.scale;
-        let (hover, play_hot, selected, kb) = state;
+        let (hover, play_hot, selected, kb, ei) = state;
         self.row_background(fb, r, hover, selected, kb);
         if row.playing {
             fb.fill_rrect(
@@ -1678,6 +1759,12 @@ impl Ui {
             1.0,
             0.0,
         );
+        if let Some(on) = row.heart {
+            let hr =
+                super::rows::heart_rect(EntKind::Track { id: 0, pos: 0 }, false, r, s).unwrap_or_default();
+            let hot = self.lib.hover == LibHit::EntHeart(ei);
+            self.draw_heart(fb, hr, on, hover || selected || kb, hot, 1.0);
+        }
         let _ = g;
         animated
     }
@@ -1821,7 +1908,11 @@ impl Ui {
                 ));
             }
         }
-        NpRects { cover, text_x, text_w, up_next, browse }
+        let heart = (model.has_media() && model.now_track.is_some()).then(|| {
+            let y = if wide { cover.y + 44.0 * s } else { cover.bottom() + 40.0 * s };
+            RectF::new(text_x + text_w - 44.0 * s, y - 24.0 * s, 40.0 * s, 40.0 * s)
+        });
+        NpRects { cover, text_x, text_w, up_next, browse, heart }
     }
 
     /// The now-playing screen. True if it animates.
@@ -1919,6 +2010,10 @@ impl Ui {
             _ => "OPENING",
         };
         self.text(fb, Face::SansBold, 11.0, x, y, status, t::violet_400(), 1.0, 2.0);
+        if let Some(hr) = rects.heart {
+            let hot = self.lib.hover == LibHit::Bar(Btn::Favorite);
+            self.draw_heart(fb, hr, model.now_favorite, true, hot, 1.0);
+        }
         y += 44.0 * s;
         let title = if model.title.is_empty() { "Untitled".into() } else { model.title.clone() };
         let lines = self.wrap(Face::SansBold, if wide { 40.0 } else { 28.0 }, &title, w, 2);
@@ -2171,7 +2266,9 @@ impl Ui {
             self.draw_cover(fb, ctx, g.bar_art, 10.0 * s, model.now_art, model.now_track.unwrap_or(3), a);
             if g.bar_info.w > 120.0 * s {
                 let tx = g.bar_art.right() + 14.0 * s;
-                let tw = g.bar_info.right() - tx;
+                let heart_room =
+                    if g.bar_btns.iter().any(|(b, _)| *b == Btn::Favorite) { 40.0 * s } else { 0.0 };
+                let tw = g.bar_info.right() - tx - heart_room;
                 let hot = self.lib.hover == LibHit::BarInfo;
                 let title = self.fonts.fit(Face::SansMedium, 14.5 * s, &model.title, tw);
                 self.text(
@@ -2331,16 +2428,19 @@ impl Ui {
             Btn::QueueView => (Icon::List, self.lib.view == View::Queue),
             Btn::VizView => (Icon::Sparkles, self.lib.view == View::Visualizer),
             Btn::ModeSwitch => (Icon::Film, false),
+            Btn::Favorite => (Icon::Heart, model.now_favorite),
             _ => (Icon::Play, false),
         };
-        let col = if on {
+        let col = if on && btn == Btn::Favorite {
+            t::magenta_400()
+        } else if on {
             t::cyan_500()
         } else if hot {
             t::white()
         } else {
             t::text_body()
         };
-        let filled = matches!(btn, Btn::Prev | Btn::Next);
+        let filled = matches!(btn, Btn::Prev | Btn::Next) || (btn == Btn::Favorite && on);
         self.icon(fb, icon, rr.cx(), rr.cy(), 19.0, col, a, filled);
         if on && matches!(btn, Btn::Shuffle | Btn::Repeat) {
             fb.fill_rrect(
@@ -2367,6 +2467,7 @@ impl Ui {
             Btn::VizView,
             Btn::QueueView,
             Btn::Mute,
+            Btn::Favorite,
         ]
         .iter()
         .position(|b| *b == btn)
@@ -2392,6 +2493,9 @@ impl Ui {
                 (if self.lib.view == View::Visualizer { "Leave visualizer" } else { "Visualizer" }, "V")
             }
             Btn::ModeSwitch => ("Player", "B"),
+            Btn::Favorite => {
+                (if model.now_favorite { "Remove from favorites" } else { "Add to favorites" }, "H")
+            }
             _ => return,
         };
         let s = self.scale;
@@ -2509,4 +2613,6 @@ pub(crate) struct TrackRow<'a> {
     pub thumbs: bool,
     pub show_artist: bool,
     pub show_album: bool,
+    /// The heart: `None` for no heart, else whether the item is a favorite.
+    pub heart: Option<bool>,
 }

@@ -14,6 +14,7 @@ use core::ops::Range;
 pub use rvp_library::{Image, Library, ListFormat, ScanStatus, TrackSort, VideoSort};
 use rvp_viz::Viz;
 
+mod about;
 mod draw;
 mod geom;
 mod input;
@@ -47,6 +48,8 @@ pub enum View {
     Tracks,
     /// Videos as a grid of posters or a list, with search and resume markers.
     Videos,
+    /// The songs and videos that were hearted.
+    Favorites,
     /// Saved playlists.
     Playlists,
     /// What plays next.
@@ -55,6 +58,8 @@ pub enum View {
     Search,
     /// The full-window visualizer.
     Visualizer,
+    /// The About page: who made it, what it is, where it came from.
+    About,
 }
 
 /// What is opened inside a view.
@@ -85,6 +90,10 @@ pub enum Scope {
     PlaylistFrom(u32, u32),
     /// Every track in the library, in the order of the Tracks view.
     AllTracks,
+    /// The favorite songs, by title.
+    FavoriteTracks,
+    /// The favorite videos, by title.
+    FavoriteVideos,
     /// The list on screen, from this position on (what a double click on a row means).
     ListFrom(u32),
     /// The whole list on screen.
@@ -115,6 +124,8 @@ impl crate::ui::Ui {
         match self.lib.view {
             View::Videos => ctx.lib.video_count() == 0,
             View::Albums | View::Artists | View::Tracks => ctx.lib.track_count() == 0,
+            View::Favorites => false,
+            View::About => false,
             _ => false,
         }
     }
@@ -151,6 +162,12 @@ pub enum LibAction {
     MovePlaylistEntry(u32, u32, i8),
     /// Make a queue item play next.
     QueueToNext(u32),
+    /// A button of the About page: 0 Rusty Bucket's site, 1 the X page, 2 the licenses.
+    About(u8),
+    /// Heart or un-heart a track or a video (library id).
+    ToggleFavorite(u32),
+    /// Heart or un-heart every track of a scope (all hearted when any is not, else all un-hearted).
+    FavoriteScope(Scope),
     /// Sort the track list.
     SortTracks(TrackSort, bool),
     /// Show the videos as a list (`true`) or as posters (`false`).
@@ -237,6 +254,8 @@ pub enum LibHit {
     AddFolder,
     /// The Settings button in the rail.
     Settings,
+    /// The About button in the rail (last).
+    About,
     /// A folder row in the rail (root index).
     Folder(usize),
     /// The search box.
@@ -253,6 +272,8 @@ pub enum LibHit {
     Ent(usize),
     /// The play button on a row or card.
     EntPlay(usize),
+    /// The heart on a row or card (index into the entities).
+    EntHeart(usize),
     /// The scroll bar.
     Scrollbar,
     /// A button in a hero block or header (index).

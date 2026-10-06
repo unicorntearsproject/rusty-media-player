@@ -277,6 +277,9 @@ impl Host for DesktopHost {
     fn app_services(&mut self) -> Option<&mut dyn rvp_host::AppServices> {
         self.services.as_mut().map(|s| s as &mut dyn rvp_host::AppServices)
     }
+    fn opens_links(&self) -> bool {
+        true
+    }
     fn stable_ids(&self) -> bool {
         true
     }

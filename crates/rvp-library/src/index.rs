@@ -100,6 +100,9 @@ pub struct Library {
     /// The index (not the pictures) changed since it was last saved.
     pub(crate) dirty: bool,
     pub(crate) playlists_dirty: bool,
+    /// Keys of the favorite files (see `favorites.rs`).
+    pub(crate) favorites: BTreeSet<String>,
+    pub(crate) favorites_dirty: bool,
     /// What the last scan did.
     pub report: ScanReport,
 }

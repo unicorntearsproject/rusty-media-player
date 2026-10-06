@@ -16,6 +16,8 @@ ICONS = [
     "library", "folder-plus", "download", "upload", "trash-2", "pencil", "arrow-up", "arrow-down", "chevron-left",
     "ellipsis", "folder", "info", "sparkles", "list-end", "refresh-cw", "triangle-alert", "chevron-down",
     "audio-waveform", "layout-grid", "house",
+    # Phase A2: favorites, links, tag editing.
+    "heart", "external-link", "tag",
 ]
 BASE = "https://cdn.jsdelivr.net/npm/lucide-static/icons/{}.svg"
 

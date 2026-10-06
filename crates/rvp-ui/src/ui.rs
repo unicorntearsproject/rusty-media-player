@@ -73,6 +73,8 @@ pub enum Btn {
     VizView,
     /// Switch to the player (library bar), or to the library (player bar).
     ModeSwitch,
+    /// Heart or un-heart what is playing (library bar).
+    Favorite,
 }
 
 /// The player bar shows the shuffle and repeat buttons from this width (logical pixels) up: below it the time readout would
@@ -865,6 +867,7 @@ impl Ui {
             Btn::ModeSwitch => out.push(Action::SetMode(crate::lib_ui::Mode::Library)),
             Btn::Shuffle => out.push(Action::ToggleShuffle),
             Btn::Repeat => out.push(Action::CycleRepeat),
+            Btn::Favorite => out.push(Action::ToggleFavorite),
             Btn::Prev | Btn::Next | Btn::QueueView | Btn::VizView => {}
         }
     }

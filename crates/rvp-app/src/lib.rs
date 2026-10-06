@@ -85,6 +85,8 @@ pub enum Effect {
     Forget(String),
     /// Show the file picker for playlist files (M3U, M3U8, PLS).
     ImportPlaylist,
+    /// Open a web page (an `https` address) in the person's browser: a new tab in a page, the system browser on a desktop.
+    OpenUrl(String),
     /// Give the user a file (an exported playlist).
     Download {
         /// Suggested file name.
@@ -119,6 +121,8 @@ pub struct App {
     /// Size of the picture last drawn (it can change mid-stream at a key frame).
     drawn_size: (u32, u32),
     base_dirty: bool,
+    /// The host opens web links (set every tick).
+    links: bool,
     force_draw: bool,
     last_drawn: Option<UiModel>,
     last_has_media: bool,
@@ -209,6 +213,7 @@ impl App {
             drawn_video: u64::MAX,
             drawn_size: (0, 0),
             base_dirty: true,
+            links: false,
             force_draw: true,
             last_drawn: None,
             last_has_media: false,
@@ -864,6 +869,7 @@ impl App {
         H::Source: 'static,
     {
         let t0 = host.clock().now_us();
+        self.links = host.opens_links();
         self.setup_tick(host);
         self.theme_tick(host);
         self.pump(host);
@@ -1150,6 +1156,10 @@ impl App {
             }
             Action::Lib(a) => self.apply_lib(host, a, now),
             Action::ShowAudioSettings => self.ui.open_audio_settings(),
+            Action::ToggleFavorite => match self.playlist.current().and_then(|i| i.track) {
+                Some(id) => self.apply_lib(host, rvp_ui::LibAction::ToggleFavorite(id), now),
+                None => self.ui.show_toast("Only what is in your library can be a favorite", now),
+            },
             Action::ShowSettings => self.show_settings(now),
             Action::DialogChar(c) => self.dialog_char(c, now),
             Action::DialogBackspace => self.dialog_backspace(now),
@@ -1322,6 +1332,7 @@ impl App {
         let cur_item = self.playlist.current();
         m.now_track = cur_item.and_then(|i| i.track);
         m.now_art = m.now_track.and_then(|t| self.lib.lib.track(t)).map_or(0, |t| t.art);
+        m.now_favorite = m.now_track.is_some_and(|t| self.lib.lib.is_favorite(t));
         m.repeat = match self.playlist.repeat() {
             Repeat::Off => 0,
             Repeat::All => 1,
@@ -1411,6 +1422,8 @@ impl App {
             }
         }
         m.app = self.app_model();
+        m.version = env!("CARGO_PKG_VERSION").into();
+        m.commit = env!("RVP_BUILD_COMMIT").into();
         m.dialog = self.dialog_spec();
         self.model = m;
     }

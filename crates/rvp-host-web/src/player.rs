@@ -372,6 +372,7 @@ impl WebPlayer {
                 Effect::Rescan(id) => v.push(format!("rescan:{id}")),
                 Effect::Forget(id) => v.push(format!("forget:{id}")),
                 Effect::ImportPlaylist => v.push("import".into()),
+                Effect::OpenUrl(url) => v.push(format!("open:{url}")),
                 Effect::Download { name, mime, data } => {
                     self.host.downloads.push((name, mime, data));
                     v.push("download".into());

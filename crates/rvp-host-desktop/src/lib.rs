@@ -12,6 +12,7 @@ pub mod dialogs;
 pub mod fonts;
 pub mod host;
 pub mod input;
+pub mod links;
 pub mod media;
 pub mod net;
 pub mod services;
@@ -21,6 +22,8 @@ pub mod storage;
 pub mod update_cli;
 pub mod walk;
 pub mod window;
+
+pub use links::open_url;
 
 pub use window::{APP_ID, APP_NAME};
 

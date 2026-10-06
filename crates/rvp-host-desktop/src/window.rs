@@ -309,6 +309,7 @@ impl Handler {
                 Effect::AddFiles => self.dialogs.pick_files(true),
                 Effect::AddFolder => self.dialogs.pick_folder(),
                 Effect::ImportPlaylist => self.dialogs.pick_playlists(),
+                Effect::OpenUrl(url) => crate::open_url(&url),
                 Effect::Rescan(id) => self.host.library.rescan(&id),
                 Effect::Forget(id) => {
                     self.host.library.forget(&id);

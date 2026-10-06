@@ -39,7 +39,8 @@ pub(crate) fn track_cols(w: f32, s: f32, thumbs: bool, want_artist: bool, want_a
         x += thumb.1 + 12.0 * s;
     }
     let time = (w - pad - 56.0 * s, 56.0 * s);
-    let avail = time.0 - x - 12.0 * s;
+    // The heart sits left of the time (see `rows::heart_rect`).
+    let avail = time.0 - 34.0 * s - x - 12.0 * s;
     let (artist, album, title);
     if !want_artist && !want_album {
         title = (x, avail);
@@ -78,6 +79,8 @@ pub(crate) struct Geom {
     pub add_folder: RectF,
     /// The Settings button under it.
     pub settings: RectF,
+    /// The About button, last.
+    pub about: RectF,
     pub folders: Vec<(usize, RectF)>,
     /// Folders that do not fit under the others: a "+N more" line after the last row.
     pub folders_more: usize,
@@ -105,13 +108,14 @@ pub(crate) struct Geom {
 }
 
 /// The rail's entries, top to bottom (a `None` is a divider).
-pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 10] = [
+pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 11] = [
     Some((View::Search, "Search", Icon::Search, "/")),
     Some((View::NowPlaying, "Now playing", Icon::AudioLines, "6")),
     Some((View::Albums, "Albums", Icon::Disc3, "1")),
     Some((View::Artists, "Artists", Icon::MicVocal, "2")),
     Some((View::Tracks, "Tracks", Icon::Music, "3")),
     Some((View::Videos, "Videos", Icon::Film, "8")),
+    Some((View::Favorites, "Favorites", Icon::Heart, "9")),
     Some((View::Playlists, "Playlists", Icon::ListMusic, "4")),
     Some((View::Queue, "Queue", Icon::List, "5")),
     None,
@@ -130,6 +134,7 @@ impl Ui {
             mode: [RectF::default(); 2],
             add_folder: RectF::default(),
             settings: RectF::default(),
+            about: RectF::default(),
             folders: Vec::new(),
             folders_more: 0,
             back: None,
@@ -184,20 +189,34 @@ impl Ui {
                 RectF::new(sw.cx(), sw.y + 3.0 * s, sw.w * 0.5 - 3.0 * s, sw.h - 6.0 * s),
             ];
         }
-        let mut y = top + if compact { 92.0 * s } else { 58.0 * s };
+        let mut y = top + if compact { 92.0 * s } else { 52.0 * s };
         let bottom = r.bottom() - 16.0 * s;
-        let btn_h = 40.0 * s;
-        g.settings = RectF::new(px, bottom - btn_h, iw, btn_h);
-        g.add_folder = RectF::new(px, bottom - 2.0 * btn_h - 8.0 * s, iw, btn_h);
+        // From the bottom up: About RW (last), Settings, Add folder.
+        g.about = RectF::new(px, bottom - 28.0 * s, iw, 28.0 * s);
+        g.settings = RectF::new(px, g.about.y - 4.0 * s - 32.0 * s, iw, 32.0 * s);
+        g.add_folder = RectF::new(px, g.settings.y - 6.0 * s - 40.0 * s, iw, 40.0 * s);
         // The folders live in the space between the entries and the add button (and the scan's progress line when it shows). The
         // entries shrink first (down to a compact row), so that up to three folders always have their rows; on a window too short
         // even for one, the folders are left out.
         let n_roots = if compact { 0 } else { ctx.lib.roots().len() };
         let (head, step, row_h, more_h) = (26.0 * s, 28.0 * s, 26.0 * s, 16.0 * s);
-        let area_bottom = g.add_folder.y - 12.0 * s - if ctx.scan.is_some() { 34.0 * s } else { 0.0 };
         let items = NAV.iter().flatten().count() as f32;
         let dividers = NAV.iter().filter(|n| n.is_none()).count() as f32;
-        let nav_min = items * (22.0 * s + 2.0 * s) + dividers * 14.0 * s;
+        // A window too short for the entries above the three buttons drops Add folder first (the empty views and the menus still
+        // add folders), then lets the entries shrink to a row of 16 px.
+        let fits = |stack_top: f32, min_item: f32| {
+            y + items * (min_item + 2.0 * s) + dividers * 14.0 * s + 12.0 * s <= stack_top
+        };
+        let mut min_item = 22.0 * s;
+        if !fits(g.add_folder.y, min_item) {
+            g.add_folder = RectF::default();
+            if !fits(g.settings.y, min_item) {
+                min_item = 16.0 * s;
+            }
+        }
+        let stack_top = if g.add_folder.w > 0.0 { g.add_folder.y } else { g.settings.y };
+        let area_bottom = stack_top - 12.0 * s - if ctx.scan.is_some() { 34.0 * s } else { 0.0 };
+        let nav_min = items * (min_item + 2.0 * s) + dividers * 14.0 * s;
         let space = (area_bottom - y - nav_min - 12.0 * s - head).max(0.0);
         let mut reserved_rows = n_roots.min(3).min((space / step) as usize);
         // Folders beyond the rows need room for the "+N more" line too.
@@ -210,7 +229,7 @@ impl Ui {
             head + reserved_rows as f32 * step + if n_roots > reserved_rows { more_h } else { 0.0 } + 12.0 * s
         };
         let room = (area_bottom - reserve) - y - dividers * 14.0 * s;
-        let item_h = ((room / items) - 2.0 * s).clamp(22.0 * s, if compact { 44.0 * s } else { 42.0 * s });
+        let item_h = ((room / items) - 2.0 * s).clamp(min_item, if compact { 44.0 * s } else { 42.0 * s });
         for it in NAV.iter() {
             match it {
                 Some((v, ..)) => {
@@ -273,6 +292,9 @@ impl Ui {
             }
             (View::Tracks | View::Albums, _) if ctx.lib.track_count() > 0 => {
                 alloc::vec![(0, "Shuffle all", Icon::Shuffle, true)]
+            }
+            (View::Favorites, _) if ctx.lib.favorite_count() > 0 => {
+                alloc::vec![(1, "Shuffle", Icon::Shuffle, false), (0, "Play all", Icon::Play, true)]
             }
             (View::Videos, _) if ctx.lib.video_count() > 0 => {
                 let sort = match self.lib.video_sort {
@@ -400,8 +422,14 @@ impl Ui {
                 rx -= vw + 6.0 * s;
             }
             g.bar_btns.push((Btn::Mute, RectF::new(rx - small, cy2 - small * 0.5, small, small)));
+            // The heart of what is playing sits at the right end of its title.
+            if !compact && model.has_media() {
+                g.bar_btns.push((
+                    Btn::Favorite,
+                    RectF::new(g.bar_info.right() - small, y0 + 14.0 * s, small, small),
+                ));
+            }
         }
-        let _ = model;
     }
 
     fn geom_viz(&mut self, g: &mut Geom) {
@@ -429,7 +457,8 @@ impl Ui {
                 alloc::vec![
                     (0, "Play", Icon::Play, true),
                     (1, "Shuffle", Icon::Shuffle, false),
-                    (2, "Add to queue", Icon::ListEnd, false)
+                    (2, "Add to queue", Icon::ListEnd, false),
+                    (3, "Favorite", Icon::Heart, false)
                 ]
             }
             Detail::Playlist(_) => alloc::vec![

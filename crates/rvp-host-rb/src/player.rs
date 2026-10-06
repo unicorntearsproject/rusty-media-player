@@ -418,6 +418,8 @@ impl RbPlayer {
                 Effect::PickFile => self.request_pick(false),
                 Effect::AddFiles => self.request_pick(true),
                 Effect::ImportPlaylist => self.pick(PickKind::Import, "m3u,m3u8,pls"),
+                // Rusty Bucket has no browser to hand a link to (the About page shows the address instead).
+                Effect::OpenUrl(_) => {}
                 Effect::AddFolder => self.request_folder(),
                 Effect::Rescan(root) => self.rescan(&root),
                 Effect::Forget(root) => self.host.library.forget(&root),

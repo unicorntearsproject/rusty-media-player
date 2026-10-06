@@ -74,6 +74,8 @@ pub struct AppModel {
     pub updates: bool,
     /// The host can add the app to the desktop's app menu: `Some(true)` when it is there now.
     pub integration: Option<bool>,
+    /// The host can open a web page in the person's browser (the About page's links are buttons; else they are text).
+    pub links: bool,
 }
 
 /// Everything the UI needs to draw and to build its menus.
@@ -121,6 +123,12 @@ pub struct UiModel {
     pub album: String,
     /// Library track id of what is playing, if it came from the library.
     pub now_track: Option<u32>,
+    /// What is playing is a favorite.
+    pub now_favorite: bool,
+    /// The version of the app, `0.0.5` (the About page).
+    pub version: String,
+    /// The commit the app was built from, a short hash (the About page).
+    pub commit: String,
     /// Cover picture id (library thumbnail) of what is playing, 0 if none.
     pub now_art: u64,
     /// Changes whenever the queue's items, their order or the current item change.

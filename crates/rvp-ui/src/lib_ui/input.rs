@@ -21,7 +21,7 @@ fn home_nav() -> NavEntry {
 }
 
 /// The views the digit keys go to.
-const DIGITS: [View; 8] = [
+const DIGITS: [View; 9] = [
     View::Albums,
     View::Artists,
     View::Tracks,
@@ -30,6 +30,7 @@ const DIGITS: [View; 8] = [
     View::NowPlaying,
     View::Visualizer,
     View::Videos,
+    View::Favorites,
 ];
 
 impl Ui {
@@ -300,6 +301,8 @@ impl Ui {
             Scope::Playlist(id) => lib.playlist(id).map(|p| p.track_ids()).unwrap_or_default(),
             Scope::PlaylistFrom(id, _) => lib.playlist(id).map(|p| p.track_ids()).unwrap_or_default(),
             Scope::AllTracks => lib.sorted_tracks(self.lib.track_sort, self.lib.track_asc),
+            Scope::FavoriteTracks => lib.favorite_tracks(),
+            Scope::FavoriteVideos => lib.favorite_videos(),
             Scope::ListFrom(_) | Scope::List => {
                 self.lib.rows.as_ref().map(|r| r.list.clone()).unwrap_or_default()
             }
@@ -316,6 +319,18 @@ impl Ui {
                 .playlist(id)
                 .map_or(0, |p| p.entries.iter().take(from as usize).filter(|e| e.track.is_some()).count()),
             _ => 0,
+        }
+    }
+
+    /// The library id of the song or video an entity stands for (the heart acts on it), if it is one.
+    pub(crate) fn ent_item(&self, kind: EntKind, ctx: &LibCtx<'_>, model: &UiModel) -> Option<u32> {
+        match kind {
+            EntKind::Track { id, .. } | EntKind::Video { id, .. } => Some(id),
+            EntKind::PlEntry { pl, idx } => {
+                ctx.lib.playlist(pl)?.entries.get(idx)?.track.filter(|t| ctx.lib.track(*t).is_some())
+            }
+            EntKind::Queue(q) => model.playlist.iter().find(|e| e.id == q)?.track,
+            _ => None,
         }
     }
 
@@ -429,6 +444,9 @@ impl Ui {
             if g.settings.contains(x, y) {
                 return LibHit::Settings;
             }
+            if g.about.contains(x, y) {
+                return LibHit::About;
+            }
             for (i, r) in &g.folders {
                 if r.contains(x, y) {
                     return LibHit::Folder(*i);
@@ -508,11 +526,32 @@ impl Ui {
                 }
             }
         }
+        // The About page's buttons.
+        if view == View::About && self.lib.detail.is_none() {
+            let rect =
+                self.lib.rows.as_ref().and_then(|r| r.rows.first().filter(|r| r.kind == RowKind::About)).map(
+                    |row| RectF::new(g.m.body.x, g.m.body.y + row.y - self.lib.scroll, g.m.body.w, row.h),
+                );
+            if let Some(rect) = rect {
+                for b in self.about_page(None, rect, model) {
+                    if b.rect.contains(x, y) {
+                        return LibHit::Button(b.id);
+                    }
+                }
+            }
+            return LibHit::None;
+        }
         let Some(rows) = &self.lib.rows else { return LibHit::None };
         match rows.ent_at(bx, by, &g.m) {
             Some(i) => {
                 let rect = rows.ent_rect(i, &g.m);
                 let (lx, ly) = (bx - rect.x, by - rect.y);
+                // The heart.
+                if let Some(h) = super::rows::heart_rect(rows.ents[i].kind, rows.video_list, rect, s) {
+                    if h.contains(bx, by) && self.ent_item(rows.ents[i].kind, ctx, model).is_some() {
+                        return LibHit::EntHeart(i);
+                    }
+                }
                 // The play button: the lower right of a card, the number column of a track row.
                 let play = match rows.ents[i].kind {
                     EntKind::Album(_) => {
@@ -544,6 +583,9 @@ impl Ui {
         }
         if rects.browse.is_some_and(|r| r.contains(x, y)) {
             return LibHit::Button(0);
+        }
+        if rects.heart.is_some_and(|r| r.contains(x, y)) {
+            return LibHit::Bar(Btn::Favorite);
         }
         LibHit::None
     }
@@ -883,6 +925,7 @@ impl Ui {
             LibHit::ModeSwitch(m) => out.push(Action::SetMode(m)),
             LibHit::AddFolder => out.push(Action::Lib(LibAction::AddFolder)),
             LibHit::Settings => out.push(Action::ShowSettings),
+            LibHit::About => self.show_view(View::About),
             LibHit::Folder(i) => {
                 if let Some(r) = ctx.lib.roots().get(i) {
                     let _ = r;
@@ -937,6 +980,13 @@ impl Ui {
             LibHit::EntPlay(i) => {
                 self.lib.sel = Some(i);
                 self.play_ent(i, ctx, out);
+            }
+            LibHit::EntHeart(i) => {
+                self.lib.sel = Some(i);
+                let kind = self.lib.rows.as_ref().map(|r| r.ents[i].kind);
+                if let Some(id) = kind.and_then(|k| self.ent_item(k, ctx, model)) {
+                    out.push(Action::Lib(LibAction::ToggleFavorite(id)));
+                }
             }
             _ => {}
         }
@@ -1012,6 +1062,7 @@ impl Ui {
                     0 => out.push(Action::Lib(LibAction::Play(scope, Enqueue::Now))),
                     1 => out.push(Action::Lib(LibAction::Play(scope, Enqueue::ShuffleNow))),
                     2 => out.push(Action::Lib(LibAction::Play(scope, Enqueue::Append))),
+                    3 => out.push(Action::Lib(LibAction::FavoriteScope(scope))),
                     4 | 5 => {
                         if let Detail::Playlist(p) = d {
                             out.push(Action::Lib(LibAction::ExportPlaylist(p, id == 5)));
@@ -1056,6 +1107,13 @@ impl Ui {
                 self.lib.scroll = 0.0;
                 self.dirty = true;
             }
+            (View::Favorites, None, 0) => {
+                out.push(Action::Lib(LibAction::Play(Scope::ListFrom(0), Enqueue::Now)))
+            }
+            (View::Favorites, None, 1) => {
+                out.push(Action::Lib(LibAction::Play(Scope::List, Enqueue::ShuffleNow)))
+            }
+            (View::About, None, id @ 0..=2) => out.push(Action::Lib(LibAction::About(id))),
             (View::NowPlaying, None, 0) => self.show_view(View::Albums),
             (_, None, 10) => out.push(Action::Lib(LibAction::AddFolder)),
             (_, None, 11) => out.push(Action::OpenFile),
@@ -1075,6 +1133,7 @@ impl Ui {
             Btn::QueueView => self.show_view(View::Queue),
             Btn::VizView => self.toggle_visualizer(model, ctx),
             Btn::ModeSwitch => out.push(Action::SetMode(Mode::Player)),
+            Btn::Favorite => out.push(Action::ToggleFavorite),
             _ => {}
         }
     }
@@ -1247,6 +1306,10 @@ impl Ui {
                 }
                 return;
             }
+            Key::Other(n) if n == "F1" => {
+                self.show_view(View::About);
+                return;
+            }
             Key::Char('/') if plain => {
                 self.show_view(View::Search);
                 return;
@@ -1255,7 +1318,7 @@ impl Ui {
                 self.show_view(View::Search);
                 return;
             }
-            Key::Char(c @ '1'..='8') if plain && !mods.shift => {
+            Key::Char(c @ '1'..='9') if plain && !mods.shift => {
                 self.show_view(DIGITS[(*c as u8 - b'1') as usize]);
                 return;
             }
@@ -1284,7 +1347,18 @@ impl Ui {
             }
             _ => {}
         }
-        // Content.
+        // Content. H hearts the selected song or video (what is playing when nothing is selected: the shortcut table's own action).
+        if plain && !mods.shift && matches!(key, Key::Char('h' | 'H')) {
+            self.ensure_rows(model, ctx, &g);
+            let item = self
+                .lib
+                .sel
+                .and_then(|i| self.lib.rows.as_ref().and_then(|r| r.ents.get(i)))
+                .and_then(|e| self.ent_item(e.kind, ctx, model));
+            if let Some(id) = item {
+                return out.push(Action::Lib(LibAction::ToggleFavorite(id)));
+            }
+        }
         if view == View::Visualizer && plain && !mods.shift {
             match key {
                 Key::Left => return out.push(Action::Lib(LibAction::VizStep(-1))),

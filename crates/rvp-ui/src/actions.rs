@@ -110,6 +110,8 @@ pub enum Action {
     DialogChar(char),
     /// Backspace in the text box of the application's dialog.
     DialogBackspace,
+    /// Heart or un-heart what is playing (or, in the library, the selected song or video).
+    ToggleFavorite,
     /// Show the Settings dialog (theme, default player, app menu, updates, audio).
     ShowSettings,
     /// Show the Audio settings panel (crossfade and automatic level).
@@ -205,6 +207,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::Char('b'), Action::ToggleMode),
     sc(ShortKey::Char('v'), Action::ToggleVisualizer),
     sc(ShortKey::Char('u'), Action::ShowAudioSettings),
+    sc(ShortKey::Char('h'), Action::ToggleFavorite),
     Shortcut { key: ShortKey::Char(','), shift: false, ctrl: true, action: Action::ShowSettings },
     // Ctrl+arrows keep seeking and the volume where the plain arrows move around lists in the library.
     Shortcut { key: ShortKey::Left, shift: false, ctrl: true, action: Action::SeekBy(-5_000) },
@@ -602,6 +605,15 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
             }));
             v
         }),
+        {
+            let mut m = MenuItem::act(
+                if model.now_favorite { "Remove from favorites" } else { "Add to favorites" },
+                Action::ToggleFavorite,
+            )
+            .enabled(model.now_track.is_some());
+            m.hint = shortcut_label(Action::ToggleFavorite);
+            m
+        },
         MenuItem::act(
             if model.fullscreen { "Leave fullscreen" } else { "Fullscreen" },
             Action::ToggleFullscreen

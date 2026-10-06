@@ -228,6 +228,10 @@ pub struct WebHost {
 }
 
 impl Host for WebHost {
+    fn opens_links(&self) -> bool {
+        true
+    }
+
     type Source = WebSource;
     type Audio = WebAudio;
     type Video = FrameSink;

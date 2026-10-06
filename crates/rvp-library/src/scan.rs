@@ -692,4 +692,74 @@ mod tests {
         let r = rvp_core::task::block_on(read_tags(src));
         assert!(r.is_err());
     }
+
+    #[test]
+    fn favorites_survive_rescans_moves_and_a_save() {
+        let mut l = Library::new();
+        let files = [
+            entry("m/one.mp3", 10, 1),
+            entry("m/two.mp3", 10, 1),
+            entry("v/film.mp4", 10, 1),
+            entry("w/one.mp3", 10, 1),
+        ];
+        let plan = l.begin_scan("r", "M", &files);
+        for e in &plan.read {
+            l.apply_tags(plan.root, e, Ok(tags(&e.path, "x")));
+        }
+        for e in &plan.read_videos {
+            l.apply_video(plan.root, e, Ok(vinfo("Film", 5_000_000)));
+        }
+        l.finish_scan();
+        let id = |l: &Library, p: &str| l.all_tracks().iter().find(|t| t.path == p).unwrap().id;
+        let (one, two) = (id(&l, "m/one.mp3"), id(&l, "m/two.mp3"));
+        let film = l.all_videos()[0].id;
+        assert!(!l.is_favorite(one) && l.favorite_tracks().is_empty());
+        assert_eq!(l.toggle_favorite(one), Some(true));
+        assert_eq!(l.set_favorite(film, true), Some(true));
+        assert_eq!(l.set_favorite(9999, true), None, "no such item");
+        assert!(l.is_favorite(one) && !l.is_favorite(two) && l.is_favorite(film));
+        assert_eq!((l.favorite_tracks(), l.favorite_videos()), (alloc::vec![one], alloc::vec![film]));
+        assert_eq!(l.set_favorites(&[one, two], true), 1, "one was already a favorite");
+        assert_eq!(l.set_favorites(&[two], false), 1);
+        assert!(l.favorites_dirty());
+
+        // Saved and loaded into a fresh library that scans the same files again (new ids): the hearts are still there.
+        let bytes = l.save_favorites();
+        assert!(!l.favorites_dirty());
+        let mut m = Library::new();
+        m.load_favorites(&bytes).unwrap();
+        // Another folder first, so the ids differ.
+        let other = [entry("zz/x.mp3", 1, 1)];
+        let p = m.begin_scan("o", "O", &other);
+        for e in &p.read {
+            m.apply_tags(p.root, e, Ok(tags("x", "y")));
+        }
+        m.finish_scan();
+        // The files moved to a different folder (same names and lengths).
+        let moved = [
+            entry("moved/deeper/m/one.mp3", 10, 1),
+            entry("moved/m/two.mp3", 10, 1),
+            entry("moved/v/film.mp4", 10, 1),
+            entry("moved/w/one.mp3", 10, 1),
+        ];
+        let plan = m.begin_scan("r", "M", &moved);
+        for e in &plan.read {
+            m.apply_tags(plan.root, e, Ok(tags(&e.path, "x")));
+        }
+        for e in &plan.read_videos {
+            m.apply_video(plan.root, e, Ok(vinfo("Film", 5_000_000)));
+        }
+        m.finish_scan();
+        let one2 = m.all_tracks().iter().find(|t| t.path.ends_with("m/one.mp3")).unwrap().id;
+        let two2 = m.all_tracks().iter().find(|t| t.path.ends_with("two.mp3")).unwrap().id;
+        let other_one = m.all_tracks().iter().find(|t| t.path.ends_with("w/one.mp3")).unwrap().id;
+        assert!(m.is_favorite(one2) && !m.is_favorite(two2));
+        assert!(!m.is_favorite(other_one), "same file name and length in another album is another song");
+        assert_eq!(m.favorite_videos().len(), 1);
+        assert_eq!(m.favorite_count(), 2);
+        // Damaged files are refused, not half-loaded.
+        assert!(m.load_favorites(b"nope").is_err());
+        assert!(m.load_favorites(&bytes[..bytes.len() - 1]).is_err());
+        assert!(m.is_favorite(one2));
+    }
 }

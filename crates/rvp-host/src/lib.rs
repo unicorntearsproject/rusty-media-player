@@ -174,6 +174,11 @@ pub trait Host {
     fn app_services(&mut self) -> Option<&mut dyn AppServices> {
         None
     }
+    /// True when the host can open a web page in the person's browser (an `https` link on the About page); where it cannot, the page
+    /// shows the address as text.
+    fn opens_links(&self) -> bool {
+        false
+    }
     /// True when the ids this host gives to [`OpenRequest::Id`] still open the same file after a restart (file paths).
     /// The player then keeps them in the saved queue; a host whose ids belong to one session (a browser's stashed
     /// `File` objects) keeps the default and only library tracks are restored, through the library's own listing.

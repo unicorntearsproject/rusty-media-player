@@ -64,6 +64,8 @@ pub(crate) enum RowKind {
     Items(Range<usize>),
     /// A full-width message (an empty view).
     Message(String, String),
+    /// The About page (one tall block; `draw_about` lays it out).
+    About,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -308,6 +310,28 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
                 b.videos(lib.sorted_videos(ui.video_sort, ui.video_asc).into_iter());
             }
         }
+        (View::Favorites, None) => {
+            let (songs, films) = (lib.favorite_tracks(), lib.favorite_videos());
+            if songs.is_empty() && films.is_empty() {
+                b.push(
+                    300.0 * s,
+                    RowKind::Message(
+                        "Nothing hearted yet.".into(),
+                        "Click the heart on a song or a video, or press H, and it lands here.".into(),
+                    ),
+                );
+            }
+            if !songs.is_empty() {
+                b.push(44.0 * s, RowKind::Header(alloc::format!("Music ({})", songs.len())));
+                for id in songs {
+                    b.track(id);
+                }
+            }
+            if !films.is_empty() {
+                b.push(44.0 * s, RowKind::Header(alloc::format!("Videos ({})", films.len())));
+                b.videos(films.into_iter());
+            }
+        }
         (View::Playlists, None) => {
             if lib.playlists().is_empty() {
                 b.push(
@@ -377,10 +401,39 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
                 }
             }
         }
+        (View::About, None) => {
+            // The height is an estimate from the length of the paragraphs (the fonts are not at hand here); drawing lays the block out
+            // properly and has room to spare.
+            let w = (m.body.w - 2.0 * m.pad).clamp(200.0 * s, 680.0 * s);
+            let chars: usize = super::about::PARAGRAPHS.iter().map(|(_, p)| p.len()).sum();
+            let lines = libm::ceilf(chars as f32 * 8.2 * s / w) + 6.0;
+            b.push(260.0 * s + lines * 24.0 * s + 3.0 * 70.0 * s, RowKind::About);
+        }
         (View::NowPlaying | View::Visualizer, None) => {}
     }
     b.push(24.0 * s, RowKind::Gap);
     Rows { key, rows: b.rows, ents: b.ents, total: b.y, list: b.list, video_list: ui.video_list }
+}
+
+/// The heart of an entity drawn in `r` (a rectangle of [`Rows::ent_rect`], or the same moved by the scroll), if it has one: songs
+/// and queue rows keep it left of the time, video rows at the right end, poster cards in the poster's top right corner.
+pub(crate) fn heart_rect(
+    kind: EntKind,
+    video_list: bool,
+    r: crate::gfx::RectF,
+    s: f32,
+) -> Option<crate::gfx::RectF> {
+    use crate::gfx::RectF;
+    match kind {
+        EntKind::Track { .. } | EntKind::PlEntry { .. } | EntKind::Queue(_) => {
+            Some(RectF::new(r.right() - 98.0 * s, r.cy() - 14.0 * s, 28.0 * s, 28.0 * s))
+        }
+        EntKind::Video { .. } if video_list => {
+            Some(RectF::new(r.right() - 44.0 * s, r.cy() - 14.0 * s, 28.0 * s, 28.0 * s))
+        }
+        EntKind::Video { .. } => Some(RectF::new(r.right() - 36.0 * s, r.y + 8.0 * s, 28.0 * s, 28.0 * s)),
+        _ => None,
+    }
 }
 
 impl Rows {
