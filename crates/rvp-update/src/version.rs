@@ -149,6 +149,20 @@ mod tests {
     }
 
     #[test]
+    fn release_candidates_of_one_oh_are_before_the_release_and_after_the_betas() {
+        // 1.0.0-rc1 is what the first release candidate is called (SemVer: `rc1` is one identifier, compared as text, so rc1 < rc2 < rc9).
+        assert!(v("1.0.0-rc1") < v("1.0.0-rc2") && v("1.0.0-rc2") < v("1.0.0"));
+        assert!(v("1.0.0-rc9") < v("1.0.0"));
+        assert!(v("1.0.0-beta1") < v("1.0.0-rc1"));
+        assert!(
+            v("0.99.0") < v("1.0.0-rc1"),
+            "an installed 0.x is offered the candidate when pre-releases are wanted"
+        );
+        assert!(v("1.0.0-rc1").is_prerelease() && !v("1.0.0").is_prerelease());
+        assert_eq!(v("1.0.0-rc1").to_string(), "1.0.0-rc1");
+    }
+
+    #[test]
     fn rejects_what_is_not_a_version() {
         for bad in ["", "1", "1.2", "1.2.3.4", "a.b.c", "1.2.x", "1.2.3-", "1..3", "1.2.3-a..b", "-1.2.3"] {
             assert!(Version::parse(bad).is_none(), "{bad}");

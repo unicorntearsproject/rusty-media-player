@@ -386,8 +386,11 @@ jobs:
     if: needs.gate.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/v')
     needs: [gate, version, linux, rpm, flatpak, windows, macos, pwa]
     runs-on: ubuntu-22.04
+    # The shared publish action signs in to Rusty Bucket's release site with this job's OIDC token (no long-lived secret for that), and
+    # the job has no other write access: no `environment:`, nothing but reading the repository.
     permissions:
-      contents: write
+      id-token: write
+      contents: read
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -409,8 +412,9 @@ jobs:
             echo "$GPG_PRIVATE_KEY" | gpg --batch --import
             gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign dist/SHA256SUMS
           fi
-      - uses: softprops/action-gh-release@v2
+      # Pinned to a commit of the shared infrastructure repository (never a branch).
+      - uses: iDoMeteor/rba-infra/.github/actions/publish-release@e0efb3b1df5384ef537ae93ff7a64126b1de3396
         with:
-          files: dist/*
-          generate_release_notes: true
-          draft: true   # review the notes and the files, then publish by hand
+          tag: ${{ github.ref_name }}
+          release-dir: dist
+          dispatch-token: ${{ secrets.RBA_WAVE_DISPATCH_TOKEN }}

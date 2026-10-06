@@ -40,18 +40,20 @@ class Buttons {
   async press(label, { reset = false } = {}) {
     const d = await dialog(this.page);
     const labels = d.buttons.map((b) => b.label);
-    const shape = labels.join("\u0001");
+    // The keyboard goes through the switches first, then the buttons.
+    const nt = (d.toggles || []).length;
+    const shape = labels.join("\u0001") + nt;
     if (reset || this.shape !== shape) {
       this.shape = shape;
       const primary = d.buttons.findIndex((b) => b.primary && b.enabled);
-      this.focus = primary < 0 ? 0 : primary;
+      this.focus = nt + (primary < 0 ? 0 : primary);
     }
-    const want = labels.indexOf(label);
-    expect(want, `a button "${label}" among ${labels}`).toBeGreaterThanOrEqual(0);
-    expect(d.buttons[want].enabled, `"${label}" is enabled`).toBe(true);
+    const want = nt + labels.indexOf(label);
+    expect(want - nt, `a button "${label}" among ${labels}`).toBeGreaterThanOrEqual(0);
+    expect(d.buttons[want - nt].enabled, `"${label}" is enabled`).toBe(true);
     while (this.focus !== want) {
       await press(this.page, "ArrowDown");
-      this.focus = (this.focus + 1) % labels.length;
+      this.focus = (this.focus + 1) % (nt + labels.length);
     }
     await press(this.page, "Enter");
   }

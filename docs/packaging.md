@@ -223,7 +223,7 @@ threads fail falls back to `pkg/` and still starts offline next time). The page 
 Nothing runs on a push or a pull request, and nothing on a schedule (`dist check` fails if a workflow has a `schedule:` trigger). CI only runs on changes: the first job of
 both workflows, `gate` (`tools/ci/gate.sh`, needs `actions: read`), skips every other job when the same workflow already succeeded on this commit (manual runs) or, for a tag
 run, when that tag's release already has assets; a skipped workflow is green. The `force` input of a manual run overrides the gate. A manual run is a dry run: it builds and tests every format under the version you type and keeps the files as
-workflow artifacts. A tag run also creates a *draft* release with the files and `SHA256SUMS`. Jobs: gate, Linux (metadata check, Xvfb smoke tests with
+workflow artifacts. A tag run's last job (`publish`) gathers the files, writes `SHA256SUMS` (signed when a key is configured) and hands them to the shared `publish-release` action of `iDoMeteor/rba-infra` (pinned to a commit), which publishes them to Rusty Bucket's release site with the job's OIDC token (`id-token: write`, `contents: read`, no `environment:`) and dispatches the web player's update with `RBA_WAVE_DISPATCH_TOKEN`. Jobs: gate, Linux (metadata check, Xvfb smoke tests with
 `playerctl`, deb, AppImage, tarball), rpm (Fedora container, install test), Flatpak (flatpak-builder action), Windows (exe, zip, installer, silent install
 test), macOS (universal app and dmg on `macos-14`, Developer ID signing and notarization only when the Apple secrets exist, mount and `--version` smoke test), PWA (build and Playwright), publish.
 
@@ -305,3 +305,20 @@ extracted `rusty-wave.exe.new`. Update path (Linux): an updater-capable build of
 (`dist manifest --base-url file://...`), replaced itself with the 0.0.3 AppImage (SHA-256 identical) and then reported "up to date"; a tampered file was refused with the old one untouched. After publishing, the same old build updated from
 the live bucket over HTTPS to the published 0.0.3 AppImage (SHA-256 identical). Published with `dist publish --sign --windows` (14 files and 14 `latest` aliases, local folder and S3). Not verified: macOS (CI only), the real
 Windows registry and Start menu on Windows itself, a real desktop environment picking up the AppImage's menu entry (the `.desktop` file validates with `desktop-file-validate`), the GitHub workflows (the PWA job's binaryen and the rpm job's PATH were fixed from the 2026-10-06 dry run's logs; the PWA failure was reproduced locally with binaryen 105).
+
+## Pre-release versions (1.0.0-rc1)
+
+The version in `Cargo.toml` and the tag is SemVer (`1.0.0-rc1`, tag `v1.0.0-rc1`); every consumer spells it the way its own system orders it, so a release candidate is always older than the release and
+newer than the betas before it:
+
+| Where | Spelling |
+| --- | --- |
+| Cargo, the tag, `build-info.json`, file names, the manifest, `--version` | `1.0.0-rc1` |
+| `.deb` | `1.0.0~rc1` (`rusty-wave_1.0.0~rc1_amd64.deb`) |
+| `.rpm` | version `1.0.0`, release `0.1.rc1` (`rusty-wave-1.0.0-0.1.rc1.x86_64.rpm`) |
+| AppStream `<release version>` | `1.0.0~rc1` |
+| Windows `VERSIONINFO` and the installer's file properties | `1,0,0,0` numeric, the full text in `FileVersion`/`ProductVersion` and `AppVersion` |
+| macOS `CFBundleShortVersionString` / `CFBundleVersion` | `1.0.0` (dotted integers only); `CFBundleVersion` keeps the full text |
+| The updater (`rvp_update::Version`) | SemVer order: `rc1 < rc2 < 1.0.0`, `beta1 < rc1` (identifiers compare as text, so name candidates `rc1` .. `rc9`, or `rc.1`, `rc.10` with a dot) |
+
+`cargo xtask dist check --version 1.0.0-rc1` validates the metadata under that spelling (the rpm and deb spellings and the AppStream version are unit-tested in `xtask`).

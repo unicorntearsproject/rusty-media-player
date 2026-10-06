@@ -187,6 +187,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
+/// The rpm version and release of a version: `1.0.0-rc1` is version `1.0.0`, release `0.1.rc1`, which sorts before `1.0.0-1` (the
+/// release) and `rc2` (`0.1.rc2`) after it; a plain version is release `1`.
+fn rpm_parts(version: &str) -> (String, String) {
+    match version.split_once('-') {
+        Some((v, pre)) => (v.to_string(), format!("0.1.{}", pre.replace('-', "."))),
+        None => (version.to_string(), "1".to_string()),
+    }
+}
+
 /// `version = "x"` under `[workspace.package]`.
 fn workspace_version(root: &Path) -> Result<String, String> {
     let text = fs::read_to_string(root.join("Cargo.toml")).map_err(|e| e.to_string())?;
@@ -326,6 +335,16 @@ impl Ctx {
         text.replace("@VERSION@", &self.version).replace("@DATE@", &self.date)
     }
 
+    /// The metainfo file: the release is stamped with the version as AppStream orders it.
+    fn stamp_metainfo(&self, text: &str) -> String {
+        text.replace("@VERSION@", &self.appstream_version()).replace("@DATE@", &self.date)
+    }
+
+    /// The version as AppStream orders it: a pre-release is marked with `~` (`1.0.0~rc1` sorts before `1.0.0`), like Debian's.
+    fn appstream_version(&self) -> String {
+        self.version.replacen('-', "~", 1)
+    }
+
     /// The commit the build is made from (the About page shows it); a container has no git of its own, so it is handed in.
     fn build_commit(&self) -> String {
         std::env::var("RVP_BUILD_COMMIT")
@@ -427,7 +446,10 @@ impl Ctx {
         )?;
         let meta = fs::read_to_string(shared.join(format!("{APP_ID}.metainfo.xml.in")))
             .map_err(|e| e.to_string())?;
-        write(&s.join(format!("share/metainfo/{APP_ID}.metainfo.xml")), self.stamp(&meta).as_bytes())?;
+        write(
+            &s.join(format!("share/metainfo/{APP_ID}.metainfo.xml")),
+            self.stamp_metainfo(&meta).as_bytes(),
+        )?;
         let icons = self.root.join("packaging/icons/hicolor");
         for size in [16, 22, 24, 32, 48, 64, 96, 128, 192, 256, 512] {
             let rel = format!("hicolor/{size}x{size}/apps/{APP_ID}.png");
@@ -527,11 +549,7 @@ impl Ctx {
         if !have("cargo-generate-rpm") {
             return Err("cargo-generate-rpm is missing: cargo install cargo-generate-rpm".into());
         }
-        let (ver, rel) = match self.version.split_once('-') {
-            // 0.1.0-rc1 -> version 0.1.0, release 0.rc1 (sorts before 0.1.0-1)
-            Some((v, pre)) => (v.to_string(), format!("0.{}", pre.replace('-', "."))),
-            None => (self.version.clone(), "1".to_string()),
-        };
+        let (ver, rel) = rpm_parts(&self.version);
         let rpm = self.out().join(format!("{PKG}-{ver}-{rel}.x86_64.rpm"));
         let mut c = self.cargo_cmd();
         c.args(["generate-rpm", "-p", "crates/rvp-host-desktop", "--profile", "dist", "-o"])
@@ -939,7 +957,7 @@ impl Ctx {
         let meta = fs::read_to_string(shared.join(format!("{APP_ID}.metainfo.xml.in")))
             .map_err(|e| e.to_string())?;
         let stamped = tmp.join(format!("{APP_ID}.metainfo.xml"));
-        write(&stamped, self.stamp(&meta).as_bytes())?;
+        write(&stamped, self.stamp_metainfo(&meta).as_bytes())?;
         if have("appstreamcli") {
             // The file is written for current AppStream (1.x: `<developer>`, `vcs-browser`); Ubuntu 22.04 ships 0.15, whose validator
             // does not know them, so its verdict is advisory.
@@ -1108,5 +1126,21 @@ mod tests {
     fn schedules_are_found() {
         assert!(has_schedule("on:\n  schedule:\n    - cron: '0 3 * * *'\n"));
         assert!(!has_schedule("on:\n  push:\n    tags: ['v*']\n# schedule: never\n"));
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn a_release_candidate_is_spelled_the_way_each_package_system_orders_it() {
+        assert_eq!(rpm_parts("1.0.0-rc1"), ("1.0.0".to_string(), "0.1.rc1".to_string()));
+        assert_eq!(rpm_parts("1.0.0-rc.2"), ("1.0.0".to_string(), "0.1.rc.2".to_string()));
+        assert_eq!(rpm_parts("1.0.0"), ("1.0.0".to_string(), "1".to_string()));
+        assert_eq!(rpm_parts("0.0.0-ci1"), ("0.0.0".to_string(), "0.1.ci1".to_string()));
+        // rpm compares the release field piece by piece: 0.1.rc1 is older than 1 (the release).
+        let key = |r: &str| r.split('.').map(|p| p.parse::<u32>().ok()).collect::<Vec<_>>();
+        assert!(key("0.1.rc1") < key("1") || key("0.1.rc1")[0] < key("1")[0]);
     }
 }

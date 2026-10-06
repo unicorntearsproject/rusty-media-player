@@ -39,7 +39,7 @@ modules:
       - install -Dm755 target/dist/rusty-wave /app/bin/rusty-wave
       - install -Dm644 packaging/shared/io.github.idometeor.RustyWave.desktop /app/share/applications/io.github.idometeor.RustyWave.desktop
       # Stamp the AppStream file with the version of Cargo.toml (RVP_VERSION overrides it) and the date of the source.
-      - V=${RVP_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}; D=$(date -u -d "@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%F); sed -e "s/@VERSION@/$V/" -e "s/@DATE@/$D/" packaging/shared/io.github.idometeor.RustyWave.metainfo.xml.in > rusty-wave.metainfo.xml
+      - V=${RVP_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}; D=$(date -u -d "@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%F); VA=$(printf '%s' "$V" | sed 's/-/~/'); sed -e "s/@VERSION@/$VA/" -e "s/@DATE@/$D/" packaging/shared/io.github.idometeor.RustyWave.metainfo.xml.in > rusty-wave.metainfo.xml
       - install -Dm644 rusty-wave.metainfo.xml /app/share/metainfo/io.github.idometeor.RustyWave.metainfo.xml
       - for s in 16 22 24 32 48 64 96 128 192 256 512; do install -Dm644 packaging/icons/hicolor/${s}x${s}/apps/io.github.idometeor.RustyWave.png /app/share/icons/hicolor/${s}x${s}/apps/io.github.idometeor.RustyWave.png; done
       - install -Dm644 LICENSE-MIT /app/share/licenses/io.github.idometeor.RustyWave/LICENSE-MIT
