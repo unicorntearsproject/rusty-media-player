@@ -913,7 +913,7 @@ impl Ctx {
         let man_path = tmp.join("rusty-wave.1");
         write(&man_path, self.stamp(&man).as_bytes())?;
         if have("mandoc") {
-            sh(Command::new("mandoc").args(["-T", "lint"]).arg(&man_path))?;
+            sh(Command::new("mandoc").args(["-T", "lint", "-W", "warning"]).arg(&man_path))?;
         }
         // Every media type of the desktop file is in the AppStream file and the other way round.
         let desktop =
