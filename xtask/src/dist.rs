@@ -296,6 +296,19 @@ impl Ctx {
         self.root.join("target/dist")
     }
 
+    /// Build staging that holds symlinks (the Wine prefix links `z:` to `/`, the Flatpak build root and virtualenv link into the system), kept out
+    /// of the repository so that tools that walk it (editors, `rg --follow`) never follow them. `RVP_STAGING_DIR` overrides the place.
+    fn staging(&self) -> PathBuf {
+        if let Some(d) = std::env::var_os("RVP_STAGING_DIR") {
+            return PathBuf::from(d);
+        }
+        let cache = std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+            .unwrap_or_else(std::env::temp_dir);
+        cache.join("rvp-scratch/staging")
+    }
+
     fn out(&self) -> PathBuf {
         self.dist().join("release")
     }
@@ -606,7 +619,7 @@ impl Ctx {
 
     fn flatpak_sources(&self) -> Result<(), String> {
         let gen_script = self.root.join("tools/flatpak-cargo-generator.py");
-        let venv = self.dist().join("flatpak-venv");
+        let venv = self.staging().join("flatpak-venv");
         if !venv.join("bin/python").exists() {
             sh(Command::new("python3").args(["-m", "venv"]).arg(&venv))?;
             sh(Command::new(venv.join("bin/pip"))
@@ -623,7 +636,7 @@ impl Ctx {
         if !self.prepare_only && !have("flatpak-builder") {
             return Err("flatpak-builder is missing".into());
         }
-        let work = self.dist().join("flatpak");
+        let work = self.staging().join("flatpak");
         fs::create_dir_all(&work).map_err(|e| e.to_string())?;
         let src = self.source_tarball()?;
         let sha = sha256(&src)?;
@@ -831,7 +844,7 @@ impl Ctx {
             sh(&mut c)?;
         } else {
             self.ensure_win_image()?;
-            let prefix = self.dist().join("wineprefix");
+            let prefix = self.staging().join("wineprefix");
             fs::create_dir_all(&prefix).map_err(|e| e.to_string())?;
             let dl = self.dist().join("downloads");
             fs::create_dir_all(&dl).map_err(|e| e.to_string())?;

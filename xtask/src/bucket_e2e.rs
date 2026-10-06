@@ -539,7 +539,6 @@ fn library(ctx: &Ctx) -> Result<String, String> {
     let data = ctx.tmp.join("library-data");
     fs::create_dir_all(&data).map_err(|e| e.to_string())?;
     let script = "\
-0.5s key b\n\
 0.8s click 690 349\n\
 3s key 3\n\
 4s screenshot {out}/tracks.png\n\
@@ -650,8 +649,7 @@ fn slow_volume(ctx: &Ctx) -> Result<String, String> {
     // The OS walks a cold folder and the library reads tags through ids and handles that are all cold: the walk finishes late
     // (on the simulator's clock) but completely.
     let dir = ctx.fixture("library/music")?;
-    let script =
-        "0.5s key b\n0.8s click 690 349\n60s key 3\n61s screenshot {out}/tracks.png\n62s terminate 2000\n";
+    let script = "0.8s click 690 349\n60s key 3\n61s screenshot {out}/tracks.png\n62s terminate 2000\n";
     let mut l = base("slow-library", script);
     l.args = vec![
         "--slow-volume".into(),
@@ -681,7 +679,7 @@ fn slow_fail(ctx: &Ctx) -> Result<String, String> {
     let dir = ctx.fixture("library/music")?;
     let data = ctx.tmp.join("slow-fail-data");
     fs::create_dir_all(&data).map_err(|e| e.to_string())?;
-    let mut a = base("slow-fail-seed", "0.5s key b\n0.8s click 690 349\n4s terminate 2000\n");
+    let mut a = base("slow-fail-seed", "0.8s click 690 349\n4s terminate 2000\n");
     a.args = vec!["--pick".into(), dir.display().to_string()];
     a.data = Some(data.clone());
     ctx.run(&a)?;

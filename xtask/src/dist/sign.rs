@@ -337,7 +337,7 @@ impl Ctx {
         }
         // Flatpak repo: the summary is signed and the app commit carries a signature by our key (ostree cannot check it against a throwaway
         // keyring; the real check is installing from the remote, which verifies it: see docs/release-testing.md).
-        let fp = self.dist().join("flatpak/repo");
+        let fp = self.staging().join("flatpak/repo");
         if fp.join("summary.sig").exists() && have("ostree") {
             let sig_len = fs::metadata(fp.join("summary.sig")).map(|m| m.len()).unwrap_or(0);
             check(

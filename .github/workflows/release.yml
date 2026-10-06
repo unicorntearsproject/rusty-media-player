@@ -31,6 +31,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RVP_TOOLCHAIN: '1.99.0'
+  # Staging with symlinks (Flatpak build root, Wine prefix) lives outside the checkout locally; on the runners the old place keeps the layout.
+  RVP_STAGING_DIR: ${{ github.workspace }}/target/dist
 
 jobs:
   # CI only runs on changes: skip everything when this commit already built successfully (or the tag's release already has its files).
