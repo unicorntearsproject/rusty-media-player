@@ -1,6 +1,6 @@
 # Packaging and releasing
 
-Rusty Wave ships as a native desktop app (Linux and Windows) and as an installable web app (PWA). Everything is built by
+Rusty Wave ships as a native desktop app (Linux and Windows; macOS in beta) and as an installable web app (PWA). Everything is built by
 `cargo xtask dist <target>` (`cargo xtask dist` lists the targets) and, for releases, by `.github/workflows/release.yml`.
 
 | Format | Built by | Needs | Output (`target/dist/release/`) |
@@ -13,6 +13,7 @@ Rusty Wave ships as a native desktop app (Linux and Windows) and as an installab
 | Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.idometeor.RustyWave-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `target/dist/flatpak/repo`) |
 | Windows exe + zip | `dist windows` | MSVC or GNU toolchain; on Linux the wine image (podman) | `rusty-wave-<ver>-windows-x64.zip` |
 | Windows installer | `dist installer` | Inno Setup 6 (`ISCC.exe`); on Linux wine in the image | `rusty-wave-<ver>-x64-Setup.exe` |
+| macOS app + dmg (beta) | `dist macos` (macOS only) | Xcode command line tools, both Apple Rust targets; optionally `create-dmg` | `rusty-wave-<ver>-macos-universal.dmg` |
 | PWA | `dist pwa` | `cargo xtask web` prerequisites | `rusty-wave-web-<ver>.zip` |
 | Signed apt repo | `dist apt-repo --sign` | gpg | `target/dist/apt-repo/` |
 | Checksums, signatures | `dist checksums [--sign]` | gpg for `--sign` | `SHA256SUMS` (+ `.asc` files); `dist verify` checks them |
@@ -140,6 +141,32 @@ PATH entry, licence page, wizard bitmaps from the brand script, uninstaller (whi
 File associations are *registered*, not forced (Windows 10 and 11 reserve the default for the user): the program appears under "Open with" and in
 Default apps for mp4, m4v, mkv, webm, mka, mp3, flac, ogg, oga, opus, wav, m4a, m4b, aac, m3u, m3u8 and pls.
 
+## macOS (beta)
+
+`cargo xtask dist macos` (macOS only; the release workflow's `macos` job runs it on `macos-14`) builds the `rusty-wave` binary for `aarch64-apple-darwin` and `x86_64-apple-darwin` (profile `dist`),
+joins them with `lipo -create`, and assembles `Rusty Wave.app`: `Contents/MacOS/rusty-wave`, `Contents/Info.plist` (from `packaging/macos/Info.plist.in`), `Contents/Resources/rusty-wave.icns` (from `packaging/icons`)
+and the licences. The dmg holds the app and a link to `/Applications` (`create-dmg` if installed, else `hdiutil create`) and is named `rusty-wave-<ver>-macos-universal.dmg`; `dist publish --macos` publishes it
+(with `.asc`, in `SHA256SUMS`, as the manifest's `macos-dmg` entry and as `rusty-wave-latest-macos-universal.dmg`).
+
+**Info.plist**: bundle id `io.github.idometeor.RustyWave`, name "Rusty Wave", `LSMinimumSystemVersion` 11.0, `NSHighResolutionCapable`, category `public.app-category.video`, the version stamped
+(`CFBundleShortVersionString` is the numeric part, so `0.0.0-ci1` becomes `0.0.0`). Document types (mp4 m4v mkv webm mka mp3 flac ogg oga opus wav m4a m4b aac m3u m3u8 pls) use system UTIs where they exist
+(`public.mpeg-4`, `public.mp3`, `com.apple.m4v-video`, `com.apple.m4a-audio`, `public.aac-audio`, `com.microsoft.waveform-audio`, `public.m3u-playlist`, `public.pls-playlist`) and imported declarations with the usual
+shared ids for the rest (`org.matroska.mkv`, `org.matroska.mka`, `org.webmproject.webm`, `org.xiph.flac`, `org.xiph.ogg-audio`, `org.xiph.opus`), at rank *Alternate* (listed under Open With, never
+taking a default over). `dist check` fails if the plist's extensions differ from the Windows installer's, if a UTI is neither a system type nor declared, or if a declaration is unused.
+Finder passes opened files to a running app as an Apple Event rather than on the command line, and the host reads only its command line, so double-clicking a file may not play it yet: a known gap for the beta.
+
+**Signing hooks** (both optional; nothing is in the repository):
+
+| Variable | Effect |
+| --- | --- |
+| `RVP_MACOS_SIGN_IDENTITY` | a "Developer ID Application: ..." identity in the keychain: `codesign --options runtime --timestamp --entitlements packaging/macos/entitlements.plist` on the app (hardened runtime) and `codesign --timestamp` on the dmg |
+| `RVP_MACOS_NOTARY_PROFILE` | a `xcrun notarytool store-credentials` keychain profile (needs the identity): the app is notarized (`notarytool submit --wait`) and stapled, then the dmg is built, signed, notarized and stapled |
+| neither | ad-hoc signed app (`codesign --sign -`, which Apple Silicon needs to run it at all), unsigned dmg; the command says so. Gatekeeper asks the user to allow it (`release-testing.md`, section 5b) |
+
+In CI the job imports `APPLE_CERT_P12_BASE64` / `APPLE_CERT_PASSWORD` into a temporary keychain and sets the identity from `APPLE_SIGN_IDENTITY` when they exist, and stores a notary profile from `APPLE_NOTARY_KEY` (the
+contents of the `.p8` key), `APPLE_NOTARY_KEY_ID` and `APPLE_NOTARY_ISSUER`. The entitlements file is empty: the app is not sandboxed and does not record, so the hardened runtime needs no exception. GPG signs the dmg like the
+other files (`.asc`); the macOS code signature is separate.
+
 ## Web app (PWA)
 
 `cargo xtask web` produces `target/web` with `manifest.webmanifest` (name, icons incl. maskable, `display: standalone`, file handlers, a share target,
@@ -156,9 +183,9 @@ network off, and the update flow.
 Nothing runs on a push or a pull request, and nothing on a schedule (`dist check` fails if a workflow has a `schedule:` trigger). CI only runs on changes: the first job of
 both workflows, `gate` (`tools/ci/gate.sh`, needs `actions: read`), skips every other job when the same workflow already succeeded on this commit (manual runs) or, for a tag
 run, when that tag's release already has assets; a skipped workflow is green. The `force` input of a manual run overrides the gate. A manual run is a dry run: it builds and tests every format under the version you type and keeps the files as
-workflow artifacts. A tag run also creates a *draft* release with the files and `SHA256SUMS`. Jobs: Linux (metadata check, Xvfb smoke tests with
+workflow artifacts. A tag run also creates a *draft* release with the files and `SHA256SUMS`. Jobs: gate, Linux (metadata check, Xvfb smoke tests with
 `playerctl`, deb, AppImage, tarball), rpm (Fedora container, install test), Flatpak (flatpak-builder action), Windows (exe, zip, installer, silent install
-test), PWA (build and Playwright), publish.
+test), macOS (universal app and dmg on `macos-14`, Developer ID signing and notarization only when the Apple secrets exist, mount and `--version` smoke test), PWA (build and Playwright), publish.
 
 ## Signing
 
@@ -220,6 +247,7 @@ Testing every package by hand: [`release-testing.md`](release-testing.md).
 | Installer | built with Inno Setup 6.7.3 under Wine; silent install: files, Start menu and desktop shortcuts, `OpenWithProgids` and Capabilities registry entries, installed program ran, uninstall removed registry entries and shortcuts | Real Windows' Default apps page, signing, the dialog flow |
 | PWA | Playwright (Chromium): valid manifest, every icon exists with the declared size, service worker precache, reload and play a local file with the network off, update flow | Install prompt UI, file handlers and share target on real OSes, Firefox and Safari |
 | Signing (release key `E13F...3CEE`) | `dist ... --sign` for deb, rpm, AppImage, Flatpak repo and bundle, apt repo, checksums; `dist verify` (19 checks, throwaway keyring); `.deb` and rpm tamper tests; installed from the signed apt repo in a clean Ubuntu 22.04 container (a modified `InRelease` is refused) and the signed rpm in Fedora 44 (`rpm --import`, `rpm -K`, a modified rpm is refused); AppImage embedded signature checked and the AppImage still runs; Flatpak installed `--user` from the signed local repo (`.flatpakrepo`), from the `.flatpakref` and from the bundle, ran under Xvfb at 1.00x; a remote with another key is refused | rpm below 4.14 (no EdDSA), Flathub, signing from CI, a Windows certificate |
+| macOS | `cargo check -p rvp-host-desktop` for `aarch64-apple-darwin` and `x86_64-apple-darwin` on Linux (compiles without the SDK); `dist check` validates `Info.plist` (document types against the installer, UTIs, valid plist); unit tests of the stamping and checks | **Any macOS run**: the build, `lipo`, `codesign`, the dmg, Gatekeeper, audio, media controls, Finder file opening, signing and notarization |
 | Workflows | `actionlint` clean; never run (they must not be triggered from here) | A real run |
 
 **0.0.2 (2026-10-05, includes crossfade and auto-level).** `cargo test --workspace` (467 passed, 5 ignored), clippy `-D warnings`, `cargo xtask check`, `cargo xtask e2e` and

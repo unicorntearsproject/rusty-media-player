@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime entitlements for the Developer ID build (`cargo xtask dist macos` passes this file to codesign when RVP_MACOS_SIGN_IDENTITY is set).
+     The app is not sandboxed, plays audio (no microphone), opens files and, for the optional update check, a network connection the hardened
+     runtime does not restrict, so none is needed today. Add keys here (for example com.apple.security.device.audio-input if recording is ever added)
+     and note why. -->
+<plist version="1.0">
+<dict/>
+</plist>

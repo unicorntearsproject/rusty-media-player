@@ -52,7 +52,7 @@ Get-FileHash .\rusty-wave-0.0.2-x64-Setup.exe -Algorithm SHA256     # compare wi
 gpg --import rusty-wave-release.asc; gpg --verify SHA256SUMS.asc SHA256SUMS      # optional, needs Gpg4win
 ```
 
-## 2. What to look for in every desktop build (Linux and Windows)
+## 2. What to look for in every desktop build (Linux, Windows and macOS)
 
 Do this once per package type on each machine, with real speakers or headphones.
 
@@ -264,6 +264,33 @@ signature of the checksums is the only proof). Take a snapshot or use a throwawa
 
 **Portable zip**: unzip to a folder (and to a USB stick), run `rusty-wave.exe`: SmartScreen prompt as above (unblock via file Properties > Unblock to compare), plays, settings go to `%APPDATA%\rusty-wave\data`
 (or next to it with `--data-dir`), nothing registered; deleting the folder removes it.
+
+## 5b. macOS (beta: Apple Silicon and Intel, macOS 11 or newer)
+
+Nobody has run Rusty Wave on a Mac yet. The `.dmg` (`rusty-wave-<ver>-macos-universal.dmg`, one binary for arm64 and x86_64) is built by the `macos` job of `release.yml` on a macOS runner (or
+`cargo xtask dist macos` on a Mac); this is the first real test. Unless the maintainer has Apple signing secrets set, the app is **ad-hoc signed only: not signed with a Developer ID and not
+notarized**, so Gatekeeper blocks the first launch ("Rusty Wave cannot be opened because the developer cannot be verified" or "... is damaged"). That is expected. Verify the download first
+(section 1: `gpg --verify x.dmg.asc x.dmg`, `shasum -a 256 -c`), then open the dmg and drag *Rusty Wave* onto *Applications*, and allow it once, whichever way you prefer:
+
+- Finder: right-click (or Control-click) the app, choose **Open**, then **Open** again in the dialog (macOS 14 and older); or
+- macOS 15 and newer: try to open it once, then System Settings > Privacy & Security, scroll to Security, **Open Anyway**; or
+- Terminal, on your own Mac and only for this app: `xattr -dr com.apple.quarantine "/Applications/Rusty Wave.app"` (this removes the quarantine flag that triggers the check; it is the same as
+  allowing the app by hand).
+
+What to test (the checks of section 2 apply, with these macOS parts):
+
+- [ ] Starts on Apple Silicon and on an Intel Mac (`lipo -archs "/Applications/Rusty Wave.app/Contents/MacOS/rusty-wave"` prints `x86_64 arm64`); the window and Dock icon are right; the menu bar shows the app name.
+- [ ] Video (H.264, AV1, VP9) and audio (MP3, FLAC, Opus, AAC, WAV) play with sound at the right pitch; changing the output device (AirPods, HDMI) while playing recovers; a Retina display is sharp (HiDPI).
+- [ ] Keyboard shortcuts work with Command where the Windows/Linux builds use Ctrl, or at least with Ctrl; full screen (the green button and `F`); the window resizes smoothly.
+- [ ] Media keys (F7 to F9, the AirPods squeeze) and Control Centre / Now Playing show title, artist and cover and control playback (MPNowPlayingInfoCenter through the media-controls library).
+- [ ] Open a folder and a file from inside the app. Finder integration (**double-click or Open With a `.mp4`/`.mkv`/`.mp3`/`.flac`, or drop a file on the Dock icon**) is the most likely thing to fail: the app reads its command line,
+  while Finder passes files as an Apple Event; note exactly what happens (opens empty, opens the file, opens a second copy).
+- [ ] "Get Info" on a media file lists Rusty Wave under Open With (the Info.plist declares the types); it does not become the default by itself.
+- [ ] Data lives in `~/Library/Application Support/rusty-wave/` (or wherever the app reports with `--help`); `--data-dir` redirects it. Uninstall is: drag the app to the Trash, remove that folder.
+- [ ] If the maintainer provided a signed and notarized build: it opens with no Gatekeeper dialog (`spctl --assess --type execute -vv "/Applications/Rusty Wave.app"` says "accepted, source=Notarized Developer ID").
+
+**Not verified (known)**: everything above. Specifically the Info.plist file-type declarations (Launch Services may need `lsregister -f` or a logout to pick them up), Finder file opening, audio on both architectures,
+the media controls, notarization, and the unsigned-app flow on a current macOS. Report what you see, the macOS version, the chip, and `rusty-wave --version`.
 
 ## 6. Web app (PWA)
 

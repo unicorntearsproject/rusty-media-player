@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod macos;
 mod manifest;
 mod publish;
 mod sign;
@@ -38,6 +39,9 @@ targets:
                --prepare-only just writes the manifest and the source tarball (CI builds it with the flatpak-builder action)
   windows      rusty-wave.exe (x86_64-pc-windows-gnu in the wine image on Linux; the host toolchain on Windows) and the portable zip
   installer    the Inno Setup installer around it (ISCC.exe on Windows, wine in the image on Linux)
+  macos        Rusty Wave.app (universal arm64 + x86_64) in rusty-wave-<ver>-macos-universal.dmg; macOS only. Signing hooks:
+               RVP_MACOS_SIGN_IDENTITY (Developer ID, hardened runtime) and RVP_MACOS_NOTARY_PROFILE (notarytool keychain profile);
+               with neither the bundle is ad-hoc signed and the dmg unsigned
   pwa          the web app (cargo xtask web) as rusty-wave-web-<ver>.zip
   apt-repo     a signed apt repository of the .deb in target/dist/apt-repo (needs --sign)
   checksums    SHA256SUMS over everything in target/dist/release (and signatures if --sign or RVP_SIGN_CMD is set)
@@ -134,6 +138,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "checksums" => cx.checksums(),
         "apt-repo" => cx.apt_repo(),
         "verify" => cx.verify(),
+        "macos" => cx.macos(),
         "manifest" => cx.manifest(windows, macos),
         "publish" => cx.publish(windows, macos, dry_run),
         "check" => cx.check(),
@@ -931,6 +936,19 @@ impl Ctx {
             if !iss.contains(&format!("\"Software\\Classes\\.{ext}\\OpenWithProgids\"")) {
                 return Err(format!(".{ext} is not associated in rusty-wave.iss"));
             }
+        }
+        // The macOS Info.plist: document types agree with the installer's extensions, UTIs are declared, and it is a valid plist.
+        let plist =
+            fs::read_to_string(self.root.join("packaging/macos/Info.plist.in")).map_err(|e| e.to_string())?;
+        macos::check_document_types(&plist, &macos::iss_extensions(&iss))?;
+        let stamped_plist = tmp.join("Info.plist");
+        write(&stamped_plist, macos::info_plist(&plist, &self.version).as_bytes())?;
+        if have("plutil") {
+            sh(Command::new("plutil").arg("-lint").arg(&stamped_plist))?;
+        } else if have("python3") {
+            sh(Command::new("python3")
+                .args(["-c", "import plistlib,sys; plistlib.load(open(sys.argv[1],'rb'))"])
+                .arg(&stamped_plist))?;
         }
         // Nothing may run on a schedule: workflows start by a tag or by hand only.
         let wf = self.root.join(".github/workflows");

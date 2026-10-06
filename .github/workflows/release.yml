@@ -1,4 +1,5 @@
-# Release builds: Linux packages (.deb, .rpm, AppImage, Flatpak, tarball), the Windows installer and portable zip, and the PWA.
+# Release builds: Linux packages (.deb, .rpm, AppImage, Flatpak, tarball), the Windows installer and portable zip, the macOS dmg (beta, unsigned
+# unless the Apple secrets exist), and the PWA.
 #
 # Triggered ONLY by a version tag (v*) or by hand (workflow_dispatch); never on a push or a pull request. A manual run is a dry run: it
 # builds and tests everything under the version you type and uploads the files as workflow artifacts, but publishes nothing. A tag run
@@ -254,6 +255,78 @@ jobs:
             target/dist/release/*.exe
             target/dist/release/*windows-x64.zip
 
+  macos:
+    name: macOS app and dmg (beta)
+    needs: [gate, version]
+    if: needs.gate.outputs.run == 'true'
+    runs-on: macos-14   # Apple Silicon; the x86_64 half of the universal binary is cross-compiled
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RVP_TOOLCHAIN }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Check the metadata (Info.plist agrees with the installer's file types)
+        run: cargo xtask dist check --version "${{ needs.version.outputs.version }}"
+      - name: Unit tests of the desktop host
+        continue-on-error: true   # never run on macOS before; informational until it has been seen to pass
+        run: cargo test -p rvp-host-desktop --lib
+      - name: Signing and notarization (only when the repository has the Apple secrets)
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+        run: |
+          if [[ -z "$CERT_P12_BASE64" || -z "$SIGN_IDENTITY" ]]; then
+            echo "No Developer ID certificate: the app is ad-hoc signed and the dmg is unsigned (Gatekeeper will ask the user)"
+            exit 0
+          fi
+          # A temporary keychain that holds the certificate (and the notary profile) for this job only.
+          kc="$RUNNER_TEMP/rusty-wave.keychain-db"
+          pw="$(uuidgen)"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          security default-keychain -d user -s "$kc"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "RVP_MACOS_SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
+          if [[ -n "$NOTARY_KEY" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_ISSUER" ]]; then
+            printf '%s\n' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+            xcrun notarytool store-credentials rusty-wave-notary --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --keychain "$kc"
+            rm -f "$RUNNER_TEMP/notary.p8"
+            echo "RVP_MACOS_NOTARY_PROFILE=rusty-wave-notary" >> "$GITHUB_ENV"
+            echo "Signing and notarization are on"
+          else
+            echo "Signing is on, notarization is off (no notary key)"
+          fi
+      - name: Build the universal app and the dmg
+        run: cargo xtask dist macos --version "${{ needs.version.outputs.version }}"
+      - name: Mount the dmg and start the app
+        continue-on-error: true   # a window on a hosted runner is best effort; the build above is what counts
+        run: |
+          dmg=""; for f in target/dist/release/*.dmg; do dmg="$f"; break; done
+          hdiutil attach "$dmg" -nobrowse -mountpoint "$RUNNER_TEMP/rw"
+          app="$RUNNER_TEMP/rw/Rusty Wave.app/Contents/MacOS/rusty-wave"
+          lipo -archs "$app"
+          "$app" --version
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/rw/Rusty Wave.app" || true
+          spctl --assess --type execute --verbose=2 "$RUNNER_TEMP/rw/Rusty Wave.app" || true   # rejected is expected without notarization
+          "$app" --no-audio --no-media-keys --data-dir "$RUNNER_TEMP/rvpdata" --exit-after 4 --report "$RUNNER_TEMP/report.json"
+          cat "$RUNNER_TEMP/report.json"
+          hdiutil detach "$RUNNER_TEMP/rw"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: target/dist/release/*.dmg
+
   pwa:
     name: Web app (PWA)
     needs: [gate, version]
@@ -293,7 +366,7 @@ jobs:
   publish:
     name: Publish the release
     if: needs.gate.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/v')
-    needs: [gate, version, linux, rpm, flatpak, windows, pwa]
+    needs: [gate, version, linux, rpm, flatpak, windows, macos, pwa]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -302,7 +375,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-          pattern: '{linux-packages,rpm,flatpak,windows,pwa}'
+          pattern: '{linux-packages,rpm,flatpak,windows,macos,pwa}'
       - name: Checksums
         run: |
           cd dist
