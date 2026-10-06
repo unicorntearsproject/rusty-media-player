@@ -203,7 +203,7 @@ pub async fn make_poster<S: Source>(src: S, codecs: &dyn CodecFactory) -> Result
     }
     // The end of the stream: a decoder that holds frames back gives them up now.
     let _ = dec.drain();
-    while let Ok(Some(f)) = dec.receive_frame() {
+    if let Ok(Some(f)) = dec.receive_frame() {
         return Ok(Some(frame_to_poster(&f)));
     }
     Ok(None)
