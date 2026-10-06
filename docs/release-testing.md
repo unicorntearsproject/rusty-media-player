@@ -194,6 +194,14 @@ c) From the single-file bundle (works offline except for the runtime): `flatpak 
 
 `rvp-0.0.2-linux-x86_64.tar.gz`: unpack to a temp folder, `./usr/bin/rusty-wave --version` (needs the runtime libraries of section 3); the tree mirrors `/usr`.
 
+### 3.6 Testing the update path against a local manifest (AppImage, no network)
+
+Build a "new" version and serve it from a local folder: `cargo xtask dist appimage --sign --version 0.0.9 --base-url file:///tmp/rw-dist` (embeds `zsync|file:///tmp/rw-dist/...`
+and writes the `.zsync` with that base), `cargo xtask dist checksums --sign`, then `cargo xtask dist manifest --sign --base-url file:///tmp/rw-dist` and copy the AppImage, its `.asc`, the
+`.zsync` (also as `rusty-wave-latest-x86_64.AppImage.zsync`), `rusty-wave-latest.json` and its `.asc` into `/tmp/rw-dist`. Point the installed (older) Rusty Wave at that manifest
+as described in [`updates.md`](updates.md) (the other end of this contract) and check that it finds 0.0.9, verifies the SHA-256 and the signature, and replaces itself. `publish` never
+accepts `--base-url`, so a test build can never reach the bucket with local URLs.
+
 ## 4. Quick container checks (dev machine, no hardware)
 
 ```sh

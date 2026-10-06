@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod manifest;
 mod publish;
 mod sign;
 
@@ -31,7 +32,7 @@ targets:
   tarball      rusty-wave-<ver>-linux-x86_64.tar.gz of that tree (and the source tarball the Flatpak builds from)
   deb          rusty-wave_<ver>_amd64.deb (cargo-deb)
   rpm          rusty-wave-<ver>-1.x86_64.rpm (cargo-generate-rpm)
-  appimage     rusty-wave-<ver>-x86_64.AppImage (appimagetool)
+  appimage     rusty-wave-<ver>-x86_64.AppImage (appimagetool, with update information) and its .zsync (zsyncmake)
   flatpak-sources   regenerate packaging/flatpak/cargo-sources.json from Cargo.lock (flatpak-cargo-generator)
   flatpak      build the Flatpak with flatpak-builder from the working tree and bundle it (.flatpak);
                --prepare-only just writes the manifest and the source tarball (CI builds it with the flatpak-builder action)
@@ -41,9 +42,12 @@ targets:
   apt-repo     a signed apt repository of the .deb in target/dist/apt-repo (needs --sign)
   checksums    SHA256SUMS over everything in target/dist/release (and signatures if --sign or RVP_SIGN_CMD is set)
   verify       check every signature in target/dist against packaging/keys/rusty-wave-release.asc in a throwaway keyring
-  publish      copy the verified deb, rpm and AppImage (with .asc and a versioned SHA256SUMS) to /home/jj/projects/_software-dist/rusty-wave/ and
-               s3://ut-software-dist/; needs --sign, never overwrites (stops if a file of this version exists in either place);
-               --windows adds the Windows installer and zip (only when built and verified in the same run); --dry-run only checks
+  manifest     rusty-wave-latest.json (the in-app updater's manifest) of what is built in target/dist/release; --base-url U sets where the
+               files will be served (an https:// URL or file:///path, default the bucket); --windows and --macos list those files too
+  publish      copy the verified deb, rpm and AppImage (with .asc, .zsync and a versioned SHA256SUMS) to /home/jj/projects/_software-dist/rusty-wave/ and
+               s3://ut-software-dist/; needs --sign, never overwrites a versioned file (stops if one exists in either place), then
+               overwrites the `latest` aliases and the manifest last; --windows / --macos add the Windows installer and zip / the macOS dmg
+               (only when built and verified in the same run); --dry-run only checks
   check        validate the metadata (desktop file, AppStream, man page) without building anything
   linux        stage, tarball, deb, rpm, appimage and flatpak
   all          linux, windows, installer, pwa and checksums
@@ -55,6 +59,7 @@ targets:
               and a detached .asc next to every artifact and SHA256SUMS. The key is RVP_GPG_KEY (a fingerprint) or the one in
               packaging/keys/rusty-wave-release.asc; its secret half must be in your gpg keyring.
 --sign-key K  like --sign with the key K
+--base-url U  where the published files are served from (the AppImage's update information, the manifest); default the bucket
 --repo-url U  the URL the Flatpak repo will be served from, written into the .flatpakrepo and .flatpakref (default file://<local repo>)
 
 Outputs go to target/dist/release. Other signing hooks: RVP_SIGN_CMD (run once per Linux artifact with {} replaced by its path),
@@ -70,6 +75,7 @@ struct Ctx {
     /// The fingerprint to sign with (`--sign`), already checked to be in the keyring.
     sign: Option<String>,
     repo_url: Option<String>,
+    base_url: Option<String>,
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -83,7 +89,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut version = None;
     let (mut container, mut no_build, mut prepare_only) = (false, false, false);
     let (mut want_sign, mut sign_key, mut repo_url) = (false, None, None);
-    let (mut windows, mut dry_run) = (false, false);
+    let (mut windows, mut macos, mut dry_run) = (false, false, false);
+    let mut base_url = None;
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -92,6 +99,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--no-build" => no_build = true,
             "--prepare-only" => prepare_only = true,
             "--windows" => windows = true,
+            "--macos" => macos = true,
+            "--base-url" => base_url = Some(it.next().ok_or("--base-url needs a value")?.clone()),
             "--dry-run" => dry_run = true,
             "--sign" => want_sign = true,
             "--sign-key" => {
@@ -108,7 +117,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .unwrap_or(cargo_version);
     let date = release_date(&root);
     let sign = if want_sign { Some(sign::resolve_key(&root, sign_key)?) } else { None };
-    let cx = Ctx { root, version, date, container, no_build, prepare_only, sign, repo_url };
+    let cx = Ctx { root, version, date, container, no_build, prepare_only, sign, repo_url, base_url };
     fs::create_dir_all(cx.out()).map_err(|e| e.to_string())?;
     match target.as_str() {
         "linux-bin" => cx.linux_bin().map(|_| ()),
@@ -125,7 +134,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "checksums" => cx.checksums(),
         "apt-repo" => cx.apt_repo(),
         "verify" => cx.verify(),
-        "publish" => cx.publish(windows, dry_run),
+        "manifest" => cx.manifest(windows, macos),
+        "publish" => cx.publish(windows, macos, dry_run),
         "check" => cx.check(),
         "linux" => {
             cx.stage()?;
@@ -537,18 +547,39 @@ impl Ctx {
             b"#!/bin/sh\n# Rusty Wave AppImage entry point.\nHERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\nexport XDG_DATA_DIRS=\"$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\"\nexec \"$HERE/usr/bin/rusty-wave\" \"$@\"\n",
         )?;
         set_mode(&dir.join("AppRun"), 0o755)?;
+        if !have("zsyncmake") {
+            return Err("zsyncmake is missing (the AppImage's delta-update file): apt install zsync, dnf install zsync, or build zsync from source".into());
+        }
         let out = self.out().join(format!("rusty-wave-{}-x86_64.AppImage", self.version));
         let mut c = Command::new(&tool);
-        c.env("ARCH", "x86_64")
+        // The update information goes in before signing, so the embedded signature and the .asc cover the final file. appimagetool
+        // also writes a .zsync of its own next to the output when zsyncmake exists; it is replaced below by one that names the versioned file.
+        // (run in the scratch folder: that is where appimagetool leaves that file)
+        c.current_dir(self.dist().join("appimage"))
+            .env("ARCH", "x86_64")
             .env("VERSION", &self.version)
             .arg("--appimage-extract-and-run")
-            .arg("--no-appstream");
+            .arg("--no-appstream")
+            .arg("-u")
+            .arg(self.update_info());
         if let Some(key) = &self.sign {
             // appimagetool embeds the signature and the public key in the ELF (.sha256_sig, .sig_key); checked by `dist verify`.
             c.args(["--sign", "--sign-key", key]);
         }
         sh(c.arg(&dir).arg(&out))?;
-        println!("{}", out.display());
+        // The delta-update file: its internal URL is the immutable versioned AppImage (the `latest` alias is a copy of this file), so a
+        // zsync client that reads the alias can only ever fetch the file the alias describes.
+        let zsync = self.out().join(format!("rusty-wave-{}-x86_64.AppImage.zsync", self.version));
+        let versioned_url = format!("{}/rusty-wave-{}-x86_64.AppImage", self.base_url(), self.version);
+        sh(Command::new("zsyncmake")
+            .arg("-u")
+            .arg(&versioned_url)
+            .arg("-f")
+            .arg(out.file_name().unwrap())
+            .arg("-o")
+            .arg(&zsync)
+            .arg(&out))?;
+        println!("{}\n{}", out.display(), zsync.display());
         Ok(())
     }
 
@@ -644,7 +675,10 @@ impl Ctx {
             .arg("build-bundle");
         if self.sign.is_some() {
             // The bundle carries the public key, so installing it verifies the signed commit; the runtime comes from Flathub.
-            c.arg(format!("--gpg-keys={}", self.root.join("packaging/keys/rusty-wave-release.gpg").display()));
+            c.arg(format!(
+                "--gpg-keys={}",
+                self.root.join("packaging/keys/rusty-wave-release.gpg").display()
+            ));
             c.arg("--runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo");
         }
         sh(c.arg(&repo).arg(&bundle).arg(APP_ID).arg("stable"))?;
@@ -891,11 +925,24 @@ impl Ctx {
                 return Err(format!("`{t}` is in the .desktop file but not in the AppStream <provides>"));
             }
         }
-        let iss =
-            fs::read_to_string(self.root.join("packaging/windows/rusty-wave.iss")).map_err(|e| e.to_string())?;
+        let iss = fs::read_to_string(self.root.join("packaging/windows/rusty-wave.iss"))
+            .map_err(|e| e.to_string())?;
         for ext in ["mp4", "mkv", "webm", "mp3", "flac", "ogg", "opus", "wav", "m4a", "m3u8", "pls"] {
             if !iss.contains(&format!("\"Software\\Classes\\.{ext}\\OpenWithProgids\"")) {
                 return Err(format!(".{ext} is not associated in rusty-wave.iss"));
+            }
+        }
+        // Nothing may run on a schedule: workflows start by a tag or by hand only.
+        let wf = self.root.join(".github/workflows");
+        if let Ok(rd) = fs::read_dir(&wf) {
+            for e in rd.filter_map(Result::ok) {
+                let text = fs::read_to_string(e.path()).unwrap_or_default();
+                if has_schedule(&text) {
+                    return Err(format!(
+                        "{} has a `schedule:` trigger; workflows must not run on a timer",
+                        e.path().display()
+                    ));
+                }
             }
         }
         println!("metadata ok ({} media types)", types.len());
@@ -913,6 +960,7 @@ impl Ctx {
                     && p.file_name().is_some_and(|n| {
                         let n = n.to_string_lossy();
                         n != "SHA256SUMS"
+                            && n != manifest::MANIFEST_NAME
                             && !n.ends_with(".sig")
                             && !n.ends_with(".asc")
                             && !n.ends_with("-src.tar.gz")
@@ -940,6 +988,14 @@ impl Ctx {
         print!("{sums}");
         Ok(())
     }
+}
+
+/// Whether a workflow file has a `schedule:` key (a cron trigger) outside comments.
+fn has_schedule(text: &str) -> bool {
+    text.lines().any(|l| {
+        let l = l.trim_start();
+        !l.starts_with('#') && (l.starts_with("schedule:") || l.starts_with("- cron:"))
+    })
 }
 
 fn set_mode(path: &Path, mode: u32) -> Result<(), String> {
@@ -974,4 +1030,15 @@ fn zip_dir(dir: &Path, zip: &Path) -> Result<(), String> {
     let py = "import sys, os, zipfile\nsrc, out = sys.argv[1], sys.argv[2]\nz = zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED)\nfor base, _, files in os.walk(src):\n    for f in sorted(files):\n        p = os.path.join(base, f)\n        z.write(p, os.path.relpath(p, src))\nz.close()\n";
     let python = if have("python3") { "python3" } else { "python" };
     sh(Command::new(python).arg("-c").arg(py).arg(dir).arg(zip))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_schedule;
+
+    #[test]
+    fn schedules_are_found() {
+        assert!(has_schedule("on:\n  schedule:\n    - cron: '0 3 * * *'\n"));
+        assert!(!has_schedule("on:\n  push:\n    tags: ['v*']\n# schedule: never\n"));
+    }
 }

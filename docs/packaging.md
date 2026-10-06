@@ -9,14 +9,15 @@ Rusty Wave ships as a native desktop app (Linux and Windows) and as an installab
 | Tarball | `dist tarball` | | `rusty-wave-<ver>-linux-x86_64.tar.gz` (and `rusty-wave-<ver>-src.tar.gz`) |
 | .deb | `dist deb` | `cargo install cargo-deb` | `rusty-wave_<ver>_amd64.deb` |
 | .rpm | `dist rpm` | `cargo install cargo-generate-rpm`, rpm tools | `rusty-wave-<ver>-1.x86_64.rpm` |
-| AppImage | `dist appimage` | `appimagetool` (downloaded to `~/.local/bin` on first use) | `rusty-wave-<ver>-x86_64.AppImage` |
+| AppImage | `dist appimage` | `appimagetool` (downloaded to `~/.local/bin` on first use), `zsyncmake` (`apt install zsync`, `dnf install zsync`) | `rusty-wave-<ver>-x86_64.AppImage` and `rusty-wave-<ver>-x86_64.AppImage.zsync` |
 | Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.idometeor.RustyWave-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `target/dist/flatpak/repo`) |
 | Windows exe + zip | `dist windows` | MSVC or GNU toolchain; on Linux the wine image (podman) | `rusty-wave-<ver>-windows-x64.zip` |
 | Windows installer | `dist installer` | Inno Setup 6 (`ISCC.exe`); on Linux wine in the image | `rusty-wave-<ver>-x64-Setup.exe` |
 | PWA | `dist pwa` | `cargo xtask web` prerequisites | `rusty-wave-web-<ver>.zip` |
 | Signed apt repo | `dist apt-repo --sign` | gpg | `target/dist/apt-repo/` |
 | Checksums, signatures | `dist checksums [--sign]` | gpg for `--sign` | `SHA256SUMS` (+ `.asc` files); `dist verify` checks them |
-| Publish | `dist publish --sign [--windows] [--dry-run]` | the signed, verified deb, rpm and AppImage in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root) |
+| Update manifest | `dist manifest [--base-url U] [--windows] [--macos] [--sign]` | the built files in `target/dist/release` | `rusty-wave-latest.json` (+ `.asc` with `--sign`), for the in-app updater |
+| Publish | `dist publish --sign [--windows] [--macos] [--dry-run]` | the signed, verified deb, rpm and AppImage (and `.zsync`) in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root), then the `latest` aliases and the manifest |
 
 `cargo xtask dist check` validates the metadata without building (desktop file, AppStream, man page, that the media types agree between the
 `.desktop` file and the AppStream file, that the Windows installer registers the main extensions). `linux` runs stage to flatpak, `all`
@@ -34,12 +35,48 @@ everything. `--version V` stamps another version (a dry run such as `0.0.0-ci1`)
 ## Publishing builds
 
 Per the project's distribution rule, each verified build goes to `/home/jj/projects/_software-dist/rusty-wave/` and to the root of `s3://ut-software-dist/`.
-`cargo xtask dist publish --sign` first runs `dist verify`, takes `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-1.x86_64.rpm` and
-`rusty-wave-<ver>-x86_64.AppImage` (plus `-x64-Setup.exe` and `-windows-x64.zip` with `--windows`, only when they were built and verified in the same run),
-writes and signs `rusty-wave-<ver>-SHA256SUMS` over exactly those files, and checks both destinations (`ls` and `aws s3api head-object` per file): if any file of
-this version exists in either, it stops before copying anything. Bump `version` in `Cargo.toml` for the next publish. `--dry-run` does all checks and copies nothing.
-Build the files with `dist stage --container`, then `dist deb|rpm|appimage --no-build --sign`, then `dist checksums --sign` (move old files out of `target/dist/release`,
-`linux/stage` and `appimage` first: stale files from an earlier name would be packaged or fail `verify`).
+The bucket (us-east-1) is publicly readable through its bucket policy, so a file is served at `https://ut-software-dist.s3.amazonaws.com/<key>` (the
+constant `DIST_BASE_URL` in `xtask/src/dist/manifest.rs`; the AppImage's update information and the manifest start with it).
+
+`cargo xtask dist publish --sign` first runs `dist verify`, takes `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-1.x86_64.rpm`, `rusty-wave-<ver>-x86_64.AppImage`
+and its `.zsync` (plus `-x64-Setup.exe` and `-windows-x64.zip` with `--windows`, `-macos-universal.dmg` with `--macos`, only when they were built and verified in the same run),
+writes and signs `rusty-wave-<ver>-SHA256SUMS` over exactly those files, builds and signs the manifest, and checks both destinations (`ls` and `aws s3api head-object`
+per file): if any *versioned* file of this version exists in either, it stops before copying anything. Bump `version` in `Cargo.toml` for the next publish.
+`--dry-run` does all checks and copies nothing. Build the files with `dist stage --container`, then `dist deb|rpm|appimage --no-build --sign`, then
+`dist checksums --sign` (move old files out of `target/dist/release`, `linux/stage` and `appimage` first: stale files from an earlier name would be packaged or fail `verify`).
+
+**Stable `latest` aliases.** After every versioned file is uploaded and confirmed by `head-object` (size must match), publish uploads byte copies under stable names
+(the only objects it ever overwrites; `Cache-Control: public, max-age=300`, versioned files get `immutable`), the manifest last, so a half-failed publish never points
+`latest` at a missing file. Each has the `.asc` of its source (a detached signature covers the content, not the name):
+
+| Alias | Is |
+| --- | --- |
+| `rusty-wave-latest-x86_64.AppImage` (+ `.asc`) | the versioned AppImage |
+| `rusty-wave-latest-x86_64.AppImage.zsync` (+ `.asc`) | the versioned `.zsync` |
+| `rusty-wave-latest_amd64.deb`, `rusty-wave-latest-1.x86_64.rpm` (+ `.asc`) | the deb, the rpm |
+| `rusty-wave-latest-x64-Setup.exe`, `rusty-wave-latest-windows-x64.zip` (+ `.asc`) | with `--windows` |
+| `rusty-wave-latest-macos-universal.dmg` (+ `.asc`) | with `--macos` |
+| `rusty-wave-latest.json` (+ `.asc`, content type `application/json`) | the update manifest, below |
+
+**AppImage delta updates.** `dist appimage` embeds the update information `zsync|<base>/rusty-wave-latest-x86_64.AppImage.zsync` (appimagetool `-u`; AppImageUpdate
+and the in-app updater read it) *before* signing, so the embedded signature and the `.asc` cover the final file. The `.zsync` is made by `zsyncmake -u <base>/rusty-wave-<ver>-x86_64.AppImage`:
+its internal URL is the immutable versioned file, so the `latest` alias of the `.zsync` can never fetch a mismatching AppImage. `dist verify` checks that the update
+information is embedded and that the `.zsync` header has the versioned URL, the file's length and its SHA-1.
+
+**Update manifest** (`rusty-wave-latest.json`, schema 1; the in-app updater is documented in [`updates.md`](updates.md)). Generated by `dist manifest` (publish does it from the staged
+files, signs it with the release key and verifies the signature). Entries exist only for the files of that publish; URLs name the immutable versioned files, except `zsync_url`, which is the
+stable alias:
+
+```json
+{ "schema": 1, "version": "0.0.3", "released": "2026-10-06", "key_fingerprint": "E13FF843723D54068E45A3FF54BF2FA407093CEE",
+  "files": { "linux-appimage": { "arch": "x86_64", "name": "rusty-wave-0.0.3-x86_64.AppImage", "url": "<base>/rusty-wave-0.0.3-x86_64.AppImage",
+             "size": 123, "sha256": "<hex>", "signature_url": "<base>/rusty-wave-0.0.3-x86_64.AppImage.asc",
+             "zsync_url": "<base>/rusty-wave-latest-x86_64.AppImage.zsync" },
+             "linux-deb": { "arch": "amd64", "...": "same keys without zsync_url" }, "linux-rpm": {}, "windows-installer": {}, "windows-portable": {}, "macos-dmg": {} } }
+```
+
+`--base-url` (an `https://` URL or `file:///path`) changes `<base>` for `dist manifest` and for the update information `dist appimage` embeds, for local update tests
+(see [`release-testing.md`](release-testing.md), "Testing the update path"); `publish` refuses it. The release date is the last commit's date.
 
 ## Version stamping
 
@@ -147,7 +184,10 @@ must be in your keyring, otherwise the command stops at once). With `--sign`:
 | `.rpm` | embedded (`rpmsign`), plus `.asc` | `rpm -K` after `rpm --import packaging/keys/rusty-wave-release.asc` |
 | `.deb` | detached `.asc`; apt checks the repo instead (below), `dpkg-sig` is not used because apt ignores it | `gpg --verify x.deb.asc x.deb` |
 | apt repo (`dist apt-repo`, `target/dist/apt-repo`) | `InRelease` (clearsigned) and `Release.gpg` | `apt-get update` with `signed-by=rusty-wave-release.gpg` |
-| AppImage | embedded by `appimagetool --sign` (ELF sections `.sha256_sig`, `.sig_key`), plus `.asc`; the runtime does not check it | `tools/packaging/verify-appimage-sig.py` or `gpg --verify` |
+| AppImage | embedded by `appimagetool --sign` (ELF sections `.sha256_sig`, `.sig_key`; made after the update information is embedded), plus `.asc` of the final file; the runtime does not check it | `tools/packaging/verify-appimage-sig.py` or `gpg --verify` |
+| `.zsync` | detached `.asc` (from `dist checksums --sign`); also covered by `SHA256SUMS` | `gpg --verify`; `dist verify` also checks its header against the AppImage |
+| `rusty-wave-latest.json` | detached `.asc` by the release key (`dist manifest --sign`, `dist publish`); the manifest names the key fingerprint and every file's SHA-256 | `gpg --verify rusty-wave-latest.json.asc rusty-wave-latest.json` |
+| `latest` aliases | copies of the versioned files with copies of their `.asc` | `gpg --verify` works on either name |
 | Flatpak | the commit and the repo summary (`--gpg-sign`), the key in `.flatpakrepo`, `.flatpakref` and the bundle; plus `.asc` of the bundle | `flatpak install` from the remote verifies; `ostree show` lists the signature |
 | tarballs, zip, exe, installer, `.flatpakref/.flatpakrepo` | detached `.asc` (from `dist checksums --sign`) | `gpg --verify` |
 | `SHA256SUMS` | `SHA256SUMS.asc` | `gpg --verify SHA256SUMS.asc SHA256SUMS`, then `sha256sum -c SHA256SUMS` |

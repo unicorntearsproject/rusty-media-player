@@ -259,6 +259,38 @@ impl Ctx {
             );
             check(format!("embedded signature {}", f.file_name().unwrap().to_string_lossy()), r.map(|_| ()));
         }
+        // AppImage update information and the .zsync: the file embeds the stable alias of the zsync file, and the zsync file downloads the
+        // versioned AppImage and describes exactly the final (signed) file.
+        for f in names.iter().filter(|p| p.extension().is_some_and(|e| e == "AppImage")) {
+            let name = f.file_name().unwrap().to_string_lossy().into_owned();
+            let want = self.update_info();
+            let r = fs::read(f).map_err(|e| e.to_string()).and_then(|b| {
+                let w = want.as_bytes();
+                b.windows(w.len())
+                    .any(|x| x == w)
+                    .then_some(())
+                    .ok_or_else(|| format!("`{want}` is not embedded"))
+            });
+            check(format!("update information in {name}"), r);
+            let zs = out.join(format!("{name}.zsync"));
+            if zs.is_file() {
+                let r = fs::read(&zs).map_err(|e| e.to_string()).and_then(|b| {
+                    let head = String::from_utf8_lossy(&b[..b.len().min(2048)]).into_owned();
+                    let size = fs::metadata(f).map_err(|e| e.to_string())?.len();
+                    let sha1 = capture(Command::new("sha1sum").arg(f))?;
+                    let url = format!("{}/{name}", self.base_url());
+                    manifest::check_zsync(
+                        &head,
+                        &url,
+                        size,
+                        sha1.split_whitespace().next().unwrap_or_default(),
+                    )
+                });
+                check(format!("{name}.zsync matches {name}"), r);
+            } else {
+                check(format!("{name}.zsync matches {name}"), Err("missing (run `dist appimage`)".into()));
+            }
+        }
         // apt repo: InRelease (clearsigned) and Release.gpg (detached), and the hashes they cover.
         let apt = self.dist().join("apt-repo/dists/stable");
         if apt.join("Release").exists() {
