@@ -24,8 +24,41 @@ fn resolve(root: &str, path: &str) -> Result<PathBuf, String> {
     Ok(base.join(rel))
 }
 
-/// Replace `target` with `data`, atomically.
+/// Whether files can be made in `dir` (a file is made and removed): a read-only mount (Flatpak without write access to the folder) or a
+/// folder the user may not change says so here, before anyone has typed a tag.
+pub fn probe_writable(dir: &Path) -> Result<(), String> {
+    let probe = dir.join(format!(".rusty-wave-write-test-{}", std::process::id()));
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(f) => {
+            drop(f);
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(e) => {
+            let flatpak = rvp_update::Env::current().flatpak;
+            let why = match e.kind() {
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
+                    "Rusty Wave may only read this folder".to_string()
+                }
+                _ => format!("this folder cannot be written ({e})"),
+            };
+            Err(if flatpak {
+                format!(
+                    "{why}. The Flatpak has read access only here: grant write access with flatpak override --user --filesystem={} \
+                     io.github.unicorntearsproject.RustyWave",
+                    dir.display()
+                )
+            } else {
+                format!("{why}.")
+            })
+        }
+    }
+}
+
+/// Replace `target` with `data`, atomically. A symbolic link is followed: the file it points to is replaced, and the link stays a link.
 pub fn replace_file(target: &Path, data: &[u8]) -> Result<(), String> {
+    let real = std::fs::canonicalize(target).map_err(|e| format!("the file cannot be found ({e})"))?;
+    let target = real.as_path();
     let meta = std::fs::metadata(target).map_err(|e| format!("the file cannot be found ({e})"))?;
     if !meta.is_file() {
         return Err("it is not a file".into());
@@ -60,7 +93,7 @@ impl FileWriter for DesktopWriter {
     fn can_write(&mut self, root: &str) -> Result<(), String> {
         let dir = root_path(root).ok_or("this folder is not one the app can write to")?;
         match std::fs::metadata(&dir) {
-            Ok(m) if m.is_dir() => Ok(()),
+            Ok(m) if m.is_dir() => probe_writable(&dir),
             _ => Err("the folder is not there right now".into()),
         }
     }
@@ -132,6 +165,44 @@ mod tests {
         let t = w.write("root-123", "a.mp3", vec![]);
         assert!(w.poll_write(t).unwrap().is_err());
         assert!(w.can_write(&crate::walk::root_id(&d.join("missing"))).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_track_stays_a_link_and_its_target_is_what_changes() {
+        let d = tmpdir("link");
+        std::fs::create_dir_all(d.join("real")).unwrap();
+        std::fs::write(d.join("real/a.mp3"), b"old").unwrap();
+        std::os::unix::fs::symlink(d.join("real/a.mp3"), d.join("sub/a.mp3")).unwrap();
+        let mut w = DesktopWriter::default();
+        let t = w.write(&crate::walk::root_id(&d), "sub/a.mp3", b"new bytes".to_vec());
+        assert_eq!(w.poll_write(t), Some(Ok(())));
+        assert!(
+            std::fs::symlink_metadata(d.join("sub/a.mp3")).unwrap().file_type().is_symlink(),
+            "still a link"
+        );
+        assert_eq!(std::fs::read(d.join("real/a.mp3")).unwrap(), b"new bytes");
+        let left: Vec<_> =
+            std::fs::read_dir(d.join("real")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["a.mp3"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_folder_is_refused_up_front_when_the_editor_opens() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmpdir("probe");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(d.join("probe"), b"").is_ok() {
+            return; // root ignores the mode
+        }
+        let mut w = DesktopWriter::default();
+        let why = w.can_write(&crate::walk::root_id(&d)).unwrap_err();
+        assert!(why.contains("only read"), "{why}");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(w.can_write(&crate::walk::root_id(&d)).is_ok());
+        let left: Vec<_> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert!(left.iter().all(|n| !n.to_string_lossy().contains("write-test")), "{left:?}");
     }
 
     #[cfg(unix)]

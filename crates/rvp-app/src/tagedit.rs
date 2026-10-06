@@ -9,13 +9,17 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use rvp_core::Timestamp;
-use rvp_host::mock::MemSource;
 use rvp_host::{FrameSink, Host, OpenRequest, Source};
 use rvp_library::{TagPatch, Track, TrackId, read_all, read_tags};
 use rvp_tagwrite::{Change, Cover, Edit, edit_tags, format_of};
 use rvp_ui::{CoverAction, Scope, TagField, TagFormSpec, TagTarget};
 
-/// Files bigger than this are not edited (they are held in memory).
+/// Files bigger than this are not edited (they are held in memory, the old and the new one at once: in a page, with its 4 GB address
+/// space shared by everything else, far less than on a desktop).
+#[cfg(target_arch = "wasm32")]
+const MAX_EDIT_FILE: usize = 64 << 20;
+/// Files bigger than this are not edited (they are held in memory, the old and the new one at once).
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_EDIT_FILE: usize = 256 << 20;
 /// Cover pictures bigger than this are not accepted.
 const MAX_COVER: usize = 8 << 20;
@@ -57,16 +61,43 @@ pub(crate) struct TagState {
     prepared: Rc<RefCell<Vec<Prepared>>>,
 }
 
-/// Read, edit and check one file; the bytes to write, or why not.
+/// A source over bytes that someone else keeps (the edited file is checked where it is, not in a copy).
+struct SharedBytes(Rc<Vec<u8>>);
+
+impl Source for SharedBytes {
+    async fn size(&self) -> Option<u64> {
+        Some(self.0.len() as u64)
+    }
+
+    async fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize, rvp_host::HostError> {
+        let start = (offset as usize).min(self.0.len());
+        let n = buf.len().min(self.0.len() - start);
+        buf[..n].copy_from_slice(&self.0[start..start + n]);
+        Ok(n)
+    }
+
+    fn name(&self) -> &str {
+        "edited"
+    }
+}
+
+/// Read, edit and check one file; the bytes to write, or why not. The old bytes are let go as soon as the new ones exist, and the check
+/// reads the new ones in place, so at most two copies of the file are ever held (not three).
 async fn prepare<S: Source>(src: S, name: &str, edit: &Edit, want_us: i64) -> Result<Vec<u8>, String> {
-    let old = read_all(src, MAX_EDIT_FILE).await.map_err(|e| format!("it could not be read ({e})"))?;
+    let old = read_all(src, MAX_EDIT_FILE).await.map_err(|e| {
+        format!("it could not be read, or it is bigger than the {} MB that can be edited here ({e})", MAX_EDIT_FILE >> 20)
+    })?;
     let fmt = format_of(name, &old[..old.len().min(16)])
         .ok_or_else(|| "tags in this kind of file cannot be written".to_string())?;
     let new = edit_tags(fmt, &old, edit).map_err(|e| e.to_string())?;
+    drop(old);
     // The edited file has to read as the same audio, or nothing is written.
-    let t = read_tags(MemSource::new(new.clone()))
+    let shared = Rc::new(new);
+    let t = read_tags(SharedBytes(shared.clone()))
         .await
-        .map_err(|_| "the edited file would not read back, so nothing was written".to_string())?;
+        .map_err(|_| "the edited file would not read back, so nothing was written".to_string());
+    let new = Rc::try_unwrap(shared).unwrap_or_else(|rc| (*rc).clone());
+    let t = t?;
     if want_us > 0 && t.duration_us > 0 && (t.duration_us - want_us).abs() > want_us / 50 + 100_000 {
         return Err("the edited file reads as a different length, so nothing was written".into());
     }

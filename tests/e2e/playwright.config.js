@@ -9,6 +9,9 @@ const root = path.resolve(__dirname, "../..");
 module.exports = defineConfig({
   testDir: ".",
   testMatch: "*.spec.js",
+  // Each run of the suite can have a folder of its own for traces and videos (`cargo xtask perf-web` gives each pass one), so passes that
+  // follow each other never clean up under one another.
+  outputDir: process.env.RVP_E2E_OUTPUT || "test-results",
   timeout: 90_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

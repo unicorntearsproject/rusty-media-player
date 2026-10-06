@@ -90,20 +90,74 @@ pub fn config_home() -> Option<PathBuf> {
     })
 }
 
+/// The folder of the user's real `mimeapps.list`. Inside Flatpak `XDG_CONFIG_HOME` is the app's private copy (`~/.var/app/<id>/config`), which
+/// the desktop never reads, so the host's own `~/.config` is used there (`HOST_XDG_CONFIG_HOME`, which Flatpak sets, else `$HOME/.config`).
+pub fn real_config_home(flatpak: bool) -> Option<PathBuf> {
+    if flatpak {
+        let host = std::env::var_os("HOST_XDG_CONFIG_HOME").filter(|v| !v.is_empty()).map(PathBuf::from);
+        return host.or_else(|| {
+            std::env::var_os("HOME").filter(|v| !v.is_empty()).map(|h| PathBuf::from(h).join(".config"))
+        });
+    }
+    config_home()
+}
+
+/// The file `path` stands for: a symbolic link (a dotfile manager's) is followed, so the real file is replaced and the link stays a link.
+fn real_file(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Make the app the default for `mimes` in the user's `mimeapps.list` under `config_home`. The file is written in one step (a temporary
-/// file, then a rename) so a crash never leaves half of it. Returns the number of media types set.
+/// file beside the real file, then a rename) so a crash never leaves half of it, and a `mimeapps.list` that is a symbolic link stays one.
+/// Returns the number of media types set.
 pub fn set_linux_defaults(config_home: &Path, desktop_id: &str, mimes: &[&str]) -> io::Result<usize> {
-    let path = config_home.join("mimeapps.list");
+    let link = config_home.join("mimeapps.list");
+    let path = real_file(&link);
     let old = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
     let new = with_defaults(&old, desktop_id, mimes);
-    std::fs::create_dir_all(config_home)?;
-    let tmp = config_home.join(".mimeapps.list.rusty-wave.tmp");
+    let dir = path.parent().unwrap_or(config_home);
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(".mimeapps.list.rusty-wave.tmp");
     std::fs::write(&tmp, new)?;
-    std::fs::rename(&tmp, &path)?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(mimes.len())
+}
+
+/// The same inside Flatpak, where only the file `mimeapps.list` itself is shared with the app (`--filesystem=xdg-config/mimeapps.list`):
+/// no other file can be made next to it, so it is rewritten in place, and it has to exist already (the sandbox cannot create it).
+pub fn set_linux_defaults_in_place(
+    config_home: &Path,
+    desktop_id: &str,
+    mimes: &[&str],
+) -> Result<usize, String> {
+    let path = real_file(&config_home.join("mimeapps.list"));
+    let old = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(format!(
+                "Flatpak can only change a mimeapps.list that already exists, and {} does not. Choose Rusty Wave in your system's \
+                 Default Applications settings, or run on your computer: xdg-mime default {desktop_id} {}",
+                path.display(),
+                mimes.join(" ")
+            ));
+        }
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let new = with_defaults(&old, desktop_id, mimes);
+    std::fs::write(&path, new).map_err(|e| {
+        format!(
+            "cannot write {} ({e}). The Flatpak needs --filesystem=xdg-config/mimeapps.list: \
+             flatpak override --user --filesystem=xdg-config/mimeapps.list <app id>",
+            path.display()
+        )
+    })?;
     Ok(mimes.len())
 }
 
@@ -244,5 +298,34 @@ mod tests {
         assert!(!dir.join(".mimeapps.list.rusty-wave.tmp").exists());
         let _ = std::fs::remove_file(dir.join("mimeapps.list"));
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_mimeapps_list_stays_a_link_and_flatpak_writes_in_place() {
+        let d = std::env::temp_dir().join(format!("rvp-mimeapps-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(d.join("dots"));
+        let _ = std::fs::create_dir_all(d.join("cfg"));
+        std::fs::write(d.join("dots/mimeapps.list"), "[Default Applications]\nvideo/mp4=vlc.desktop;\n")
+            .unwrap();
+        let _ = std::fs::remove_file(d.join("cfg/mimeapps.list"));
+        std::os::unix::fs::symlink(d.join("dots/mimeapps.list"), d.join("cfg/mimeapps.list")).unwrap();
+        set_linux_defaults(&d.join("cfg"), "x.desktop", &["video/mp4", "audio/mpeg"]).unwrap();
+        assert!(std::fs::symlink_metadata(d.join("cfg/mimeapps.list")).unwrap().file_type().is_symlink());
+        let t = std::fs::read_to_string(d.join("dots/mimeapps.list")).unwrap();
+        assert!(is_default(&t, "x.desktop", "video/mp4") && is_default(&t, "x.desktop", "audio/mpeg"), "{t}");
+        let left: Vec<_> =
+            std::fs::read_dir(d.join("dots")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["mimeapps.list"], "no temporary file left");
+        // Flatpak: the file is there and is rewritten in place (same file, same link); missing: an honest message with the command.
+        set_linux_defaults_in_place(&d.join("cfg"), "y.desktop", &["video/webm"]).unwrap();
+        assert!(is_default(
+            &std::fs::read_to_string(d.join("cfg/mimeapps.list")).unwrap(),
+            "y.desktop",
+            "video/webm"
+        ));
+        let e = set_linux_defaults_in_place(&d.join("nothing"), "y.desktop", &["video/webm", "audio/flac"])
+            .unwrap_err();
+        assert!(e.contains("xdg-mime default y.desktop video/webm audio/flac"), "{e}");
     }
 }

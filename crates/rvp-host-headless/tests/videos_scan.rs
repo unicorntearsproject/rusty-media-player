@@ -493,3 +493,48 @@ fn a_queued_video_comes_back_after_a_restart() {
     assert_eq!(items.iter().map(|i| i.track).collect::<Vec<_>>(), [Some(a), Some(c)]);
     assert!(items.iter().all(|i| !i.source.is_empty()), "their source comes from the library");
 }
+
+#[test]
+fn posters_wait_while_a_video_plays_and_go_on_when_it_is_paused() {
+    if skip() {
+        return;
+    }
+    let d = folder("app_pause_posters");
+    // Plenty of films without a poster yet.
+    for i in 0..8 {
+        std::fs::copy(fixture("h264_aac.mp4"), d.join(format!("extra{i}.mp4"))).unwrap();
+    }
+    std::fs::copy(fixture("av1_opus_60s.webm"), d.join("long.webm")).unwrap();
+    let mut r = Rig::new(UiHost::new());
+    let l = walk_listing("films", "Films", &d);
+    r.host.library.as_mut().unwrap().listings.push_back(l);
+    // The headers are read first, the posters after: start a film as soon as the posters are asked for.
+    for _ in 0..3000 {
+        r.step();
+        if r.app.library().video_count() >= 13 && !r.app.library().pending_posters().is_empty() {
+            break;
+        }
+    }
+    let pending = r.app.library().pending_posters().len();
+    assert!(pending >= 6, "{pending} posters are still to make");
+    let id = r.id("long.webm");
+    r.act(Action::Lib(LibAction::Play(Scope::Video(id), Enqueue::Now)));
+    // Let it get going (opening and buffering count as playing: no poster is made then either).
+    r.run(400);
+    let at_start = r.app.library().pending_posters().len();
+    assert!(
+        at_start >= pending - 1,
+        "at most the poster that was in the making finished: {pending} -> {at_start}"
+    );
+    r.run(3_000);
+    assert_eq!(r.app.library().pending_posters().len(), at_start, "no poster is made while the film plays");
+    // Paused: they go on until every film has one.
+    r.act(Action::PlayPause);
+    for _ in 0..4000 {
+        r.step();
+        if r.app.library().pending_posters().is_empty() {
+            break;
+        }
+    }
+    assert!(r.app.library().pending_posters().is_empty(), "the posters were made once the film was paused");
+}

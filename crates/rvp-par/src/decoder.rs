@@ -78,6 +78,7 @@ fn run(sh: Arc<Shared>, factory: Factory) {
     // The epoch of the stream state inside the decoder: frames it finishes on its own (a decoder with a second thread)
     // belong to it, even if the caller has flushed since and the flush has not reached us yet.
     let mut state_epoch = sh.epoch.load(Ordering::Acquire);
+    let mut waited: u64 = 0;
     while !sh.stop.load(Ordering::Acquire) {
         let cmd = sh.inbox.lock().pop_front();
         let Some(cmd) = cmd else {
@@ -85,12 +86,16 @@ fn run(sh: Arc<Shared>, factory: Factory) {
             let busy = dec.pending() > 0;
             collect(&sh, &mut *dec, state_epoch);
             if busy {
-                std::thread::park_timeout(std::time::Duration::from_micros(300));
+                // The decoder inside has a thread of its own that is finishing something: look again soon (longer the longer it takes).
+                waited = (waited * 2).clamp(100, 1000);
+                std::thread::park_timeout(std::time::Duration::from_micros(waited));
             } else {
+                waited = 0;
                 std::thread::park();
             }
             continue;
         };
+        waited = 0;
         match cmd {
             Cmd::Packet(p, epoch) => {
                 if epoch == sh.epoch.load(Ordering::Acquire) {

@@ -23,6 +23,8 @@ struct Job {
     n: usize,
     next: AtomicUsize,
     done: AtomicUsize,
+    /// The thread of the `run` call, which sleeps once it has nothing left to do and is woken by whoever finishes the last task.
+    caller: Thread,
 }
 
 // SAFETY: `f` is `Sync` and only dereferenced while the owning `run` call is still waiting for the job.
@@ -40,7 +42,10 @@ impl Job {
             }
             // SAFETY: tasks are only handed out while `run` waits for `done == n`, so the closure is alive.
             unsafe { (*self.f)(i) };
-            self.done.fetch_add(1, Ordering::AcqRel);
+            // The last task wakes the caller (which may be asleep waiting for it).
+            if self.done.fetch_add(1, Ordering::AcqRel) + 1 == self.n {
+                self.caller.unpark();
+            }
         }
     }
 }
@@ -90,10 +95,16 @@ impl Pool {
         leaked
     }
 
-    fn wake_all(&self) {
-        for t in self.shared.threads.lock().iter() {
+    /// Wake `n` workers (as many as there are tasks beyond the caller's own): a worker that wakes to find nothing left costs a switch for
+    /// nothing, many times a frame.
+    fn wake(&self, n: usize) {
+        for t in self.shared.threads.lock().iter().take(n) {
             t.unpark();
         }
+    }
+
+    fn wake_all(&self) {
+        self.wake(usize::MAX);
     }
 }
 
@@ -132,12 +143,25 @@ impl Parallel for Pool {
         // SAFETY: the closure outlives this call, and `run` does not return before `done == n`, after which no
         // thread starts another task of this job.
         let f: *const (dyn Fn(usize) + Sync) = unsafe { std::mem::transmute(f) };
-        let job = Arc::new(Job { f, n, next: AtomicUsize::new(0), done: AtomicUsize::new(0) });
+        let job = Arc::new(Job {
+            f,
+            n,
+            next: AtomicUsize::new(0),
+            done: AtomicUsize::new(0),
+            caller: std::thread::current(),
+        });
         self.shared.jobs.lock().push(job.clone());
-        self.wake_all();
+        self.wake(n - 1);
         job.work();
+        // The tasks still running on other threads are nearly done: look for a moment, then sleep until the last one wakes this thread.
+        let mut spins = 0u32;
         while job.done.load(Ordering::Acquire) < n {
-            std::hint::spin_loop();
+            if spins < 200 {
+                spins += 1;
+                std::hint::spin_loop();
+            } else {
+                std::thread::park_timeout(std::time::Duration::from_millis(2));
+            }
         }
         self.shared.jobs.lock().retain(|j| !Arc::ptr_eq(j, &job));
     }

@@ -82,6 +82,43 @@ pub fn relax() {
     }
 }
 
+static SLEEP: AtomicUsize = AtomicUsize::new(0);
+
+/// Install how a waiting thread gives the processor away for about `micros` microseconds (a host with threads parks the thread for
+/// that long). Without it a wait is a spin, which is only right on a core of its own.
+pub fn set_sleep(f: fn(u32)) {
+    SLEEP.store(f as usize, Ordering::Release);
+}
+
+/// A wait loop that does not burn a core: it spins briefly (the awaited thread is usually about to finish), then sleeps for longer and longer
+/// (25 us up to 1 ms) through [`set_sleep`]. Make one before the loop and call [`Backoff::wait`] once per look at the condition.
+#[derive(Debug, Default)]
+pub struct Backoff {
+    n: u32,
+}
+
+impl Backoff {
+    /// A fresh wait.
+    pub const fn new() -> Self {
+        Self { n: 0 }
+    }
+
+    /// Wait a little before the next look.
+    pub fn wait(&mut self) {
+        self.n = self.n.saturating_add(1);
+        let p = SLEEP.load(Ordering::Acquire);
+        if p == 0 || self.n <= 40 {
+            core::hint::spin_loop();
+            return;
+        }
+        // 25, 50, 100, ... 1600 us, then it stays at the top.
+        let step = ((self.n - 41) / 4).min(6);
+        let micros = 25u32 << step;
+        // SAFETY: the value was stored by `set_sleep` from a valid `fn(u32)`.
+        unsafe { core::mem::transmute::<usize, fn(u32)>(p)(micros.clamp(25, 1000)) }
+    }
+}
+
 /// A spin lock: for the few instructions of handing a value between threads. It never puts a thread to sleep, so it
 /// is safe on a browser's main thread.
 pub struct SpinLock<T> {

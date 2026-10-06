@@ -72,11 +72,12 @@ impl MotionSlot {
 
     /// The motion, waiting for the parsing of its picture if it is not there yet.
     pub fn wait(&self) -> Arc<Motion> {
+        let mut b = rvp_core::par::Backoff::new();
         loop {
             if let Some(m) = self.cell.lock().as_ref() {
                 return m.clone();
             }
-            rvp_core::par::relax();
+            b.wait();
         }
     }
 }

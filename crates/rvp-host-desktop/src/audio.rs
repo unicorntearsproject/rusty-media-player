@@ -93,6 +93,12 @@ pub struct DesktopAudio {
     silent_carry: f64,
 }
 
+/// The ring's lock, whatever happened to the thread that held it last: the ring is plain numbers, so what a panic left is still usable, and
+/// neither the device's callback nor the player's thread may panic because of another thread's failure.
+fn lock_ring(m: &Mutex<Ring>) -> std::sync::MutexGuard<'_, Ring> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 impl DesktopAudio {
     /// A closed sink; `silent` never touches a device.
     pub fn new(silent: bool) -> Self {
@@ -139,7 +145,7 @@ impl DesktopAudio {
     }
 
     fn ring_sized(&self, frames: usize, channels: usize) {
-        *self.shared.ring.lock().unwrap() = Ring::new(frames * channels * RING_SECONDS);
+        *lock_ring(&self.shared.ring) = Ring::new(frames * channels * RING_SECONDS);
     }
 
     fn try_device(&mut self, want: AudioParams) -> Result<AudioParams, String> {
@@ -214,7 +220,7 @@ impl DesktopAudio {
                         return;
                     }
                     scratch.resize(frames * pc, 0.0);
-                    let got = shared.ring.lock().map_or(0, |mut r| r.pop_into(&mut scratch)) / pc.max(1);
+                    let got = lock_ring(&shared.ring).pop_into(&mut scratch) / pc.max(1);
                     let vol = f32::from_bits(shared.volume.load(Ordering::Relaxed));
                     for f in 0..frames {
                         for c in 0..device_channels {
@@ -246,7 +252,7 @@ impl DesktopAudio {
         self.silent_carry += dt * p.sample_rate as f64;
         let n = self.silent_carry as usize;
         self.silent_carry -= n as f64;
-        let mut ring = self.shared.ring.lock().unwrap();
+        let mut ring = lock_ring(&self.shared.ring);
         let take = (n * p.channels as usize).min(ring.len());
         ring.read += take as u64;
         self.shared.played_frames.fetch_add((take / p.channels.max(1) as usize) as u64, Ordering::Relaxed);
@@ -277,7 +283,7 @@ impl AudioSink for DesktopAudio {
 
     fn queued_frames(&self) -> usize {
         let ch = self.params.map_or(1, |p| p.channels.max(1) as usize);
-        let mut queued = self.shared.ring.lock().map_or(0, |r| r.len());
+        let mut queued = lock_ring(&self.shared.ring).len();
         if let (Output::Silent { last }, Some(p)) = (&self.out, self.params) {
             // No device: what the wall clock has played since the ring was last drained is gone too.
             if !self.shared.paused.load(Ordering::Relaxed) {
@@ -300,7 +306,7 @@ impl AudioSink for DesktopAudio {
         self.drain_silent();
         let Some(p) = self.params else { return 0 };
         let ch = p.channels.max(1) as usize;
-        let mut ring = self.shared.ring.lock().unwrap();
+        let mut ring = lock_ring(&self.shared.ring);
         let frames = (interleaved.len() / ch).min(ring.free() / ch);
         ring.push(&interleaved[..frames * ch]);
         self.written += frames as u64;
@@ -309,7 +315,7 @@ impl AudioSink for DesktopAudio {
 
     fn flush(&mut self) {
         self.drain_silent();
-        self.shared.ring.lock().unwrap().clear();
+        lock_ring(&self.shared.ring).clear();
     }
 
     fn set_paused(&mut self, paused: bool) {
@@ -368,5 +374,25 @@ mod tests {
         a.flush();
         assert_eq!(a.queued_frames(), 0);
         assert_eq!(a.backend(), "none");
+    }
+}
+
+#[cfg(test)]
+mod poison_tests {
+    use super::*;
+
+    #[test]
+    fn a_poisoned_ring_is_still_usable_by_both_threads() {
+        let m = Arc::new(Mutex::new(Ring::new(8)));
+        let m2 = m.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = m2.lock().unwrap();
+            panic!("a thread dies holding the ring");
+        })
+        .join();
+        assert!(m.lock().is_err(), "poisoned");
+        let mut r = lock_ring(&m);
+        r.clear();
+        assert_eq!(r.len(), 0);
     }
 }

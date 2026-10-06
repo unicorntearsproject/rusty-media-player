@@ -136,7 +136,7 @@ exist (CI does it in a Fedora container from the staged binary).
 
 **Flatpak.** `packaging/flatpak/io.github.unicorntearsproject.RustyWave.yml`: runtime `org.freedesktop.Platform//25.08`, `rust-stable` extension, the crates
 vendored offline from `cargo-sources.json` (regenerate with `cargo xtask dist flatpak-sources` after any `Cargo.lock` change; the generator is
-`tools/flatpak-cargo-generator.py`, MIT). Permissions: Wayland, fallback X11, PulseAudio (PipeWire's socket), `xdg-music:ro`, `xdg-videos:ro`, and the
+`tools/flatpak-cargo-generator.py`, MIT). Permissions: Wayland, fallback X11, PulseAudio (PipeWire's socket), `xdg-music` and `xdg-videos` (read and write: the tag editor), `--share=network` (a theme link; updates stay with Flatpak), `xdg-config/mimeapps.list` ("Set as default media player" edits the host's file, in place, and only if it exists), and the
 MPRIS names `org.mpris.MediaPlayer2.io.github.unicorntearsproject.RustyWave[.*]`; no GPU, no network, no home access (other places come through the file
 chooser portal). The manifest builds a release tag; `dist flatpak` rewrites the source between the `APP-SOURCE` markers to a tarball of the working
 tree. For Flathub, copy the manifest and `cargo-sources.json` to the Flathub repository with the tag and a commit.

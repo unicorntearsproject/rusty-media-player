@@ -413,7 +413,7 @@ jobs:
             gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign dist/SHA256SUMS
           fi
       # Pinned to a commit of the shared infrastructure repository (never a branch).
-      - uses: unicorntearsproject/rba-infra/.github/actions/publish-release@102c06c3d8b441cba481116c59e244475573d37e
+      - uses: unicorntearsproject/rba-infra/.github/actions/publish-release@51ab92eb061dedb4309b548f50b4669f03add548
         with:
           tag: ${{ github.ref_name }}
           release-dir: dist

@@ -64,11 +64,12 @@ impl JobSlot {
 
     /// The parsed picture, waiting for its parsing to finish.
     pub(crate) fn wait(&self) -> Box<PicJob> {
+        let mut b = rvp_core::par::Backoff::new();
         loop {
             if let Some(j) = self.job.lock().take() {
                 return j;
             }
-            rvp_core::par::relax();
+            b.wait();
         }
     }
 }

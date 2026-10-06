@@ -88,7 +88,69 @@ pub fn yuv420_rows_to_rgba(frame: &VideoFrame, out: &mut [u8], y0: usize, y1: us
     if c.bits == 8 {
         return wasm::rows(frame, &c, out, y0, y1);
     }
+    if c.bits == 8 {
+        return rows_8(frame, &c, out, y0, y1);
+    }
     scalar_rows(frame, &c, out, y0, y1, 0);
+}
+
+/// The 8-bit conversion written for the compiler: chunks of 16 pixels with fixed-size arrays, so every step is a loop over lanes it can
+/// vectorize (the chroma terms are computed once per pixel pair). Same arithmetic as [`scalar_rows`], bit for bit.
+fn rows_8(frame: &VideoFrame, c: &Coefs, out: &mut [u8], y0: usize, y1: usize) {
+    let w = frame.width as usize;
+    let (s0, s1, s2) = (frame.strides[0], frame.strides[1], frame.strides[2]);
+    const N: usize = 16;
+    for y in y0..y1 {
+        let yrow = &frame.planes[0][y * s0..y * s0 + w];
+        let cw = w.div_ceil(2);
+        let urow = &frame.planes[1][(y / 2) * s1..(y / 2) * s1 + cw];
+        let vrow = &frame.planes[2][(y / 2) * s2..(y / 2) * s2 + cw];
+        let orow = &mut out[(y - y0) * w * 4..(y - y0 + 1) * w * 4];
+        let mut x = 0;
+        while x + N <= w {
+            let yb: [u8; N] = yrow[x..x + N].try_into().unwrap_or([0; N]);
+            let ub: [u8; N / 2] = urow[x / 2..x / 2 + N / 2].try_into().unwrap_or([0; N / 2]);
+            let vb: [u8; N / 2] = vrow[x / 2..x / 2 + N / 2].try_into().unwrap_or([0; N / 2]);
+            let mut rv = [0i32; N];
+            let mut guv = [0i32; N];
+            let mut bu = [0i32; N];
+            for k in 0..N {
+                let u = ub[k / 2] as i32 - 128;
+                let v = vb[k / 2] as i32 - 128;
+                rv[k] = c.r_v * v + HALF;
+                guv[k] = HALF - c.g_u * u - c.g_v * v;
+                bu[k] = c.b_u * u + HALF;
+            }
+            let ob = &mut orow[x * 4..(x + N) * 4];
+            for k in 0..N {
+                let yl = (yb[k] as i32 - c.y_off) * c.ys;
+                ob[k * 4] = ((yl + rv[k]) >> 16).clamp(0, 255) as u8;
+                ob[k * 4 + 1] = ((yl + guv[k]) >> 16).clamp(0, 255) as u8;
+                ob[k * 4 + 2] = ((yl + bu[k]) >> 16).clamp(0, 255) as u8;
+                ob[k * 4 + 3] = 255;
+            }
+            x += N;
+        }
+        // The columns that are left (the end of the row).
+        if x < w {
+            scalar_tail(frame, c, orow, y, x);
+        }
+    }
+}
+
+/// Columns `x_from..width` of row `y`, into the row `orow` (the reference arithmetic).
+fn scalar_tail(frame: &VideoFrame, c: &Coefs, orow: &mut [u8], y: usize, x_from: usize) {
+    let w = frame.width as usize;
+    for x in x_from..w {
+        let yy = frame.planes[0][y * frame.strides[0] + x] as i32;
+        let u = frame.planes[1][(y / 2) * frame.strides[1] + x / 2] as i32 - 128;
+        let v = frame.planes[2][(y / 2) * frame.strides[2] + x / 2] as i32 - 128;
+        let yl = (yy - c.y_off) * c.ys;
+        orow[x * 4] = ((yl + c.r_v * v + HALF) >> 16).clamp(0, 255) as u8;
+        orow[x * 4 + 1] = ((yl - c.g_u * u - c.g_v * v + HALF) >> 16).clamp(0, 255) as u8;
+        orow[x * 4 + 2] = ((yl + c.b_u * u + HALF) >> 16).clamp(0, 255) as u8;
+        orow[x * 4 + 3] = 255;
+    }
 }
 
 /// Reference conversion of rows `y0..y1`, starting at column `x_from` (a multiple of 2; the vector code uses this for
@@ -378,5 +440,51 @@ mod tests {
         assert_eq!(out[0..4], out[4..8]); // x=0,1 share chroma
         assert_ne!(out[0..4], out[8..12]); // x=2 differs
         assert_eq!(out[8..12], out[12..16]);
+    }
+
+    /// The chunked 8-bit path gives exactly the bytes of the reference loop, for odd and even sizes, strides wider than the picture, every
+    /// matrix and both ranges.
+    #[test]
+    fn the_fast_8_bit_path_is_the_reference_bit_for_bit() {
+        let mut seed = 0x2545_f491u32;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed >> 8) as u8
+        };
+        for (w, h) in [(1usize, 2usize), (2, 2), (15, 4), (16, 4), (17, 6), (33, 8), (64, 2), (130, 10)] {
+            for m in [ColorMatrix::Bt601, ColorMatrix::Bt709, ColorMatrix::Bt2020] {
+                for r in [ColorRange::Limited, ColorRange::Full] {
+                    let (s0, s1) = (w + 3, w.div_ceil(2) + 5);
+                    let f = VideoFrame {
+                        width: w as u32,
+                        height: h as u32,
+                        format: PixelFormat::Yuv420p8,
+                        matrix: m,
+                        range: r,
+                        planes: [
+                            (0..s0 * h).map(|_| rnd()).collect(),
+                            (0..s1 * h.div_ceil(2)).map(|_| rnd()).collect(),
+                            (0..s1 * h.div_ceil(2)).map(|_| rnd()).collect(),
+                        ],
+                        strides: [s0, s1, s1],
+                        pts: 0,
+                    };
+                    let c = Coefs::of(&f);
+                    let (mut fast, mut slow) = (vec![0u8; w * h * 4], vec![0u8; w * h * 4]);
+                    rows_8(&f, &c, &mut fast, 0, h);
+                    scalar_rows(&f, &c, &mut slow, 0, h, 0);
+                    assert_eq!(fast, slow, "{w}x{h} {m:?} {r:?}");
+                    // A band of rows.
+                    if h >= 4 {
+                        let (mut a, mut b) = (vec![0u8; w * 2 * 4], vec![0u8; w * 2 * 4]);
+                        rows_8(&f, &c, &mut a, 2, 4);
+                        scalar_rows(&f, &c, &mut b, 2, 4, 0);
+                        assert_eq!(a, b, "{w}x{h} band");
+                    }
+                }
+            }
+        }
     }
 }

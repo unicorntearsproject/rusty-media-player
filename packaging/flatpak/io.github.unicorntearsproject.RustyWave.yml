@@ -18,9 +18,14 @@ finish-args:
   - --share=ipc
   # Sound through PipeWire's PulseAudio socket.
   - --socket=pulseaudio
-  # The user's music and videos, read only. Anywhere else the file chooser portal hands over what the user picks.
-  - --filesystem=xdg-music:ro
-  - --filesystem=xdg-videos:ro
+  # The user's music and videos, read and write (the tag editor rewrites files, safely: a temporary file beside the original, then a rename).
+  # Anywhere else the file chooser portal hands over what the user picks.
+  - --filesystem=xdg-music
+  - --filesystem=xdg-videos
+  # Fetching a theme from a link (a Claude Design page or a style sheet) the user pastes. Updates stay with Flatpak itself.
+  - --share=network
+  # "Set as default media player": the user's own mimeapps.list on the host (the one file, not the config folder).
+  - --filesystem=xdg-config/mimeapps.list
   # MPRIS: playerctl, the desktop's media widget and the media keys talk to org.mpris.MediaPlayer2.<name>.
   - --own-name=org.mpris.MediaPlayer2.io.github.unicorntearsproject.RustyWave
   - --own-name=org.mpris.MediaPlayer2.io.github.unicorntearsproject.RustyWave.*

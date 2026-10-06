@@ -311,9 +311,15 @@ impl AppServices for DesktopServices {
                     self.set_integration(true)?;
                 }
                 let mimes: Vec<&str> = types.iter().flat_map(|t| t.mimes.iter().copied()).collect();
-                let home = defaults::config_home().ok_or("cannot find the configuration folder")?;
-                defaults::set_linux_defaults(&home, defaults::DESKTOP_ID, &mimes)
-                    .map_err(|e| e.to_string())?;
+                let flatpak = rvp_update::Env::current().flatpak;
+                let home =
+                    defaults::real_config_home(flatpak).ok_or("cannot find the configuration folder")?;
+                if flatpak {
+                    defaults::set_linux_defaults_in_place(&home, defaults::DESKTOP_ID, &mimes)?;
+                } else {
+                    defaults::set_linux_defaults(&home, defaults::DESKTOP_ID, &mimes)
+                        .map_err(|e| e.to_string())?;
+                }
                 Ok(DefaultOutcome::Set(types.len()))
             }
         }

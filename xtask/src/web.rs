@@ -649,6 +649,48 @@ pub fn e2e(args: &[String]) -> Result<(), String> {
 /// Play the 1080p30 streams of `cargo xtask perf-fixtures` in the browser and report the dropped frames.
 /// Options: `--secs N` per stream (default 60), `--only NAME` (a part of the file name), `--single` for the
 /// single-threaded baseline only, `--both` for both builds.
+/// The page's server (`xtask serve`) as a child process that lives for the whole run and is stopped when this is dropped.
+struct Server(Option<std::process::Child>);
+
+impl Server {
+    fn start(port: &str) -> Result<Server, String> {
+        // Already one on that port (a developer's own): use it and leave it alone.
+        let addr = format!("127.0.0.1:{port}");
+        if std::net::TcpStream::connect(&addr).is_ok() {
+            return Ok(Server(None));
+        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let child = Command::new(exe)
+            .args(["serve", "--port", port])
+            .current_dir(root())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("could not start the page's server: {e}"))?;
+        let mut server = Server(Some(child));
+        for _ in 0..100 {
+            if std::net::TcpStream::connect(&addr).is_ok() {
+                return Ok(server);
+            }
+            if let Some(c) = &mut server.0 {
+                if let Ok(Some(st)) = c.try_wait() {
+                    return Err(format!("the page's server stopped at once ({st})"));
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        Err("the page's server did not come up".into())
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        if let Some(c) = &mut self.0 {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
 pub fn perf(args: &[String]) -> Result<(), String> {
     let root = root();
     let e2e = root.join("tests/e2e");
@@ -676,6 +718,9 @@ pub fn perf(args: &[String]) -> Result<(), String> {
             return Err("npm install failed".into());
         }
     }
+    // One server for every pass (a pass that starts its own stops it on the way out, and the next one meets a closed port).
+    let port = std::env::var("RVP_E2E_PORT").unwrap_or_else(|_| "4173".into());
+    let _server = Server::start(&port)?;
     let passes: &[(&str, &str)] = if both {
         &[("single-threaded", "threads=0"), ("threaded", "")]
     } else if single {
@@ -693,6 +738,8 @@ pub fn perf(args: &[String]) -> Result<(), String> {
             .env("RVP_PERF_SECS", &secs)
             .env("RVP_PERF_ONLY", &only)
             .env("RVP_PERF_QUERY", query)
+            .env("RVP_E2E_PORT", &port)
+            .env("RVP_E2E_OUTPUT", root.join("target/perf-out").join(name))
             .env("RVP_E2E_THREADS", if query.is_empty() { "1" } else { "0" })
             .status()
             .map_err(|e| e.to_string())?;

@@ -11,14 +11,17 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::Thread;
 use std::time::Duration;
 
-/// What waiting threads do between looks at what they wait for: give the processor away briefly.
-fn relax() {
-    std::thread::park_timeout(Duration::from_micros(60));
+/// What waiting threads do between looks at what they wait for: sleep for a little, longer the longer they have waited.
+fn sleep(micros: u32) {
+    std::thread::park_timeout(Duration::from_micros(micros as u64));
 }
 
 fn install_relax() {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| rvp_core::par::set_relax(relax));
+    ONCE.call_once(|| {
+        rvp_core::par::set_relax(|| sleep(60));
+        rvp_core::par::set_sleep(sleep);
+    });
 }
 
 /// Pictures that may wait for reconstruction before the parsing side is made to wait.
@@ -34,6 +37,28 @@ struct Shared {
     pictures: AtomicUsize,
     stop: AtomicBool,
     thread: SpinLock<Option<Thread>>,
+    /// The thread waiting for the worker (to catch up, or to go idle): woken when the worker finishes an event.
+    waiter: SpinLock<Option<Thread>>,
+}
+
+impl Shared {
+    fn wake_waiter(&self) {
+        if let Some(t) = self.waiter.lock().as_ref() {
+            t.unpark();
+        }
+    }
+
+    /// Sleep until `done()` (the worker wakes this thread after each event; the timeout is only a safety net).
+    fn wait_until(&self, done: impl Fn() -> bool) {
+        while !done() {
+            *self.waiter.lock() = Some(std::thread::current());
+            // Look again after registering, so a wake between the check and the registration is not lost.
+            if done() {
+                break;
+            }
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+    }
 }
 
 /// A [`ReconExecutor`] running a [`Reconstructor`] on its own thread. Only for threads that may wait (the decoder
@@ -85,6 +110,7 @@ fn run(sh: Arc<Shared>) {
         }
         // Last, so that a zero count means every frame is already visible.
         sh.queued.fetch_sub(1, Ordering::AcqRel);
+        sh.wake_waiter();
     }
 }
 
@@ -93,9 +119,7 @@ impl ReconExecutor for ThreadedRecon {
         let is_picture = matches!(ev, ReconEvent::Picture(_));
         if is_picture {
             // Do not run arbitrarily far ahead of the reconstruction (each picture holds its macroblock data).
-            while self.sh.pictures.load(Ordering::Acquire) >= MAX_PICTURES_QUEUED {
-                std::thread::park_timeout(Duration::from_micros(200));
-            }
+            self.sh.wait_until(|| self.sh.pictures.load(Ordering::Acquire) < MAX_PICTURES_QUEUED);
             self.sh.pictures.fetch_add(1, Ordering::AcqRel);
         }
         self.sh.queued.fetch_add(1, Ordering::AcqRel);
@@ -112,9 +136,7 @@ impl ReconExecutor for ThreadedRecon {
     }
 
     fn wait_idle(&mut self) {
-        while self.sh.queued.load(Ordering::Acquire) > 0 {
-            std::thread::park_timeout(Duration::from_micros(200));
-        }
+        self.sh.wait_until(|| self.sh.queued.load(Ordering::Acquire) == 0);
     }
 }
 
@@ -133,6 +155,8 @@ struct ParseShared {
     active: AtomicUsize,
     stop: AtomicBool,
     threads: SpinLock<Vec<Thread>>,
+    /// The thread that is waiting for the workers to catch up: woken when a task finishes.
+    waiter: SpinLock<Option<Thread>>,
 }
 
 /// Parses pictures on a few threads. Tasks start in the order they are submitted, which is what keeps a picture's wait
@@ -151,6 +175,7 @@ impl ParseWorkers {
             active: AtomicUsize::new(0),
             stop: AtomicBool::new(false),
             threads: SpinLock::new(Vec::new()),
+            waiter: SpinLock::new(None),
         });
         for _ in 0..n.max(1) {
             let w = sh.clone();
@@ -162,6 +187,9 @@ impl ParseWorkers {
                         Some(t) => {
                             t();
                             w.active.fetch_sub(1, Ordering::AcqRel);
+                            if let Some(t) = w.waiter.lock().as_ref() {
+                                t.unpark();
+                            }
                         }
                         None => std::thread::park(),
                     }
@@ -176,7 +204,11 @@ impl ParseRunner for ParseWorkers {
     fn spawn(&mut self, job: Task) {
         // Do not run far ahead: every unfinished picture holds its slice data and macroblock arrays.
         while self.sh.active.load(Ordering::Acquire) >= self.limit {
-            std::thread::park_timeout(Duration::from_micros(200));
+            *self.sh.waiter.lock() = Some(std::thread::current());
+            if self.sh.active.load(Ordering::Acquire) < self.limit {
+                break;
+            }
+            std::thread::park_timeout(Duration::from_millis(5));
         }
         self.sh.active.fetch_add(1, Ordering::AcqRel);
         self.sh.queue.lock().push_back(job);

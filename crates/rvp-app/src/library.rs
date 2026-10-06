@@ -299,9 +299,17 @@ impl App {
             self.lib.scanner.start_posters(pending);
         }
         self.lib_refresh_resume(host);
-        // Measuring is background work: it waits while a picture is playing (decoding for the measurement would take frames).
+        // Measuring and making posters is background work: it waits while a picture is on the way (playing, or just started or seeking:
+        // decoding for them would take the frames), and goes on when the video is paused or ended. Only reading folders goes on, since it
+        // takes headers and tags, not pictures.
         let video_playing = self.session.as_ref().is_some_and(|s| {
-            s.container_has_video() && matches!(s.state(), rvp_player::SessionState::Playing)
+            s.container_has_video()
+                && matches!(
+                    s.state(),
+                    rvp_player::SessionState::Playing
+                        | rvp_player::SessionState::Buffering
+                        | rvp_player::SessionState::Opening
+                )
         });
         if self.lib.scanner.busy() && (self.lib.scanner.scanning() || !video_playing) {
             match self.lib.scanner.tick(&mut self.lib.lib, host) {
