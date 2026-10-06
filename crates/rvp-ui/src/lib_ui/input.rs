@@ -377,6 +377,9 @@ impl Ui {
     /// What is at (`x`, `y`).
     pub(crate) fn lib_hit(&mut self, x: f32, y: f32, g: &Geom, model: &UiModel, ctx: &LibCtx<'_>) -> LibHit {
         let s = self.scale;
+        if self.lib.tagform.is_some() {
+            return self.tagform_hit(x, y, g.m.w, g.m.h);
+        }
         if self.lib.prompt.is_some() {
             let (ok, cancel) = self.prompt_buttons(g);
             return if ok.contains(x, y) {
@@ -639,8 +642,12 @@ impl Ui {
                 self.keyboard_mode = true;
                 let before = out.len();
                 let had_menu = !self.menu.is_empty();
-                let (zone, view, detail, prompt) =
-                    (self.lib.zone, self.lib.view, self.lib.detail, self.lib.prompt.is_some());
+                let (zone, view, detail, prompt) = (
+                    self.lib.zone,
+                    self.lib.view,
+                    self.lib.detail,
+                    self.lib.prompt.is_some() || self.lib.tagform.is_some(),
+                );
                 let sel = self.lib.sel;
                 self.lib_key(key, mods, *repeat, now_us, model, ctx, &mut out);
                 self.key_used = out.len() > before
@@ -651,6 +658,7 @@ impl Ui {
                     || detail != self.lib.detail
                     || prompt
                     || self.lib.prompt.is_some()
+                    || self.lib.tagform.is_some()
                     || sel != self.lib.sel
                     || self.lib.zone == Zone::Search
                     || matches!(key, Key::Escape | Key::Enter)
@@ -660,7 +668,9 @@ impl Ui {
                 // Pasted text goes where typing goes: a name prompt, else the search box (one line, no control characters).
                 let clean: alloc::string::String =
                     text.chars().filter(|c| !c.is_control()).take(200).collect();
-                if let Some(p) = &mut self.lib.prompt {
+                if self.lib.tagform.is_some() {
+                    self.tagform_paste(&clean);
+                } else if let Some(p) = &mut self.lib.prompt {
                     let room = 80usize.saturating_sub(p.text.chars().count());
                     p.text.extend(clean.chars().take(room));
                 } else if self.lib.zone == Zone::Search && !clean.is_empty() {
@@ -767,7 +777,7 @@ impl Ui {
         let hit = self.lib_hit(x, y, &g, model, ctx);
         match button {
             PointerButton::Secondary => {
-                if self.lib.prompt.is_some() {
+                if self.lib.prompt.is_some() || self.lib.tagform.is_some() {
                     return;
                 }
                 let items = match hit {
@@ -919,6 +929,7 @@ impl Ui {
                     self.menu_hover(pi, ri);
                 }
             }
+            LibHit::TagField(_) | LibHit::TagButton(_) => self.tagform_click(hit),
             LibHit::PromptOk => self.confirm_prompt(),
             LibHit::PromptCancel => self.lib.prompt = None,
             LibHit::Rail(v) => self.show_view(v),
@@ -1276,6 +1287,10 @@ impl Ui {
     ) {
         let _ = now_us;
         let g = self.lib_geom(model, ctx);
+        if self.lib.tagform.is_some() {
+            self.tagform_key(key, mods);
+            return;
+        }
         if self.lib.prompt.is_some() {
             self.prompt_key(key, mods);
             return;
@@ -1362,6 +1377,23 @@ impl Ui {
                 .and_then(|e| self.ent_item(e.kind, ctx, model));
             if let Some(id) = item {
                 return out.push(Action::Lib(LibAction::ToggleFavorite(id)));
+            }
+        }
+        // E edits the tags of the selected song.
+        if plain && !mods.shift && model.app.tags && matches!(key, Key::Char('e' | 'E')) {
+            self.ensure_rows(model, ctx, &g);
+            let kind =
+                self.lib.sel.and_then(|i| self.lib.rows.as_ref().and_then(|r| r.ents.get(i))).map(|e| e.kind);
+            match kind {
+                Some(EntKind::Track { id, .. }) => {
+                    return out.push(Action::Lib(LibAction::EditTags(Scope::Track(id))));
+                }
+                Some(EntKind::Album(ai)) => {
+                    if let Some(a) = ctx.lib.albums().get(ai) {
+                        return out.push(Action::Lib(LibAction::EditTags(Scope::Album(a.id))));
+                    }
+                }
+                _ => {}
             }
         }
         if view == View::Visualizer && plain && !mods.shift {

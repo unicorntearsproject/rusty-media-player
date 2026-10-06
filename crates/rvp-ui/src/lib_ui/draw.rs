@@ -97,7 +97,7 @@ impl Ui {
     }
 
     /// A cover (or a stand-in) in `r`.
-    fn draw_cover(
+    pub(crate) fn draw_cover(
         &mut self,
         fb: &mut FrameBuffer,
         ctx: &LibCtx<'_>,
@@ -301,6 +301,9 @@ impl Ui {
         self.draw_audio_panel(fb, model);
         if self.lib.prompt.is_some() {
             self.draw_prompt(fb, &g);
+        }
+        if self.lib.tagform.is_some() {
+            self.draw_tagform(fb, g.m.w, g.m.h, ctx);
         }
         self.draw_app_dialog(fb, model);
         self.lib.animated = animated;

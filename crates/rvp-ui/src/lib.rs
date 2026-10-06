@@ -36,6 +36,9 @@ pub use audio_panel::{AudioControl, AudioPanelGeom};
 pub use dialog::{DialogButton, DialogControl, DialogGeom, DialogSpec, DialogToggle};
 pub use font::{FontData, FontLoader};
 pub use gfx::{FrameBuffer, Paint, RectF};
-pub use lib_ui::{Detail, Enqueue, LibAction, LibCtx, LibHit, LibUi, Mode, Scope, UiCommand, View};
+pub use lib_ui::{
+    CoverAction, Detail, Enqueue, LibAction, LibCtx, LibHit, LibUi, Mode, Scope, TagField, TagFormSpec,
+    TagTarget, UiCommand, View,
+};
 pub use model::{AppModel, ChapterItem, MediaState, PlaylistEntry, TrackItem, UiModel, format_time};
 pub use ui::{Cursor, HIDE_AFTER_US, Layout, Target, Ui, UiConfig};

@@ -84,6 +84,8 @@ pub(crate) struct LibState {
     pub resume_sig: Option<u64>,
     /// The library revision the poster job last looked at.
     pub poster_rev: u64,
+    /// The tag editor's picture and the job that writes the songs.
+    pub tags: crate::tagedit::TagState,
 }
 
 impl LibState {
@@ -111,6 +113,7 @@ impl LibState {
             resume: BTreeMap::new(),
             resume_sig: None,
             poster_rev: u64::MAX,
+            tags: Default::default(),
         }
     }
 }
@@ -314,6 +317,7 @@ impl App {
         }
         self.lib_load_art(host);
         self.lib_imports(host, now);
+        self.tag_tick(host, now);
         self.refresh_now_meta(now);
         self.auto_switch_mode();
         self.lib_viz_tick(now);
@@ -743,6 +747,7 @@ impl App {
                 );
                 self.lib_save_playlists(host);
             }
+            LibAction::EditTags(scope) => self.open_tag_form(host, scope, now),
             LibAction::About(n) => match n {
                 0 => self.effects.push(Effect::OpenUrl(ABOUT_BUCKET_URL.into())),
                 1 => self.effects.push(Effect::OpenUrl(ABOUT_X_URL.into())),
@@ -922,6 +927,10 @@ impl App {
                     self.ui.show_toast(&format!("Made playlist {shown}"), now);
                     self.lib_save_playlists(host);
                 }
+                UiCommand::SaveTags { target, changes, cover } => {
+                    self.start_tag_job(target, changes, cover, now)
+                }
+                UiCommand::PickCover => self.effects.push(Effect::PickCover),
                 UiCommand::RenamePlaylist { id, name } => {
                     self.lib.lib.rename_playlist(id, &name);
                     self.lib_save_playlists(host);

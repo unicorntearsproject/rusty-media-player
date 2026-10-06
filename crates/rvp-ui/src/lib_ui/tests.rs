@@ -1354,3 +1354,171 @@ fn about_rw_is_last_in_the_rail_and_opens_a_page_with_links_and_the_version() {
     let ids: Vec<u8> = r.ui.about_page(None, g.m.body, &r.m).iter().map(|b| b.id).collect();
     assert_eq!(ids, [2]);
 }
+
+// ---- the tag editor -------------------------------------------------------------------------------------------------------------
+
+fn spec(read_only: Option<&str>) -> super::TagFormSpec {
+    use super::{TagField as F, TagTarget};
+    super::TagFormSpec {
+        title: "Edit tags".into(),
+        subtitle: "01 One.mp3".into(),
+        target: TagTarget::Track(7),
+        fields: vec![
+            (F::Title, "Old title".into(), false),
+            (F::Artist, "Old artist".into(), false),
+            (F::Album, String::new(), true),
+            (F::AlbumArtist, String::new(), false),
+            (F::Genre, "Rock".into(), false),
+            (F::TrackNo, "3".into(), false),
+            (F::TrackTotal, "12".into(), false),
+            (F::DiscNo, String::new(), false),
+            (F::DiscTotal, String::new(), false),
+            (F::Year, "1999".into(), false),
+        ],
+        art: 0,
+        read_only: read_only.map(String::from),
+    }
+}
+
+fn commands(r: &mut Rig) -> Vec<UiCommand> {
+    r.ui.take_commands()
+}
+
+#[test]
+fn the_tag_form_fits_every_window_keeps_to_digits_and_sends_only_what_changed() {
+    for (w, h) in [(1280, 720), (800, 560), (480, 640), (320, 560)] {
+        let mut r = Rig::new();
+        r.ui.set_size(w, h, 1.0);
+        r.ui.open_tag_form(spec(None));
+        let l = r.ui.tagform_layout(w as f32, h as f32).unwrap();
+        assert!(l.card.x >= -0.5 && l.card.right() <= w as f32 + 0.5, "{w}x{h}: {:?}", l.card);
+        assert!(l.card.y >= -0.5, "{w}x{h}");
+        // No two boxes overlap and every box and button is inside the card.
+        for (i, a) in l.fields.iter().enumerate() {
+            assert!(a.2.x >= l.card.x && a.2.right() <= l.card.right() + 0.5, "{w}x{h}: box {i} {:?}", a.2);
+            for b in l.fields.iter().skip(i + 1) {
+                let (p, q) = (a.2, b.2);
+                assert!(
+                    p.right() <= q.x + 0.5
+                        || q.right() <= p.x + 0.5
+                        || p.bottom() <= q.y + 0.5
+                        || q.bottom() <= p.y + 0.5,
+                    "{w}x{h}: boxes overlap"
+                );
+            }
+        }
+        for b in &l.buttons {
+            assert!(b.rect.x >= l.card.x - 0.5 && b.rect.right() <= l.card.right() + 0.5, "{w}x{h}: {b:?}");
+        }
+        r.draw();
+    }
+    let mut r = Rig::new();
+    r.ui.open_tag_form(spec(None));
+    assert!(r.ui.tag_form_open() && r.ui.lib_state().typing());
+    // Typing goes to the focused box; Tab moves; digits only in a number box.
+    r.typed("!");
+    r.key(Key::Other("Tab".into()));
+    r.key(Key::Other("Backspace".into()));
+    r.typed("Z");
+    for _ in 0..4 {
+        r.key(Key::Other("Tab".into()));
+    }
+    r.typed("a7");
+    r.key_mod(Key::Other("Tab".into()), Modifiers { shift: true, ..Modifiers::default() });
+    r.typed("x"); // back on the genre
+    // Nothing is sent until Save; Enter is Save.
+    assert!(commands(&mut r).is_empty());
+    r.key(Key::Enter);
+    let cmds = commands(&mut r);
+    assert_eq!(cmds.len(), 1);
+    let UiCommand::SaveTags { target, changes, cover } = &cmds[0] else { panic!("{cmds:?}") };
+    assert_eq!(*target, super::TagTarget::Track(7));
+    assert_eq!(*cover, super::CoverAction::Keep);
+    use super::TagField as F;
+    assert_eq!(
+        changes,
+        &[
+            (F::Title, Some("Old title!".into())),
+            (F::Artist, Some("Old artisZ".into())),
+            (F::Genre, Some("Rockx".into())),
+            (F::TrackNo, Some("37".into())),
+        ]
+    );
+    assert!(!r.ui.tag_form_open());
+}
+
+#[test]
+fn the_tag_form_clears_a_box_cancels_and_closes_read_only_with_the_reason() {
+    use super::TagField as F;
+    let mut r = Rig::new();
+    r.ui.open_tag_form(spec(None));
+    for _ in 0..9 {
+        r.key(Key::Other("Backspace".into()));
+    }
+    r.key(Key::Enter);
+    let cmds = commands(&mut r);
+    let UiCommand::SaveTags { changes, .. } = &cmds[0] else { panic!("{cmds:?}") };
+    assert_eq!(changes, &[(F::Title, None)], "an emptied box clears the tag");
+    // Escape cancels; saving without a change sends nothing.
+    r.ui.open_tag_form(spec(None));
+    r.typed("abc");
+    r.key(Key::Escape);
+    assert!(!r.ui.tag_form_open() && commands(&mut r).is_empty());
+    r.ui.open_tag_form(spec(None));
+    r.key(Key::Enter);
+    assert!(!r.ui.tag_form_open() && commands(&mut r).is_empty(), "nothing changed, nothing to do");
+    // A pasted line goes into the focused box, without control characters, and only digits into a number box.
+    r.ui.open_tag_form(spec(None));
+    r.handle(InputEvent::Paste("  more\nlines\t".into()));
+    r.key(Key::Enter);
+    let cmds = commands(&mut r);
+    let UiCommand::SaveTags { changes, .. } = &cmds[0] else { panic!("{cmds:?}") };
+    assert_eq!(changes, &[(F::Title, Some("Old title  morelines".into()))]);
+    // Read-only: the reason is on the card, typing does nothing, Enter and the one button close it.
+    r.ui.open_tag_form(spec(Some("This browser cannot change files.")));
+    r.typed("zzz");
+    r.draw();
+    let l = r.ui.tagform_layout(1280.0, 720.0).unwrap();
+    assert_eq!(l.buttons.len(), 1, "just Close");
+    let (x, y) = center(l.buttons[0].rect);
+    r.click(x, y);
+    assert!(!r.ui.tag_form_open() && commands(&mut r).is_empty());
+    r.ui.open_tag_form(spec(Some("no")));
+    r.key(Key::Enter);
+    assert!(!r.ui.tag_form_open());
+}
+
+#[test]
+fn the_tag_form_buttons_and_boxes_answer_the_pointer() {
+    let mut r = Rig::new();
+    r.ui.open_tag_form(spec(None));
+    let l = r.ui.tagform_layout(1280.0, 720.0).unwrap();
+    // A click in a box focuses it; the keys then go there.
+    let artist = l.fields[1].2;
+    r.click(artist.cx(), artist.cy());
+    r.typed("!");
+    // Replace asks the app for a picture; Remove toggles; Save sends it all.
+    let by = |id: u8| l.buttons.iter().find(|b| b.id == id).unwrap().rect;
+    r.click(by(2).cx(), by(2).cy());
+    assert_eq!(commands(&mut r), [UiCommand::PickCover]);
+    r.ui.set_tag_cover(Some("front.jpg".into()));
+    r.click(by(3).cx(), by(3).cy());
+    r.click(by(3).cx(), by(3).cy());
+    r.click(by(0).cx(), by(0).cy());
+    let cmds = commands(&mut r);
+    let UiCommand::SaveTags { changes, cover, .. } = &cmds[0] else { panic!("{cmds:?}") };
+    assert_eq!(changes, &[(super::TagField::Artist, Some("Old artist!".into()))]);
+    assert_eq!(
+        *cover,
+        super::CoverAction::Keep,
+        "Remove twice is not Remove, and it drops the chosen picture"
+    );
+    // While it is open nothing behind it takes clicks or the right button, and Cancel closes it.
+    r.ui.open_tag_form(spec(None));
+    let l = r.ui.tagform_layout(1280.0, 720.0).unwrap();
+    r.right_click(10.0, 300.0);
+    assert!(!r.ui.menu_open());
+    let c = l.buttons.iter().find(|b| b.id == 1).unwrap().rect;
+    r.click(c.cx(), c.cy());
+    assert!(!r.ui.tag_form_open());
+}

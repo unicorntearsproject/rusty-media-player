@@ -22,6 +22,7 @@ pub mod storage;
 pub mod update_cli;
 pub mod walk;
 pub mod window;
+pub mod writer;
 
 pub use links::open_url;
 

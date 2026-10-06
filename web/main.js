@@ -13,6 +13,7 @@ const addInput = document.getElementById("file-add");
 // Folder picker fallback for the library, and the picker for playlist files.
 const dirInput = document.getElementById("dir");
 const playlistInput = document.getElementById("playlist-file");
+const coverInput = document.getElementById("cover-file");
 const statusEl = document.getElementById("status");
 
 // ---- the wasm module: shared-memory build with worker threads when the page can have it ------------------
@@ -197,6 +198,9 @@ function effects() {
     } else if (e === "import") {
       playlistInput.value = "";
       playlistInput.click();
+    } else if (e === "cover") {
+      coverInput.value = "";
+      coverInput.click();
     } else if (e.startsWith("open:")) {
       const url = e.slice(5);
       // Only web addresses, in a new tab that cannot reach back into the player.
@@ -282,6 +286,80 @@ async function restoreFolders() {
     } catch { /* the folder is gone or the permission was withdrawn: it stays unconnected until the user rescans it */ }
   }
 }
+
+coverInput.addEventListener("change", async () => {
+  const f = coverInput.files && coverInput.files[0];
+  if (!f) return;
+  if (f.size > 8 << 20) {
+    player.toast("That picture is too big (8 MB at most)");
+    return;
+  }
+  player.cover_picked(f.name, new Uint8Array(await f.arrayBuffer()));
+});
+
+// ---- writing library files (the tag editor) --------------------------------------------------------------------------
+// Only through a folder's File System Access handle, with the person's permission; the browser writes a swap file and replaces the
+// file only when it is complete, so a file is the old one or the whole new one.
+
+const writes = new Map();
+const writeGrants = new Map();
+let writeNext = 0;
+
+window.rvpCanWrite = (root) => {
+  if (typeof window.showDirectoryPicker !== "function") {
+    return "This browser cannot change files in a folder you open. Chrome, Edge and other Chromium browsers can.";
+  }
+  const dir = store.handles.get(root);
+  if (!dir) return "This folder was added without write access. Add it again with the folder picker, then edit its tags.";
+  // Ask now, inside the person's click: the answer is awaited when the file is written.
+  try {
+    writeGrants.set(root, (async () => {
+      const mode = { mode: "readwrite" };
+      return (await dir.queryPermission(mode)) === "granted" || (await dir.requestPermission(mode)) === "granted";
+    })());
+  } catch { /* the write reports it */ }
+  return "";
+};
+
+window.rvpWriteFile = (root, path, bytes) => {
+  const id = ++writeNext;
+  const copy = new Uint8Array(bytes); // the wasm memory may move or be reused
+  writes.set(id, undefined);
+  (async () => {
+    try {
+      const dir = store.handles.get(root);
+      if (!dir) throw new Error("This folder was added without write access.");
+      let granted = false;
+      try { granted = await writeGrants.get(root); } catch { /* asked below */ }
+      if (!granted) granted = (await dir.queryPermission({ mode: "readwrite" })) === "granted";
+      if (!granted) throw new Error("The browser did not allow changing files in this folder.");
+      const parts = path.split("/").filter((p) => p && p !== "." && p !== "..");
+      if (!parts.length) throw new Error("That path is not inside the folder.");
+      let d = dir;
+      for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p);
+      const fh = await d.getFileHandle(parts[parts.length - 1]); // it must exist: nothing is created
+      const w = await fh.createWritable();
+      try {
+        await w.write(copy);
+        await w.close();
+      } catch (e) {
+        try { await w.abort(); } catch { /* gone already */ }
+        throw e;
+      }
+      writes.set(id, { ok: true, text: "" });
+    } catch (e) {
+      writes.set(id, { ok: false, text: String((e && e.message) || e) });
+    }
+  })();
+  return id;
+};
+
+window.rvpWritePoll = (id) => {
+  const v = writes.get(id);
+  if (v === undefined) return undefined;
+  writes.delete(id);
+  return v;
+};
 
 function download(name, mime, data) {
   const url = URL.createObjectURL(new Blob([data], { type: mime }));

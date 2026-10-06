@@ -380,6 +380,7 @@ impl App {
                 Integration::On => Some(true),
             },
             links: self.links,
+            tags: self.can_edit_tags,
         }
     }
 

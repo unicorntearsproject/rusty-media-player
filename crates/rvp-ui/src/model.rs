@@ -76,6 +76,8 @@ pub struct AppModel {
     pub integration: Option<bool>,
     /// The host can open a web page in the person's browser (the About page's links are buttons; else they are text).
     pub links: bool,
+    /// The host can change library files: "Edit tags" is offered.
+    pub tags: bool,
 }
 
 /// Everything the UI needs to draw and to build its menus.

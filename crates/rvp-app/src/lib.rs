@@ -16,6 +16,7 @@ mod restore;
 mod services;
 mod setup;
 mod snapshot;
+mod tagedit;
 mod theme_ui;
 
 pub use restore::{POSITION_KEY, QUEUE_KEY, SavedItem, SavedQueue};
@@ -85,6 +86,8 @@ pub enum Effect {
     Forget(String),
     /// Show the file picker for playlist files (M3U, M3U8, PLS).
     ImportPlaylist,
+    /// Ask for a picture to use as a cover (the tag editor's Replace button); the host answers with [`App::cover_picked`].
+    PickCover,
     /// Open a web page (an `https` address) in the person's browser: a new tab in a page, the system browser on a desktop.
     OpenUrl(String),
     /// Give the user a file (an exported playlist).
@@ -123,6 +126,8 @@ pub struct App {
     base_dirty: bool,
     /// The host opens web links (set every tick).
     links: bool,
+    /// The host can replace library files (set every tick): the tag editor is offered.
+    can_edit_tags: bool,
     force_draw: bool,
     last_drawn: Option<UiModel>,
     last_has_media: bool,
@@ -214,6 +219,7 @@ impl App {
             drawn_size: (0, 0),
             base_dirty: true,
             links: false,
+            can_edit_tags: false,
             force_draw: true,
             last_drawn: None,
             last_has_media: false,
@@ -870,6 +876,7 @@ impl App {
     {
         let t0 = host.clock().now_us();
         self.links = host.opens_links();
+        self.can_edit_tags = host.file_writer().is_some();
         self.setup_tick(host);
         self.theme_tick(host);
         self.pump(host);

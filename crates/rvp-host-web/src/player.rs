@@ -133,6 +133,7 @@ impl WebPlayer {
             media: None,
             tap: None,
             net: crate::net::WebNet,
+            writer: crate::writer::WebWriter,
         };
         let app = App::new(Rc::new(WebCodecs), UiConfig { reduce_motion });
         Ok(WebPlayer { host, app, next_file: 0 })
@@ -373,6 +374,7 @@ impl WebPlayer {
                 Effect::Forget(id) => v.push(format!("forget:{id}")),
                 Effect::ImportPlaylist => v.push("import".into()),
                 Effect::OpenUrl(url) => v.push(format!("open:{url}")),
+                Effect::PickCover => v.push("cover".into()),
                 Effect::Download { name, mime, data } => {
                     self.host.downloads.push((name, mime, data));
                     v.push("download".into());
@@ -383,6 +385,12 @@ impl WebPlayer {
             v.push(format!("fullscreen:{on}"));
         }
         v
+    }
+
+    /// A picture was chosen for the tag editor's cover (its name and bytes).
+    pub fn cover_picked(&mut self, name: &str, bytes: Vec<u8>) {
+        let now = rvp_host::HostClock::now_us(&self.host.clock);
+        self.app.cover_picked(name, bytes, now);
     }
 
     /// The CSS cursor to show: `default`, `pointer`, `grabbing` or `none`.

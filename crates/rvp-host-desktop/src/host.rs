@@ -213,6 +213,8 @@ pub struct DesktopHost {
     pub media: Option<DesktopNowPlaying>,
     /// Update checks and the app-menu entry (off in scripted runs unless asked for).
     pub services: Option<crate::services::DesktopServices>,
+    /// Replaces library files (the tag editor).
+    pub writer: crate::writer::DesktopWriter,
     /// Fetching a link for the theme dialog.
     pub net: crate::net::DesktopNet,
 }
@@ -230,6 +232,7 @@ impl DesktopHost {
             library: DesktopLibrary::new(),
             media: None,
             services: None,
+            writer: Default::default(),
             net: crate::net::DesktopNet::new(),
         }
     }
@@ -273,6 +276,9 @@ impl Host for DesktopHost {
     }
     fn net(&mut self) -> Option<&mut dyn rvp_host::Net> {
         Some(&mut self.net)
+    }
+    fn file_writer(&mut self) -> Option<&mut dyn rvp_host::FileWriter> {
+        Some(&mut self.writer)
     }
     fn app_services(&mut self) -> Option<&mut dyn rvp_host::AppServices> {
         self.services.as_mut().map(|s| s as &mut dyn rvp_host::AppServices)

@@ -70,6 +70,31 @@ pub struct Search {
     pub videos: Vec<crate::video::VideoId>,
 }
 
+/// Tag changes to show at once (see [`Library::patch_tags`]): `Some` replaces the field (an empty text or a 0 clears it).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TagPatch {
+    /// Title.
+    pub title: Option<String>,
+    /// Artist.
+    pub artist: Option<String>,
+    /// Album.
+    pub album: Option<String>,
+    /// Album artist.
+    pub album_artist: Option<String>,
+    /// Genre.
+    pub genre: Option<String>,
+    /// Track number.
+    pub track_no: Option<u16>,
+    /// Tracks on the disc.
+    pub track_total: Option<u16>,
+    /// Disc number.
+    pub disc_no: Option<u16>,
+    /// Discs in the set.
+    pub disc_total: Option<u16>,
+    /// Year.
+    pub year: Option<i32>,
+}
+
 /// The library.
 #[derive(Debug, Default)]
 pub struct Library {
@@ -111,6 +136,41 @@ impl Library {
     /// An empty library.
     pub fn new() -> Self {
         Self { next_id: 1, next_playlist_id: 1, ..Self::default() }
+    }
+
+    /// Show what a tag edit just wrote at once, without waiting for the folder to be read again: the fields of the track change, the
+    /// albums and artists are regrouped and the search text is rebuilt. (The next scan reads the file itself and confirms it.)
+    pub fn patch_tags(&mut self, id: TrackId, p: &TagPatch) -> bool {
+        let Ok(i) = self.tracks.binary_search_by_key(&id, |t| t.id) else { return false };
+        let t = &mut self.tracks[i];
+        let text = |slot: &mut String, v: &Option<String>| {
+            if let Some(v) = v {
+                *slot = v.clone();
+            }
+        };
+        text(&mut t.title, &p.title);
+        text(&mut t.artist, &p.artist);
+        text(&mut t.album, &p.album);
+        text(&mut t.album_artist, &p.album_artist);
+        text(&mut t.genre, &p.genre);
+        if let Some(n) = p.track_no {
+            t.track_no = n;
+        }
+        if let Some(n) = p.track_total {
+            t.track_total = n;
+        }
+        if let Some(n) = p.disc_no {
+            t.disc_no = n;
+        }
+        if let Some(n) = p.disc_total {
+            t.disc_total = n;
+        }
+        if let Some(y) = p.year {
+            t.year = y;
+        }
+        self.dirty = true;
+        self.rebuild();
+        true
     }
 
     /// Counts up whenever something the views show changed.

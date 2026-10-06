@@ -2988,6 +2988,7 @@ dependencies = [
  "rvp-host",
  "rvp-library",
  "rvp-player",
+ "rvp-tagwrite",
  "rvp-ui",
  "rvp-viz",
 ]

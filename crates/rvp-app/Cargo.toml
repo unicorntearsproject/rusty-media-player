@@ -17,4 +17,5 @@ rvp-host.workspace = true
 rvp-player.workspace = true
 rvp-ui.workspace = true
 rvp-library.workspace = true
+rvp-tagwrite.workspace = true
 rvp-viz.workspace = true

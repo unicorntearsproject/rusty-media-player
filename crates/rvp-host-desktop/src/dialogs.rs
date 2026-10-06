@@ -23,6 +23,8 @@ pub enum Picked {
     Folder(PathBuf),
     /// An exported file was written (or not): a message for the user.
     Saved(String),
+    /// A picture for a cover: its name and bytes.
+    Cover(String, Vec<u8>),
 }
 
 /// Starts dialogs and collects what they return.
@@ -103,6 +105,29 @@ impl Dialogs {
                 .pick_files();
             if let Some(files) = files {
                 let _ = tx.send(Picked::Files { files, append: true });
+            }
+        });
+    }
+
+    /// "Choose a cover picture".
+    pub fn pick_cover(&self) {
+        self.spawn(move |tx| {
+            let file = rfd::FileDialog::new()
+                .set_title("Choose a cover picture")
+                .add_filter("Pictures", &["jpg", "jpeg", "png"])
+                .pick_file();
+            if let Some(path) = file {
+                let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                match std::fs::metadata(&path) {
+                    Ok(m) if m.len() > 8 << 20 => {
+                        let _ = tx.send(Picked::Saved("That picture is too big (8 MB at most)".into()));
+                    }
+                    _ => {
+                        if let Ok(bytes) = std::fs::read(&path) {
+                            let _ = tx.send(Picked::Cover(name, bytes));
+                        }
+                    }
+                }
             }
         });
     }

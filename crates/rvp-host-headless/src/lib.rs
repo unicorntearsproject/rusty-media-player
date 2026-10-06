@@ -380,6 +380,49 @@ pub struct UiHost {
     pub services: Option<rvp_host::ScriptedServices>,
     /// When set, the host can fetch pages (scripted by the test).
     pub net: Option<rvp_host::ScriptedNet>,
+    /// When set, the host can replace library files (a [`FsWriter`], or a scripted one).
+    pub writer: Option<Box<dyn rvp_host::FileWriter>>,
+    /// What [`Host::opens_links`] answers.
+    pub links: bool,
+}
+
+/// A [`rvp_host::FileWriter`] that really replaces files below the folders it was told about (root id -> directory), through a
+/// temporary file and a rename, like the desktop's.
+#[derive(Default)]
+pub struct FsWriter {
+    /// Root id -> directory.
+    pub roots: HashMap<String, std::path::PathBuf>,
+    answers: HashMap<u32, Result<(), String>>,
+    next: u32,
+}
+
+impl rvp_host::FileWriter for FsWriter {
+    fn can_write(&mut self, root: &str) -> Result<(), String> {
+        if self.roots.contains_key(root) { Ok(()) } else { Err("unknown folder".into()) }
+    }
+
+    fn write(&mut self, root: &str, path: &str, data: Vec<u8>) -> u32 {
+        let answer = (|| {
+            let base = self.roots.get(root).ok_or("unknown folder")?;
+            if path.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
+                return Err("that path is not inside the folder".to_string());
+            }
+            let target = base.join(path);
+            if !target.is_file() {
+                return Err("the file is not there".to_string());
+            }
+            let tmp = target.with_extension("rvp-tmp");
+            std::fs::write(&tmp, &data).map_err(|e| e.to_string())?;
+            std::fs::rename(&tmp, &target).map_err(|e| e.to_string())
+        })();
+        self.next += 1;
+        self.answers.insert(self.next, answer);
+        self.next
+    }
+
+    fn poll_write(&mut self, ticket: u32) -> Option<Result<(), String>> {
+        self.answers.remove(&ticket)
+    }
 }
 
 impl Default for UiHost {
@@ -406,6 +449,8 @@ impl UiHost {
             stable: true,
             services: None,
             net: None,
+            writer: None,
+            links: false,
         }
     }
 
@@ -459,6 +504,15 @@ impl Host for UiHost {
     }
     fn app_services(&mut self) -> Option<&mut dyn rvp_host::AppServices> {
         self.services.as_mut().map(|s| s as &mut dyn rvp_host::AppServices)
+    }
+    fn file_writer(&mut self) -> Option<&mut dyn rvp_host::FileWriter> {
+        match &mut self.writer {
+            Some(w) => Some(w.as_mut()),
+            None => None,
+        }
+    }
+    fn opens_links(&self) -> bool {
+        self.links
     }
     fn stable_ids(&self) -> bool {
         self.stable

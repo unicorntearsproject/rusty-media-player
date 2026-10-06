@@ -206,7 +206,10 @@ impl Ui {
             .collect();
         j += &format!("\"ents\":[{}],", ents.join(","));
         j += &format!("\"ent_count\":{},", l.rows.as_ref().map_or(0, |r| r.ents.len()));
-        j += &format!("\"menu_open\":{}}}", self.menu_open());
+        j += &format!("\"menu_open\":{},", self.menu_open());
+        // The editor as it was last drawn (null when it is closed).
+        let form = if self.lib.tagform.is_some() { self.lib.tagform_json.as_str() } else { "null" };
+        j += &format!("\"tagform\":{form}}}");
         j
     }
 }

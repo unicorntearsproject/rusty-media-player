@@ -225,6 +225,8 @@ pub struct WebHost {
     pub tap: Option<WebTap>,
     /// Fetching a link (the theme dialog), through the page.
     pub net: crate::net::WebNet,
+    /// Replaces library files (the tag editor).
+    pub writer: crate::writer::WebWriter,
 }
 
 impl Host for WebHost {
@@ -271,6 +273,9 @@ impl Host for WebHost {
     }
     fn library(&mut self) -> Option<&mut dyn rvp_host::Library> {
         Some(&mut self.library)
+    }
+    fn file_writer(&mut self) -> Option<&mut dyn rvp_host::FileWriter> {
+        Some(&mut self.writer)
     }
     fn net(&mut self) -> Option<&mut dyn rvp_host::Net> {
         Some(&mut self.net)

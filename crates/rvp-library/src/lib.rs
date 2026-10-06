@@ -26,7 +26,7 @@ mod videos;
 
 pub use art::{Image, THUMB_SIDE, Thumb};
 pub use favorites::FAVORITES_KEY;
-pub use index::{Library, ScanReport, Search, TrackSort};
+pub use index::{Library, ScanReport, Search, TagPatch, TrackSort};
 pub use model::{Album, ArtId, Artist, Root, Track, TrackId, UNKNOWN_ALBUM, UNKNOWN_ARTIST, VARIOUS_ARTISTS};
 pub use persist::{INDEX_KEY, PLAYLISTS_KEY, art_key, decode_thumb, encode_thumb};
 pub use plist::{ListFormat, PlEntry, SavedPlaylist};

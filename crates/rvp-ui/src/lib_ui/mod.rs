@@ -21,6 +21,7 @@ mod input;
 mod menus;
 pub(crate) mod rows;
 mod snapshot;
+pub(crate) mod tagform;
 
 pub use rows::{Ent, EntKind};
 
@@ -164,6 +165,8 @@ pub enum LibAction {
     QueueToNext(u32),
     /// A button of the About page: 0 Rusty Bucket's site, 1 the X page, 2 the licenses.
     About(u8),
+    /// Open the tag editor for a song or the shared tags of an album.
+    EditTags(Scope),
     /// Heart or un-heart a track or a video (library id).
     ToggleFavorite(u32),
     /// Heart or un-heart every track of a scope (all hearted when any is not, else all un-hearted).
@@ -196,6 +199,17 @@ pub enum UiCommand {
         /// The tracks to start it with (`None`: empty).
         from: Option<Scope>,
     },
+    /// The tag editor was saved: what changed (a field and its new text, `None` to clear it) and what to do with the cover.
+    SaveTags {
+        /// What was edited.
+        target: TagTarget,
+        /// The boxes that differ from what the form opened with.
+        changes: Vec<(TagField, Option<String>)>,
+        /// What happens to the cover.
+        cover: CoverAction,
+    },
+    /// The editor's Replace button: the app asks the host for a picture and answers with [`crate::Ui::set_tag_cover`].
+    PickCover,
     /// The name prompt for renaming was confirmed.
     RenamePlaylist {
         /// The playlist.
@@ -241,6 +255,8 @@ pub(crate) enum PromptKind {
     NewPlaylist(Option<Scope>),
     Rename(u32),
 }
+
+pub use tagform::{CoverAction, TagField, TagFormSpec, TagTarget};
 
 /// What the pointer is over in library mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -294,6 +310,10 @@ pub enum LibHit {
     UpNext(usize),
     /// A row of an open menu.
     Menu(usize, usize),
+    /// A box of the tag editor (index into its fields).
+    TagField(usize),
+    /// A button of the tag editor: 0 Save, 1 Cancel (or Close), 2 Replace cover, 3 Remove cover.
+    TagButton(u8),
     /// The prompt's OK.
     PromptOk,
     /// The prompt's cancel.
@@ -372,6 +392,10 @@ pub struct LibUi {
     pub(crate) rows: Option<rows::Rows>,
     pub(crate) thumbs: BTreeMap<u64, Rc<(u32, u32, Vec<u8>)>>,
     pub(crate) prompt: Option<Prompt>,
+    /// The tag editor, when it is open.
+    pub(crate) tagform: Option<tagform::TagForm>,
+    /// The editor as JSON, made while drawing it (for the snapshot).
+    pub(crate) tagform_json: String,
     pub(crate) commands: Vec<UiCommand>,
     pub(crate) viz_info: bool,
     pub(crate) viz_on: bool,
@@ -422,6 +446,8 @@ impl Default for LibUi {
             rows: None,
             thumbs: BTreeMap::new(),
             prompt: None,
+            tagform: None,
+            tagform_json: String::new(),
             commands: Vec::new(),
             viz_info: true,
             viz_on: true,
@@ -469,7 +495,8 @@ impl LibUi {
 
     /// True while a text field has the keyboard (the page must not use letters as shortcuts then).
     pub fn typing(&self) -> bool {
-        self.mode == Mode::Library && (self.zone == Zone::Search || self.prompt.is_some())
+        self.mode == Mode::Library
+            && (self.zone == Zone::Search || self.prompt.is_some() || self.tagform.is_some())
     }
 
     /// Whether the visualizer animation is on.

@@ -18,6 +18,7 @@ pub mod mock;
 pub mod net;
 pub mod services;
 pub mod types;
+pub mod writer;
 
 pub use frame::FrameSink;
 
@@ -32,6 +33,7 @@ pub use services::{
     AppServices, DefaultOutcome, DefaultPlayer, Integration, ScriptedServices, UpdateHow, UpdateState,
 };
 pub use types::{MEDIA_TYPES, MediaType, media_types_by_id, mimes_of};
+pub use writer::{FileWriter, ScriptedWriter};
 
 use alloc::{string::String, vec::Vec};
 use rvp_core::{AudioParams, Timestamp, VideoFrame};
@@ -168,6 +170,10 @@ pub trait Host {
     }
     /// Fetching a page of text the user pointed the app at (a link to a design system), if the host can.
     fn net(&mut self) -> Option<&mut dyn Net> {
+        None
+    }
+    /// Replacing library files (editing tags), if the host can.
+    fn file_writer(&mut self) -> Option<&mut dyn FileWriter> {
         None
     }
     /// Update checks and adding the app to the desktop's menus, if the host has them.

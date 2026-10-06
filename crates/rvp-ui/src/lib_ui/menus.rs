@@ -72,6 +72,9 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
                 add_to_playlist(Scope::Track(id), ctx),
                 favorite(id, ctx).sep(),
             ];
+            if model.app.tags {
+                v.push(hinted("Edit tags\u{2026}", "E", Action::Lib(LibAction::EditTags(Scope::Track(id)))));
+            }
             v.extend(go_to(Some(id), ctx));
             v
         }
@@ -84,7 +87,7 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
         EntKind::Album(ai) => {
             let Some(a) = lib.albums().get(ai) else { return global_menu(ui, model, ctx) };
             let id = a.id;
-            alloc::vec![
+            let mut v = alloc::vec![
                 item("Open", Action::OpenDetail(Detail::Album(id))),
                 play("Play", "", Scope::Album(id), Enqueue::Now),
                 play("Shuffle", "", Scope::Album(id), Enqueue::ShuffleNow),
@@ -92,8 +95,12 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
                 play("Add to queue", "", Scope::Album(id), Enqueue::Append),
                 add_to_playlist(Scope::Album(id), ctx),
                 item("Favorite all or none", Action::Lib(LibAction::FavoriteScope(Scope::Album(id)))).sep(),
-                item("Go to artist", Action::OpenDetail(Detail::Artist(a.artist_id))),
-            ]
+            ];
+            if model.app.tags {
+                v.push(item("Edit tags\u{2026}", Action::Lib(LibAction::EditTags(Scope::Album(id)))));
+            }
+            v.push(item("Go to artist", Action::OpenDetail(Detail::Artist(a.artist_id))));
+            v
         }
         EntKind::Artist(ai) => {
             let Some(a) = lib.artists().get(ai) else { return global_menu(ui, model, ctx) };
@@ -130,6 +137,9 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
             ];
             if let Some(t) = track {
                 v.push(favorite(t, ctx).sep());
+                if model.app.tags {
+                    v.push(item("Edit tags\u{2026}", Action::Lib(LibAction::EditTags(Scope::Track(t)))));
+                }
             }
             v.extend(go_to(track, ctx));
             v
@@ -167,6 +177,9 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
             ];
             if let Some(t) = track {
                 v.push(favorite(t, ctx).sep());
+                if model.app.tags {
+                    v.push(item("Edit tags\u{2026}", Action::Lib(LibAction::EditTags(Scope::Track(t)))));
+                }
             }
             v.extend(go_to(track, ctx));
             v
