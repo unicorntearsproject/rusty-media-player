@@ -10,7 +10,7 @@ Rusty Wave ships as a native desktop app (Linux and Windows; macOS in beta) and 
 | .deb | `dist deb` | `cargo install cargo-deb` | `rusty-wave_<ver>_amd64.deb` |
 | .rpm | `dist rpm` | `cargo install cargo-generate-rpm`, rpm tools | `rusty-wave-<ver>-1.x86_64.rpm` |
 | AppImage | `dist appimage` | `appimagetool` (downloaded to `~/.local/bin` on first use), `zsyncmake` (`apt install zsync`, `dnf install zsync`) | `rusty-wave-<ver>-x86_64.AppImage` and `rusty-wave-<ver>-x86_64.AppImage.zsync` |
-| Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.idometeor.RustyWave-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `<staging>/flatpak/repo`, staging being `~/.cache/rvp-scratch/staging` or `$RVP_STAGING_DIR`) |
+| Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.idometeor.RustyWave-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `<staging>/flatpak/repo`, staging being `/mnt/scratch/rvp-scratch/staging` or `$RVP_STAGING_DIR`) |
 | Windows exe + zip | `dist windows` | MSVC or GNU toolchain; on Linux the wine image (podman) | `rusty-wave-<ver>-windows-x64.zip` |
 | Windows installer | `dist installer` | Inno Setup 6 (`ISCC.exe`); on Linux wine in the image | `rusty-wave-<ver>-x64-Setup.exe` |
 | macOS app + dmg (beta) | `dist macos` (macOS only) | Xcode command line tools, both Apple Rust targets; optionally `create-dmg` | `rusty-wave-<ver>-macos-universal.dmg` |
@@ -148,7 +148,7 @@ tree. For Flathub, copy the manifest and `cargo-sources.json` to the Flathub rep
 
 On Windows (and in CI) `dist windows` uses the host Rust toolchain (MSVC) and `dist installer` runs `ISCC.exe` (`ISCC` env var if not on `PATH`).
 On Linux both run in `packaging/windows/Containerfile` (Fedora, MinGW-w64, Wine; `x86_64-pc-windows-gnu`), with Inno Setup 6.7.3 installed once into
-`$RVP_STAGING_DIR/wineprefix` (default `~/.cache/rvp-scratch/staging`, outside the repository so editors never walk its `z:` link to `/`) (the download is checked against a pinned SHA-256).
+`$RVP_STAGING_DIR/wineprefix` (default `/mnt/scratch/rvp-scratch/staging`, outside the repository so editors never walk its `z:` link to `/`) (the download is checked against a pinned SHA-256).
 
 `packaging/windows/rusty-wave.iss`: per-user install by default (the wizard can switch to all users), Start menu entry, optional desktop shortcut and
 PATH entry, licence page, wizard bitmaps from the brand script, uninstaller (which also asks whether to delete settings and the library index).

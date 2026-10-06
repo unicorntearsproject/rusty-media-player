@@ -302,6 +302,11 @@ impl Ctx {
         if let Some(d) = std::env::var_os("RVP_STAGING_DIR") {
             return PathBuf::from(d);
         }
+        // The scratch disk where there is one (the root drive fills up), else the user's cache folder.
+        let scratch = Path::new("/mnt/scratch");
+        if scratch.is_dir() {
+            return scratch.join("rvp-scratch/staging");
+        }
         let cache = std::env::var_os("XDG_CACHE_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))

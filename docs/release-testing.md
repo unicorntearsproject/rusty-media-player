@@ -18,7 +18,7 @@ cargo xtask dist checksums --sign      # SHA256SUMS and a .asc beside every file
 cargo xtask dist verify                # every signature against packaging/keys/rusty-wave-release.asc
 ```
 
-Files are in `target/dist/release/`; the apt repo is `target/dist/apt-repo/`, the Flatpak repo `~/.cache/rvp-scratch/staging/flatpak/repo/` (`$RVP_STAGING_DIR`). To hand files to
+Files are in `target/dist/release/`; the apt repo is `target/dist/apt-repo/`, the Flatpak repo `/mnt/scratch/rvp-scratch/staging/flatpak/repo/` (`$RVP_STAGING_DIR`). To hand files to
 another machine:
 
 ```sh
@@ -158,7 +158,7 @@ chmod +x rusty-wave-0.0.2-x86_64.AppImage
 The signed repo, the `.flatpakrepo`, the `.flatpakref` and the single-file bundle are all built by `dist flatpak --sign`. The runtime (`org.freedesktop.Platform//25.08`)
 comes from Flathub, so the machine needs the `flathub` remote (`flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`).
 
-a) From the signed repo. The repo is a folder; serve it (`cd ~/.cache/rvp-scratch/staging/flatpak && python3 -m http.server 8000`) or copy it over. The `.flatpakrepo` carries the key and
+a) From the signed repo. The repo is a folder; serve it (`cd /mnt/scratch/rvp-scratch/staging/flatpak && python3 -m http.server 8000`) or copy it over. The `.flatpakrepo` carries the key and
 `Url=file:///home/jj/...` (the dev machine's path), so on another machine either rebuild with `dist flatpak --sign --repo-url http://<dev-machine>:8000/repo`,
 or add the remote by hand with the key:
 
