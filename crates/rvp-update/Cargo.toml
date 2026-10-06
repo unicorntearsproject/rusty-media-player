@@ -1,0 +1,26 @@
+[package]
+name = "rvp-update"
+description = "Rusty Wave: update checks, signed self-update and desktop self-integration (std, desktop hosts only)"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# OpenPGP verification of the release key's detached signatures (pure Rust, MIT OR Apache-2.0).
+pgp = { version = "0.21", default-features = false }
+# HTTPS (rustls, pure Rust TLS with ring's crypto), MIT OR Apache-2.0.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The portable Windows zip.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+
+[dev-dependencies]
+rand = "0.8"

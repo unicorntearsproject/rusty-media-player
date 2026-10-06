@@ -23,6 +23,7 @@ members = [
     "crates/bucket-v0-sys",
     "crates/bucket-v0-mock",
     "crates/rvp-wave-bucket",
+    "crates/rvp-update",
     "crates/rvp-host-desktop",
     "crates/rvp-wasm-smoke",
     "xtask",
