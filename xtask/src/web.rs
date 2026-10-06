@@ -169,7 +169,7 @@ fn build_variant(
         );
     }
     let bg = pkg.join("rvp_bg.wasm");
-    if !no_opt && have("wasm-opt") {
+    if !no_opt && have("wasm-opt") && !wasm_opt_too_old() {
         println!("+ wasm-opt -O2");
         let tmp = pkg.join("rvp_bg.opt.wasm");
         let mut cmd = Command::new("wasm-opt");
@@ -193,9 +193,18 @@ fn build_variant(
             eprintln!("xtask: wasm-opt failed, keeping the unoptimised module");
         }
     } else if !no_opt {
-        eprintln!("xtask: wasm-opt not installed, skipping (cargo install wasm-opt)");
+        eprintln!("xtask: no usable wasm-opt (missing, or binaryen older than 116), skipping the size optimisation");
     }
     Ok(std::fs::metadata(&bg).map(|m| m.len()).unwrap_or(0))
+}
+
+/// binaryen older than 116 (Ubuntu 22.04 ships 105) optimises our module into one that does not start in Chrome, so it is not used.
+fn wasm_opt_too_old() -> bool {
+    let out = Command::new("wasm-opt").arg("--version").output().ok();
+    let text = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    // "wasm-opt version 123 (version_123)"
+    let version = text.split_whitespace().skip_while(|w| *w != "version").nth(1).and_then(|v| v.parse::<u32>().ok());
+    version.is_none_or(|v| v < 116)
 }
 
 fn mime(path: &Path) -> &'static str {

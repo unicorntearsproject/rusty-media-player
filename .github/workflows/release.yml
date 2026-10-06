@@ -345,7 +345,13 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg python3 binaryen zip
+          sudo apt-get install -y --no-install-recommends ffmpeg python3 zip
+          # Ubuntu 22.04's binaryen is version 105, whose `wasm-opt -O2` turns our module into one the page never starts
+          # (the PWA tests timed out waiting for it): use a pinned, checksummed modern release.
+          curl -sSfL -o /tmp/binaryen.tgz https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz
+          echo "e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe  /tmp/binaryen.tgz" | sha256sum -c -
+          tar -xzf /tmp/binaryen.tgz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_123/bin" >> "$GITHUB_PATH"
           cargo install --locked wasm-bindgen-cli --version "$(sed -n '/name = "wasm-bindgen"/{n;s/version = "\(.*\)"/\1/p}' Cargo.lock | head -1)"
       - name: Build the page
         run: cargo xtask web
