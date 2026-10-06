@@ -1073,6 +1073,20 @@ v0.2, 13 deltas in v0.3, all folded in), so the adapter has no workarounds left 
   Bucket Bar commands or clipboard (we draw our own look), no device selection, no `file_open_sibling` use (the host traits have no sidecar open). Still open:
   QEMU under Rusty Bucket (runtime choice: AOT or interpreter, risk R3), `video_present` in the real pipeline, the answers to items 8 to 11 of the review section.
 
+### Phase A of the 2026-10-06 batch (v0.0.5, in progress)
+
+Features added on top of M12 (details in the docs named in brackets):
+
+- **First run and the last face** ([`host-api.md`](host-api.md)): the first run opens on the Library and adds the system's Music and Videos folders; later runs reopen the last face.
+- **Settings, default media player, app-menu offer** ([`host-api.md`](host-api.md), [`packaging.md`](packaging.md)): one Settings dialog (rail button, right-click menu, Ctrl+,); a checklist of every
+  media type the player opens (`MEDIA_TYPES`) with per-platform behaviour (Linux `mimeapps.list`, Windows registration plus *Default apps*, macOS Launch Services); "No thanks" is final.
+- **Video library**: the same folders, index and queue as the music, a Videos view (poster grid or list, sort, search, resume markers), posters made by decoding one frame in the background.
+- **Theming**: a pasted Claude Design link or CSS becomes a theme (`rvp_ui::theming`): colours and corner radii mapped onto the runtime tokens (`rvp_ui::tk`), contrast checked, previewed live, kept per user.
+  Fonts are only noted (the app keeps its bundled faces). Fetching goes through the optional `Net` host capability; without it, paste the CSS.
+- **Visualizer**: a Rainbow palette and three scenes in the spirit of Unicorn Viz (Bass machine, Unicorn Tears, Disco ball), CPU-drawn, calm with reduced motion. None needed heavy core work.
+- **Web build**: content-hashed names, `build-info.json`, the threaded build in the zip, a service worker that precaches the build the browser can run; `dist --target rustybucket` lays a release out for
+  Rusty Bucket's release site.
+
 ## 12. Risks and open questions
 
 | # | Risk | Plan |
