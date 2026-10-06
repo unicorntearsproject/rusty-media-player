@@ -302,7 +302,7 @@ A service worker and installing need a secure context: `localhost` counts, a pla
 **Chrome and Edge, desktop (Windows, Linux, macOS)**:
 
 - [ ] The page loads, plays a local file (drop it or the open button), audio and video in sync, the keyboard shortcuts work, the Library face (`B`) scans a folder (File System Access API).
-- [ ] "Install app" button in the page and the browser's install icon in the address bar (or menu > Cast, save and share > Install page as app) both install it; the app opens in its own window without browser chrome,
+- [ ] "Install app" button in the page (top centre; the small cross hides it, and it is gone when the app runs installed) and the browser's install icon in the address bar (or menu > Cast, save and share > Install page as app) both install it; the app opens in its own window without browser chrome,
   with the right name, icon (check the maskable icon on Android/ChromeOS) and theme colour; it appears in the Start menu / app launcher / Dock.
 - [ ] Offline: with the app installed, turn the network off (DevTools > Network > Offline, or airplane mode), reload: it starts, plays a local file.
 - [ ] Update: build again so the version changes (`cargo xtask web`), reload: a bar shows "Update available: reload"; reload applies it; the old cache is gone (DevTools > Application > Cache storage).
@@ -314,12 +314,12 @@ A service worker and installing need a secure context: `localhost` counts, a pla
 
 **Firefox**:
 
-- [ ] Desktop Firefox does not install PWAs: confirm the install button is hidden, the page works in a tab, the service worker registers (`about:debugging` > This Firefox > Service Workers) and the offline start works;
+- [ ] Desktop Firefox does not install PWAs: confirm the "Install app" button opens a card that says Firefox does not install web apps on a computer (and names Chrome, Edge or Brave), the page works in a tab, the service worker registers (`about:debugging` > This Firefox > Service Workers) and the offline start works;
   it must not show errors for the missing File Handling API; the threaded decoder needs the COOP/COEP headers (Firefox supports them).
 - [ ] Firefox on Android: "Install" (add to Home screen) creates a standalone app that starts offline.
 - [ ] Library folder picking uses the `<input webkitdirectory>` fallback where the File System Access API is missing: choose a folder, it scans.
 
-**Safari / iOS** (optional): Add to Home Screen, plays H.264/AAC through our own decoder (not the system player), audio resumes after the screen locks only if the browser allows it.
+**Safari / iOS** (optional): Add to Home Screen (the "Install app" card says "Tap Share, then Add to Home Screen"; on a Mac it says File > Add to Dock), plays H.264/AAC through our own decoder (not the system player), audio resumes after the screen locks only if the browser allows it.
 
 ## 7. Results
 

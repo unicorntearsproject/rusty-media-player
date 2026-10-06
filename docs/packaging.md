@@ -185,11 +185,22 @@ other files (`.asc`); the macOS code signature is separate.
 
 `cargo xtask web` produces `target/web` with `manifest.webmanifest` (name, icons incl. maskable, `display: standalone`, file handlers, a share target,
 a shortcut), `sw.js` and `pwa.js`. The service worker precaches the page, the wasm and the icons in a cache named by version, so the app starts
-offline; a changed page is a new worker that waits and shows an "Update available: reload" button; "Install app" appears where the browser offers
-installing; files opened with the installed app or shared to it are opened in the player. Host it over HTTPS (or on localhost). For the threaded
+offline; a changed page is a new worker that waits and shows an "Update available: reload" button; "Install app" is a button at the top centre of the page
+(with a small cross that hides it for good; hidden when the page already runs as the installed app): where the browser offers installing (Chromium's
+`beforeinstallprompt`) it opens the browser's prompt, anywhere else (Safari, Firefox, or nothing offered within 2.5 s) it opens a card that says how to
+install from that browser's own menu ("Share, then Add to Home Screen" and so on). `window.rvp.install()` and `window.rvp.installState()` give a
+Settings entry the same thing; files opened with the installed app or shared to it are opened in the player. Host it over HTTPS (or on localhost). For the threaded
 decoder the server also needs `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (`cargo xtask serve` sends them);
 without them the page runs the single-threaded build. `tests/e2e/pwa.spec.js` checks the manifest and icons, the precache, playing a local file with the
-network off, and the update flow.
+network off, the update flow and the install entry (a synthetic `beforeinstallprompt`, the hints per browser, standalone).
+
+**What the host that serves the page must do** for the browser to offer installing: HTTPS; `manifest.webmanifest` as `application/manifest+json` (or
+`application/json`), `sw.js` as JavaScript, both and the icons without redirects and from the same origin as the page; `sw.js` revalidated on every
+load (`Cache-Control: no-cache` or `max-age=0`, never a long `max-age` or `s-maxage` at a CDN edge without an invalidation on each deploy, which also
+goes for `index.html`, the manifest and `build-info.json`); the page's COOP/COEP are fine for installing. If the host sends a `Content-Security-Policy`,
+`connect-src` has to allow `https:` for the Theme dialog's links (without it the dialog says to paste the CSS), `worker-src 'self'` and
+`script-src 'self' 'wasm-unsafe-eval'` for the player. A missing file should be a 404 (an object store that answers 403 shows as console errors only).
+To check a deployment: DevTools > Application > Manifest ("Installability"), or `Page.getInstallabilityErrors` through the DevTools protocol.
 
 **Content-hashed names.** The build gives the scripts, the style sheet and the wasm modules with their glue names that carry a hash of their content
 (`main.3fa9c1d2.js`, `pkg/rvp_bg.a68f7716.wasm`) and rewrites every reference (`xtask/src/web.rs`, `hash_assets`): a file's hash covers its own bytes and
