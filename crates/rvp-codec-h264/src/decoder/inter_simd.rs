@@ -1,6 +1,6 @@
 //! WebAssembly SIMD128 versions of the interpolation kernels in `inter` (8 samples per vector, 16-bit lanes). The
 //! scalar code in `inter` defines the result; `selftest` compares the two on random pictures inside WebAssembly.
-#![cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#![cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
 
 use super::inter::{self, PSTRIDE, Weights};
 use alloc::vec;

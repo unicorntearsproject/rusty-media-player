@@ -85,3 +85,14 @@ overflow-checks = false
 opt-level = 3
 debug-assertions = false
 overflow-checks = false
+
+# The SIMD kernels call intrinsics through thin wrappers; unoptimised, every lane operation is a real call and playback in a debug build
+# falls behind real time. These two crates (kernels and H.264) get light optimisation in dev and test builds.
+[profile.dev.package.rvp-core]
+opt-level = 2
+[profile.dev.package.rvp-codec-h264]
+opt-level = 2
+[profile.test.package.rvp-core]
+opt-level = 2
+[profile.test.package.rvp-codec-h264]
+opt-level = 2

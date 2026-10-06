@@ -618,7 +618,7 @@ struct Col {
     i1: u32,
     w: u32,
     /// `(256 - w) | w << 16`: both weights in one lane for the dot product.
-    #[cfg_attr(not(all(target_arch = "wasm32", target_feature = "simd128")), allow(dead_code))]
+    #[cfg_attr(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")), allow(dead_code))]
     wp: u32,
 }
 
@@ -641,7 +641,7 @@ fn lerp_px(a: u32, b: u32, w: u32) -> u32 {
 
 /// `out = (a * (256 - w) + b * w) >> 8` per byte, alpha forced to 255 (the picture is opaque).
 fn blend_rows(out: &mut [u8], a: &[u8], b: &[u8], w: u32) {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     {
         use rvp_core::simd::*;
         let (wa, wb) = (u16x8_splat((256 - w) as u16), u16x8_splat(w as u16));
@@ -666,7 +666,7 @@ fn blend_rows(out: &mut [u8], a: &[u8], b: &[u8], w: u32) {
         }
         blend_rows_scalar(&mut out[n..], &a[n..], &b[n..], w);
     }
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")))]
     blend_rows_scalar(out, a, b, w);
 }
 
@@ -684,7 +684,7 @@ fn blend_rows_scalar(out: &mut [u8], a: &[u8], b: &[u8], w: u32) {
 /// Resample one row of packed RGBA to the destination columns. `line` must hold one pixel more than the source
 /// width (the vector code reads the pair `i0, i0 + 1` with one load).
 fn resample_row(out: &mut [u8], line: &[u8], cols: &[Col]) {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     {
         use rvp_core::simd::*;
         let n = cols.len() & !3;
@@ -707,7 +707,7 @@ fn resample_row(out: &mut [u8], line: &[u8], cols: &[Col]) {
         }
         resample_row_scalar(&mut out[n * 4..], line, &cols[n..]);
     }
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")))]
     resample_row_scalar(out, line, cols);
 }
 
@@ -723,7 +723,7 @@ fn resample_row_scalar(out: &mut [u8], line: &[u8], cols: &[Col]) {
 
 /// Run the WebAssembly SIMD128 self-tests of this crate (0 mismatches expected).
 pub fn simd_selftest() -> u32 {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     {
         let mut bad = 0;
         let mut seed = 0x9e37_79b9u32;
@@ -758,13 +758,18 @@ pub fn simd_selftest() -> u32 {
         }
         bad
     }
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")))]
     0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simd_kernels_match_the_scalar_reference() {
+        assert_eq!(simd_selftest(), 0);
+    }
     use theme::tokens;
 
     #[test]

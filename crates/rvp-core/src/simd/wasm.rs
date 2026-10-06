@@ -1,10 +1,8 @@
-//! Safe slice load/store helpers for WebAssembly SIMD128, used by the pixel kernels in this and the codec crates.
+//! The WebAssembly SIMD128 side: safe slice load/store helpers over the intrinsics.
 //!
 //! Only compiled when the target has `simd128` enabled (`-C target-feature=+simd128`, which `cargo xtask web` sets).
 //! Every kernel using these keeps a scalar twin that defines the exact result; the `selftest` functions in each
 //! crate compare the two inside WebAssembly (`cargo xtask wasm-smoke` runs them in Node).
-#![cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-
 pub use core::arch::wasm32::*;
 
 /// Load 16 bytes from the start of `s` (panics if `s` is shorter).

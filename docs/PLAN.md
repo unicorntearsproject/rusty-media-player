@@ -659,6 +659,7 @@ emits `Ended`/`Error` instead of panicking.
 - **How it was found: profile first** (`perf record` natively, the decoder's `stages` timing in `rvp-codec-h264 --example bench`, and the tick breakdown in
   `window.rvp.snapshot().perf` in the browser). The work followed what showed up: colour conversion and scaling, H.264 inter
   prediction and deblocking, CABAC and residual parsing, then threads for what was left.
+- **x86_64 SIMD** (2026-10-06): the same kernels run natively through an SSE2 shim (`rvp_core::simd::x86`, baseline, no runtime detection), bit-exact against the scalar twins (selftests are native tests); desktop H.264 typical 0.9 → 0.64 core. aarch64 stays scalar; AVX2 and the long tail are optional follow-ups.
 - **SIMD128** (`core::arch::wasm32`, behind `cfg(target_feature = "simd128")`; every kernel has a scalar twin that defines the result
   and a `selftest` that compares them on random data *inside WebAssembly*, run in Node by `cargo xtask wasm-smoke`
   (`tools/wasm-selftest.mjs`); the same fixtures decode to the same hashes natively, in scalar wasm and in SIMD wasm): YUV420 to RGBA

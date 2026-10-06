@@ -34,9 +34,9 @@ pub use error::{Error, Result};
 
 /// Run the WebAssembly SIMD128 self-tests of this crate (0 mismatches expected; always 0 without SIMD128).
 pub fn simd_selftest() -> u32 {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     return decoder::simd_selftest();
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")))]
     0
 }
 use rvp_core::VideoCodec;
@@ -147,5 +147,13 @@ impl VideoDecoder for H264VideoDecoder {
         let _ = self.dec.flush();
         self.collect();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod simd_tests {
+    #[test]
+    fn simd_kernels_match_the_scalar_reference() {
+        assert_eq!(super::simd_selftest(), 0);
     }
 }

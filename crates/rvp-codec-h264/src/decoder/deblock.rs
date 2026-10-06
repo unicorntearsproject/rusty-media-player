@@ -34,7 +34,7 @@ fn filter_luma(
     beta: i32,
     index_a: usize,
 ) {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     if per == 4 && bs.len() == 4 {
         return super::deblock_simd::luma(p, q0, step, line, bs, alpha, beta, index_a);
     }
@@ -54,7 +54,7 @@ fn filter_chroma(
     beta: i32,
     index_a: usize,
 ) {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     if per == 2 && bs.len() == 4 {
         return super::deblock_simd::chroma(p, q0, step, line, bs, alpha, beta, index_a);
     }

@@ -1,6 +1,6 @@
 //! WebAssembly SIMD128 deblocking of one edge segment (16 luma or 8 chroma lines at a time). The scalar functions in
 //! `deblock` define the result; `selftest` compares the two inside WebAssembly.
-#![cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#![cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
 
 use super::deblock::{filter_chroma_scalar, filter_luma_scalar};
 use super::deblock_tables::TC0;

@@ -84,7 +84,7 @@ pub fn yuv420_rows_to_rgba(frame: &VideoFrame, out: &mut [u8], y0: usize, y1: us
     assert!(y0 % 2 == 0 && y1 <= h && y0 <= y1, "bad row band");
     assert_eq!(out.len(), (y1 - y0) * w * 4, "output band has the wrong size");
     let c = Coefs::of(frame);
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     if c.bits == 8 {
         return wasm::rows(frame, &c, out, y0, y1);
     }
@@ -185,7 +185,7 @@ fn scalar_rows(frame: &VideoFrame, c: &Coefs, out: &mut [u8], y0: usize, y1: usi
 }
 
 /// WebAssembly SIMD128 conversion of 8-bit pictures: 16 pixels per step, two rows sharing their chroma terms.
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
 mod wasm {
     use super::*;
     use crate::simd::*;
@@ -361,15 +361,20 @@ mod wasm {
 /// Run the WebAssembly SIMD128 self-tests of this crate (0 mismatches expected). Always 0 where there is no
 /// SIMD128 code.
 pub fn simd_selftest() -> u32 {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     return wasm::selftest();
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")))]
     0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simd_kernels_match_the_scalar_reference() {
+        assert_eq!(simd_selftest(), 0);
+    }
     use alloc::vec;
     use alloc::vec::Vec;
 

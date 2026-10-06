@@ -80,14 +80,16 @@ Same method as the audit: `/usr/bin/time` user time over 20 s of 1080p30 playbac
 | VP9 | 0.62 | 0.67 – 0.69 | 0.81 |
 | AV1 | 0.91 | 0.88 – 0.91 | 1.15 |
 
-**P1's target (H.264 typical ≤ 0.5 core) is not met.** The polling was real (the pool spun, the helper threads woke 3 000 to 16 000 times a second) and is gone, but it was not where most of the CPU goes. `perf record` of H.264 typical (12 s, one frame per 33 ms):
+**P1: x86_64 SIMD added; H.264 typical 0.87–0.94 → 0.64 core (target ≤ 0.5 not met, close).** Polling was minor; the CPU was in scalar kernels. `rvp_core::simd` now has an SSE2 side (`simd/x86.rs`: the SIMD128 names as thin `core::arch::x86_64` wrappers, SSE2 being the x86_64 baseline, no runtime check) and every SIMD128 kernel (H.264 luma/chroma MC, bi-prediction and weighting, deblocking, YUV→RGBA, the scaler) runs on it unchanged. Each keeps its scalar twin, and the same `selftest`s (random data, scalar vs SIMD) are now native `cargo test`s, as are per-operation tests of the shim against plain lane arithmetic. All `unsafe` is in the shim (pointer loads/stores with SAFETY notes, register-only intrinsics in blocks with a SAFETY note); the codec and UI crates stay `forbid(unsafe_code)`. aarch64 (macOS) stays scalar for now. No AVX2 variants: the profile is spread over many kernels, not one wide loop.
 
-| Where | Share |
-| --- | --- |
-| UI thread: `yuv420_rows_to_rgba` 14 % (was 22 % before the 8-bit rewrite, bit-exact against the reference, tested), `blit_scaled` 7 % | ~0.30 core |
-| Decoder threads: `mc_luma_scalar`, `combine_scalar`, CABAC residuals, deblocking, memmove | ~0.60 core |
+| Desktop, user÷wall, 20 s | Before | After |
+| --- | --- | --- |
+| H.264 typical | 0.87–0.94 | 0.64 |
+| H.264 stress | 1.78–1.98 | 1.09 |
+| VP9 | 0.67–0.69 | 0.46 (the VP9 decoder is a dependency; its kernels are not ours) |
+| AV1 | 0.88–0.91 | 0.69 |
 
-The desktop build has **no native SIMD kernels** (the SIMD128 kernels are WebAssembly-only), so motion compensation and deblocking run as scalar code. Getting under 0.5 core means x86 kernels (SSE2 is baseline; AVX2 behind runtime detection), which is a feature of its own and would need `unsafe`; or building for `x86-64-v2` (RHEL 9's minimum) at the cost of old CPUs. Left for the user to decide.
+What is left in H.264 typical (`perf`): `mc_luma` 12.6 %, CABAC `residual_sparse` 7.6 % (entropy, not SIMD-able), deblocking 7 % + `Bs::motion` 3.8 %, `yuv420_rows_to_rgba` 6.9 %, `MbRecon::uniform` 6 %, `mc_chroma` 6 %, scalar `combine_scalar` 5.3 %, `weighted_bi` 4.3 %, `blit_scaled` 4.1 %, memmove 3.5 %. Further gains are a long tail (AVX2 for colour conversion, SIMD `combine`/`uniform`, boundary-strength), none above 0.05 core each.
 
 Memory, desktop RSS: playing 1080p, no library: 105–158 MB (unchanged); **scanning 12 1080p films for posters: 182 MB → 56 MB** (H.264 110 → 55, VP9 97 → 51, AV1 178 → 47); scanning 160 tracks with 6 MB embedded covers: 50 MB.
 

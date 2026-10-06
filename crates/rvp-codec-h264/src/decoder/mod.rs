@@ -40,7 +40,7 @@ use recon::{OutputInfo, ReconEvent, ReconExecutor, Reconstructor, SliceRecon};
 pub const DEFAULT_MAX_MBS: usize = 36_864;
 
 /// Run the WebAssembly SIMD128 self-tests of the kernels (0 mismatches expected).
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
 pub fn simd_selftest() -> u32 {
     inter_simd::selftest() + deblock_simd::selftest()
 }

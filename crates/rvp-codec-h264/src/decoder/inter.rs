@@ -92,9 +92,9 @@ pub fn mc_luma(
     dst: &mut [u8],
     ds: usize,
 ) {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     return super::inter_simd::mc_luma(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds);
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")))]
     mc_luma_scalar(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds)
 }
 
@@ -114,9 +114,9 @@ pub fn mc_chroma(
     dst: &mut [u8],
     ds: usize,
 ) {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     return super::inter_simd::mc_chroma(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds);
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")))]
     mc_chroma_scalar(plane, stride, pw, ph, x, y, fx, fy, w, h, dst, ds)
 }
 
@@ -360,7 +360,7 @@ pub fn combine(
     p1: Option<&[u8]>,
     weights: Option<&Weights>,
 ) {
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     if let (Some(a), Some(b)) = (p0, p1) {
         return match weights {
             None => super::inter_simd::average(dst, dst_stride, w, h, a, b),
