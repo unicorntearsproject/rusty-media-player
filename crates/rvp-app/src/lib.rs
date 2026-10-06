@@ -138,6 +138,8 @@ struct NpState {
     playback: Option<Playback>,
     /// Host time at which `playback` was sent.
     sent_at: Timestamp,
+    /// The volume last sent (0 while muted).
+    volume: Option<f32>,
 }
 
 /// Where tick time goes, in host microseconds (cumulative).
@@ -576,6 +578,14 @@ impl App {
             self.np.playback = None;
             if let (Some(np), Some(m)) = (host.now_playing(), &meta) {
                 np.set_metadata(m);
+            }
+        }
+        // The volume, from any source (keys, the slider, the media controls): the sink reads it back.
+        let volume = if self.muted { 0.0 } else { self.volume };
+        if self.np.volume != Some(volume) {
+            self.np.volume = Some(volume);
+            if let Some(np) = host.now_playing() {
+                np.set_volume(volume);
             }
         }
         let st = match self.model.state {

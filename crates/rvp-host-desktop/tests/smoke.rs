@@ -453,6 +453,12 @@ fn playerctl_reads_and_drives_it_over_mpris() {
     playerctl(&name, &["play"]);
     std::thread::sleep(Duration::from_millis(1000));
     assert_eq!(playerctl(&name, &["status"]), "Playing");
+    // The volume reads back what the player does, whoever set it: `playerctl volume 0.3` (the slider follows), and the player's own
+    // keys are not covered here, the app test checks every source.
+    playerctl(&name, &["volume", "0.3"]);
+    std::thread::sleep(Duration::from_millis(600));
+    let v: f64 = playerctl(&name, &["volume"]).parse().unwrap();
+    assert!((v - 0.3).abs() < 0.01, "volume 0.3 reads back as {v}");
     playerctl(&name, &["stop"]);
     std::thread::sleep(Duration::from_millis(800));
     assert_ne!(playerctl(&name, &["status"]), "Playing");

@@ -1,7 +1,7 @@
 //! M8: the now-playing model: metadata and playback state go out to the host's sink when they change, and the
 //! transport commands that come back drive the player.
 use rvp_app::App;
-use rvp_host::{HostClock, PlayState, RecordingNowPlaying, TransportCommand};
+use rvp_host::{HostClock, InputEvent, Key, Modifiers, PlayState, RecordingNowPlaying, TransportCommand};
 use rvp_host_headless::{DefaultCodecs, UiHost};
 use rvp_ui::UiConfig;
 use std::path::{Path, PathBuf};
@@ -62,6 +62,11 @@ impl Rig {
 
     fn np(&mut self) -> &mut RecordingNowPlaying {
         self.host.now_playing.as_mut().unwrap()
+    }
+
+    fn key(&mut self, key: Key) {
+        self.host.input.0.push_back(InputEvent::KeyDown { key, mods: Modifiers::default(), repeat: false });
+        self.run(100);
     }
 
     fn command(&mut self, c: TransportCommand) {
@@ -160,4 +165,28 @@ fn transport_commands_drive_the_player() {
     let titles: Vec<&str> = r.np().metadata.iter().map(|m| m.title.as_str()).collect();
     assert_eq!(titles, ["gap_0", "gap_1", "gap_2", "gap_1"]);
     let _ = HostClock::now_us(&*r.host.virtual_clock());
+}
+
+#[test]
+fn the_volume_reaches_the_sink_from_every_source() {
+    if skip() {
+        return;
+    }
+    let mut r = Rig::new();
+    r.open(&["gap_0.mkv"]);
+    r.run(300);
+    // Told once at the start, not on every tick.
+    assert_eq!(r.np().volumes, [1.0]);
+    // From the media controls (`playerctl volume 0.3`).
+    r.command(TransportCommand::SetVolume(0.3));
+    assert_eq!(r.np().volumes.last(), Some(&0.3));
+    assert_eq!(r.np().volumes.len(), 2);
+    // From the keys: Down is five percent.
+    r.key(Key::Down);
+    assert!((r.np().volumes.last().unwrap() - 0.25).abs() < 1e-4, "{:?}", r.np().volumes);
+    // Mute reads as 0, and sound on brings the level back.
+    r.key(Key::Char('m'));
+    assert_eq!(r.np().volumes.last(), Some(&0.0));
+    r.key(Key::Char('m'));
+    assert!((r.np().volumes.last().unwrap() - 0.25).abs() < 1e-4, "{:?}", r.np().volumes);
 }

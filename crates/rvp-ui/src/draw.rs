@@ -144,7 +144,7 @@ impl Ui {
         let hw = self.text_w(Face::SansBold, 26.0, head, -0.3);
         self.text(fb, Face::SansBold, 26.0, cx - hw * 0.5, y, head, t::TEXT_STRONG, 1.0, -0.3);
         y += 30.0 * s;
-        let sub = "MP4, MKV and WebM. Everything plays right here in the tab.";
+        let sub = "MP4, MKV and WebM. Everything plays right here on your device.";
         let sub = self.fonts.fit(Face::Sans, 14.0 * s, sub, card.w - 48.0 * s);
         let sw = self.text_w(Face::Sans, 14.0, &sub, 0.0);
         self.text(fb, Face::Sans, 14.0, cx - sw * 0.5, y, &sub, t::TEXT_MUTED, 1.0, 0.0);

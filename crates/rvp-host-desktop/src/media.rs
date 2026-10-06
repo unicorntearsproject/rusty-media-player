@@ -164,6 +164,14 @@ impl NowPlaying for DesktopNowPlaying {
         self.send(p, p.position_us);
     }
 
+    fn set_volume(&mut self, volume: f32) {
+        // MPRIS has a Volume property (and announces the change); the Windows and macOS controls have none.
+        #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios"))))]
+        let _ = self.controls.set_volume(f64::from(volume));
+        #[cfg(not(all(unix, not(any(target_os = "macos", target_os = "ios")))))]
+        let _ = volume;
+    }
+
     fn poll_command(&mut self) -> Option<TransportCommand> {
         // Called every tick: the moment to refresh a position that would otherwise be stale.
         if let Some((p, sent)) = self.last_playback

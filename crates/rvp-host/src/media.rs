@@ -88,6 +88,9 @@ pub trait NowPlaying {
     fn set_metadata(&mut self, meta: &NowPlayingMeta);
     /// The transport state or position changed.
     fn set_playback(&mut self, playback: &Playback);
+    /// The player's volume (0.0..=1.0, 0 while muted) changed, whoever changed it: sent once at the start and then on every change, so a
+    /// client that reads it back (MPRIS `Volume`) sees what the player does. Hosts without a volume property ignore it.
+    fn set_volume(&mut self, _volume: f32) {}
     /// The next pending command from outside, if any.
     fn poll_command(&mut self) -> Option<TransportCommand>;
 }
@@ -168,6 +171,8 @@ pub struct RecordingNowPlaying {
     pub metadata: Vec<NowPlayingMeta>,
     /// Every playback update.
     pub playback: Vec<Playback>,
+    /// Every volume update.
+    pub volumes: Vec<f32>,
     /// Commands waiting to be polled.
     pub commands: alloc::collections::VecDeque<TransportCommand>,
 }
@@ -179,6 +184,10 @@ impl NowPlaying for RecordingNowPlaying {
 
     fn set_playback(&mut self, playback: &Playback) {
         self.playback.push(*playback);
+    }
+
+    fn set_volume(&mut self, volume: f32) {
+        self.volumes.push(volume);
     }
 
     fn poll_command(&mut self) -> Option<TransportCommand> {
