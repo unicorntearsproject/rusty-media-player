@@ -3,12 +3,36 @@ name: Check
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Run even if this commit already passed'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
+  # CI only runs on changes: skip when this commit already passed this workflow.
+  gate:
+    name: Gate
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: g
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: tools/ci/gate.sh check.yml
+
   check:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4

@@ -4,6 +4,9 @@
 # builds and tests everything under the version you type and uploads the files as workflow artifacts, but publishes nothing. A tag run
 # also attaches the files to a GitHub release (job `publish`, the only job with write access).
 #
+# CI only runs on changes: the first job (`gate`) skips everything when this commit already built successfully (manual runs) or the tag's
+# release already has its files; `force` overrides. No schedules.
+#
 # Signing is optional and uses repository secrets when they exist (see docs/packaging.md); without them the files are unsigned.
 name: Release
 
@@ -16,6 +19,10 @@ on:
         description: 'Dry-run version, for example 0.0.0-ci1 (a tag run uses the tag)'
         required: false
         default: ''
+      force:
+        description: 'Run even if this commit already built successfully'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,8 +32,27 @@ env:
   RVP_TOOLCHAIN: '1.99.0'
 
 jobs:
+  # CI only runs on changes: skip everything when this commit already built successfully (or the tag's release already has its files).
+  gate:
+    name: Gate
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: g
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: tools/ci/gate.sh release.yml
+
   version:
     name: Version
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -52,7 +78,8 @@ jobs:
 
   linux:
     name: Linux binary, .deb, AppImage, tarball
-    needs: version
+    needs: [gate, version]
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04   # glibc 2.35: the binary runs on that and anything newer
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +123,8 @@ jobs:
 
   rpm:
     name: .rpm
-    needs: [version, linux]
+    needs: [gate, version, linux]
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     container: fedora:44   # rpm's own dependency scan (find-requires) reads the binary and writes the exact requirements
     steps:
@@ -124,7 +152,8 @@ jobs:
 
   flatpak-prepare:
     name: Flatpak manifest
-    needs: version
+    needs: [gate, version]
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -140,7 +169,8 @@ jobs:
 
   flatpak:
     name: Flatpak
-    needs: [version, flatpak-prepare]
+    needs: [gate, version, flatpak-prepare]
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
@@ -172,7 +202,8 @@ jobs:
 
   windows:
     name: Windows exe, zip and installer
-    needs: version
+    needs: [gate, version]
+    if: needs.gate.outputs.run == 'true'
     runs-on: windows-latest
     defaults:
       run:
@@ -225,7 +256,8 @@ jobs:
 
   pwa:
     name: Web app (PWA)
-    needs: version
+    needs: [gate, version]
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -260,8 +292,8 @@ jobs:
 
   publish:
     name: Publish the release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [version, linux, rpm, flatpak, windows, pwa]
+    if: needs.gate.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/v')
+    needs: [gate, version, linux, rpm, flatpak, windows, pwa]
     runs-on: ubuntu-22.04
     permissions:
       contents: write

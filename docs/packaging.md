@@ -153,7 +153,9 @@ network off, and the update flow.
 ## CI
 
 `.github/workflows/release.yml` runs **only** on a `v*` tag or by hand (`workflow_dispatch`); `check.yml` (tests, clippy, `cargo xtask check`) only by hand.
-Nothing runs on a push or a pull request. A manual run is a dry run: it builds and tests every format under the version you type and keeps the files as
+Nothing runs on a push or a pull request, and nothing on a schedule (`dist check` fails if a workflow has a `schedule:` trigger). CI only runs on changes: the first job of
+both workflows, `gate` (`tools/ci/gate.sh`, needs `actions: read`), skips every other job when the same workflow already succeeded on this commit (manual runs) or, for a tag
+run, when that tag's release already has assets; a skipped workflow is green. The `force` input of a manual run overrides the gate. A manual run is a dry run: it builds and tests every format under the version you type and keeps the files as
 workflow artifacts. A tag run also creates a *draft* release with the files and `SHA256SUMS`. Jobs: Linux (metadata check, Xvfb smoke tests with
 `playerctl`, deb, AppImage, tarball), rpm (Fedora container, install test), Flatpak (flatpak-builder action), Windows (exe, zip, installer, silent install
 test), PWA (build and Playwright), publish.
