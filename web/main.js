@@ -289,16 +289,45 @@ function download(name, mime, data) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+// The browser changes fullscreen asynchronously: the request settles later, in a `fullscreenchange`. A toggle that arrives while
+// one is under way is remembered and applied once it settles (looking at `document.fullscreenElement` alone would drop it, and
+// the player would end up fullscreen while it believes it is not).
+let fsWant = false;
+let fsBusy = false;
+let fsDirty = false;
+
 function setFullscreen(on) {
-  if (on && !document.fullscreenElement) {
-    document.documentElement.requestFullscreen?.().catch(() => player.set_fullscreen_state(false));
-  } else if (!on && document.fullscreenElement) {
-    document.exitFullscreen?.().catch(() => {});
+  fsWant = on;
+  if (fsBusy) {
+    fsDirty = true;
+    return;
   }
+  applyFullscreen();
+}
+
+function applyFullscreen() {
+  fsDirty = false;
+  if (fsWant === !!document.fullscreenElement) return;
+  const p = fsWant ? document.documentElement.requestFullscreen?.() : document.exitFullscreen?.();
+  if (!p) return;
+  fsBusy = true;
+  p.catch(() => {
+    fsBusy = false;
+    fsWant = !!document.fullscreenElement;
+    player.set_fullscreen_state(fsWant);
+  });
 }
 
 document.addEventListener("fullscreenchange", () => {
-  player.set_fullscreen_state(!!document.fullscreenElement);
+  fsBusy = false;
+  const actual = !!document.fullscreenElement;
+  if (fsDirty && fsWant !== actual) {
+    applyFullscreen();
+  } else {
+    fsDirty = false;
+    fsWant = actual;
+    player.set_fullscreen_state(actual);
+  }
   fit();
 });
 

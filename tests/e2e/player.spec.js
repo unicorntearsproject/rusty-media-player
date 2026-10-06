@@ -236,6 +236,20 @@ test.describe("player", () => {
     await waitFor(page, () => window.rvp.snapshot().fullscreen === false);
   });
 
+  test("fullscreen: two quick toggles end where the player thinks they do, with no lag in the browser", async ({ page }) => {
+    await load(page, LONG, { play: false });
+    // The second press comes while the browser is still entering fullscreen: it must not be lost.
+    await page.keyboard.press("f");
+    await page.keyboard.press("f");
+    await waitFor(page, () => window.rvp.snapshot().fullscreen === false && !document.fullscreenElement);
+    await page.keyboard.press("f");
+    await waitFor(page, () => window.rvp.snapshot().fullscreen === true && !!document.fullscreenElement);
+    await page.keyboard.press("f");
+    await page.keyboard.press("f");
+    await page.keyboard.press("f");
+    await waitFor(page, () => window.rvp.snapshot().fullscreen === false && !document.fullscreenElement);
+  });
+
   test("e) the right-click menu offers every action the keyboard has", async ({ page }) => {
     await load(page, LONG, { play: false });
     await page.mouse.click(640, 300, { button: "right" });
