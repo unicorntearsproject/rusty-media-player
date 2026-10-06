@@ -3,8 +3,9 @@ use rvp_host::{Key, PointerButton};
 use winit::event::MouseButton;
 use winit::keyboard::{Key as WKey, NamedKey};
 
-/// Pixels a wheel "line" scrolls (the web host gets pixels from the browser; a notch of a desktop wheel is three lines of text).
-pub const WHEEL_LINE_PX: f32 = 48.0;
+/// Pixels a wheel "line" scrolls (the web host gets pixels from the browser). One detent is one line, 40 px: the notch the UI's
+/// volume, seek and list steps consume, and the line of Rusty Bucket's App API.
+pub const WHEEL_LINE_PX: f32 = 40.0;
 
 /// A logical key as the player's key, or `None` for keys it has no use for (modifiers on their own, dead keys).
 pub fn map_key(k: &WKey) -> Option<Key> {
