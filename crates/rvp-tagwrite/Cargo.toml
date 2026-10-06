@@ -1,0 +1,17 @@
+[package]
+name = "rvp-tagwrite"
+description = "Writing tags into audio files: ID3v2.4 (MP3), Vorbis comments (FLAC, Ogg Vorbis, Opus) and MP4 ilst atoms, keeping everything else (no_std + alloc)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rvp-core.workspace = true
+rvp-host.workspace = true
+rvp-library.workspace = true

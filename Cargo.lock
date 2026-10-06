@@ -3104,6 +3104,7 @@ dependencies = [
  "rvp-player",
  "rvp-subs",
  "rvp-ui",
+ "rvp-viz",
  "serde_json",
 ]
 
@@ -3181,6 +3182,15 @@ name = "rvp-subs"
 version = "0.0.4"
 dependencies = [
  "rvp-core",
+]
+
+[[package]]
+name = "rvp-tagwrite"
+version = "0.0.4"
+dependencies = [
+ "rvp-core",
+ "rvp-host",
+ "rvp-library",
 ]
 
 [[package]]

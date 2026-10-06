@@ -14,6 +14,7 @@ members = [
     "crates/rvp-subs",
     "crates/rvp-viz",
     "crates/rvp-library",
+    "crates/rvp-tagwrite",
     "crates/rvp-player",
     "crates/rvp-ui",
     "crates/rvp-app",
@@ -53,6 +54,7 @@ rvp-demux = { path = "crates/rvp-demux" }
 rvp-subs = { path = "crates/rvp-subs" }
 rvp-viz = { path = "crates/rvp-viz" }
 rvp-library = { path = "crates/rvp-library" }
+rvp-tagwrite = { path = "crates/rvp-tagwrite" }
 rvp-player = { path = "crates/rvp-player" }
 rvp-ui = { path = "crates/rvp-ui" }
 rvp-app = { path = "crates/rvp-app" }
