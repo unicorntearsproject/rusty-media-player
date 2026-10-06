@@ -199,6 +199,7 @@ jobs:
           manifest-path: target/dist/flatpak/io.github.idometeor.RustyWave.yml
           cache-key: flatpak-builder-${{ github.sha }}
           arch: x86_64
+          branch: stable
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak

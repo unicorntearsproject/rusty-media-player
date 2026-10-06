@@ -137,6 +137,18 @@ pub(super) struct Entry {
     pub sha256: String,
     /// Whether the entry has a `zsync_url` (the stable alias).
     pub zsync: bool,
+    /// A remark for people reading the manifest (clients ignore it).
+    pub note: Option<&'static str>,
+}
+
+/// What a person should know about a file before running it.
+pub(super) fn note(key: &str) -> Option<&'static str> {
+    match key {
+        "macos-dmg" => Some(
+            "beta: ad-hoc signed only, not signed with a Developer ID and not notarized; Gatekeeper asks to allow it once (docs/release-testing.md, 5b)",
+        ),
+        _ => None,
+    }
 }
 
 fn esc(s: &str) -> String {
@@ -178,11 +190,21 @@ pub(super) fn render(
         s.push_str(&format!("      \"url\": \"{}\",\n", esc(&url)));
         s.push_str(&format!("      \"size\": {},\n", e.size));
         s.push_str(&format!("      \"sha256\": \"{}\",\n", esc(&e.sha256)));
+        let more = e.zsync || e.note.is_some();
+        s.push_str(&format!(
+            "      \"signature_url\": \"{}.asc\"{}\n",
+            esc(&url),
+            if more { "," } else { "" }
+        ));
         if e.zsync {
-            s.push_str(&format!("      \"signature_url\": \"{}.asc\",\n", esc(&url)));
-            s.push_str(&format!("      \"zsync_url\": \"{}\"\n", esc(&format!("{base}/{ZSYNC_ALIAS}"))));
-        } else {
-            s.push_str(&format!("      \"signature_url\": \"{}.asc\"\n", esc(&url)));
+            let last = if e.note.is_some() { "," } else { "" };
+            s.push_str(&format!(
+                "      \"zsync_url\": \"{}\"{last}\n",
+                esc(&format!("{base}/{ZSYNC_ALIAS}"))
+            ));
+        }
+        if let Some(n) = e.note {
+            s.push_str(&format!("      \"note\": \"{}\"\n", esc(n)));
         }
         s.push_str(if i + 1 < entries.len() { "    },\n" } else { "    }\n" });
     }
@@ -249,6 +271,7 @@ impl Ctx {
                 size: fs::metadata(&p).map_err(|e| e.to_string())?.len(),
                 sha256: sha256(&p)?,
                 zsync: a.zsync.is_some(),
+                note: note(a.key),
             });
         }
         if entries.is_empty() {
@@ -280,7 +303,7 @@ mod tests {
     use super::*;
 
     fn entry(key: &'static str, arch: &'static str, name: &str, zsync: bool) -> Entry {
-        Entry { key, arch, name: name.into(), size: 123, sha256: "ab".repeat(32), zsync }
+        Entry { key, arch, name: name.into(), size: 123, sha256: "ab".repeat(32), zsync, note: None }
     }
 
     #[test]
@@ -326,6 +349,21 @@ mod tests {
 "#
         );
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn the_dmg_is_marked_as_an_unsigned_beta() {
+        let mut e = entry("macos-dmg", "universal", "a.dmg", false);
+        e.note = note(e.key);
+        let got = render("0.0.3", "2026-10-06", "F", "https://h", &[e]);
+        assert!(got.contains("\"signature_url\": \"https://h/a.dmg.asc\",\n"), "{got}");
+        assert!(got.contains("\"note\": \"beta: ad-hoc signed only"), "{got}");
+        assert!(serde_json_ok(&got), "{got}");
+    }
+
+    /// Cheap well-formedness check without a JSON dependency: balanced braces and no `,` before a closing brace.
+    fn serde_json_ok(s: &str) -> bool {
+        s.matches('{').count() == s.matches('}').count() && !s.replace(char::is_whitespace, "").contains(",}")
     }
 
     #[test]
