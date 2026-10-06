@@ -205,9 +205,9 @@ test.describe("M10", () => {
       expect(b, s.viz.effect).not.toBe(a);
     }
     expect(names.size).toBe(5);
-    // Escape leaves the visualizer for the now-playing screen.
+    // Escape leaves the visualizer for where it was opened from: the album.
     await press(page, "Escape");
-    await waitFor(page, () => window.rvp.snapshot().lib.view === "nowplaying");
+    await waitFor(page, () => window.rvp.snapshot().lib.view === "albums" && window.rvp.snapshot().lib.detail?.kind === "album");
     expect(errors).toEqual([]);
   });
 

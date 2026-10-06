@@ -443,6 +443,38 @@ test.describe("player", () => {
     await ctx.close();
   });
 
+  test("g) shuffle and repeat sit on the player bar and show one state with the keys and the menu", async ({ page }) => {
+    const errors = await load(page, LONG, { play: false });
+    const center = (r) => [r.x + r.w / 2, r.y + r.h / 2];
+    let s = await snap(page);
+    expect(s.transport).toEqual({ shuffle: { pressed: false, label: "Shuffle: off" }, repeat: { state: "off", label: "Repeat: off" } });
+    // The buttons are on the bar (the window is wide enough), clear of the time readout and of each other.
+    expect(s.buttons.Shuffle && s.buttons.Repeat).toBeTruthy();
+    await page.mouse.click(...center(s.buttons.Repeat));
+    await waitFor(page, () => window.rvp.snapshot().transport.repeat.label === "Repeat: all");
+    await page.mouse.click(...center(s.buttons.Shuffle));
+    await waitFor(page, () => window.rvp.snapshot().transport.shuffle.pressed === true);
+    // The key and the button are one state: R goes on to "one", Z turns shuffle off, and the playlist menu says so.
+    await press(page, "r");
+    await waitFor(page, () => window.rvp.snapshot().transport.repeat.label === "Repeat: one");
+    await press(page, "z");
+    await waitFor(page, () => window.rvp.snapshot().transport.shuffle.label === "Shuffle: off");
+    await press(page, "q");
+    await waitFor(page, () => window.rvp.snapshot().menu_open);
+    s = await snap(page);
+    const labels = s.menu.map((m) => m.label);
+    expect(labels).toContain("Repeat: one");
+    expect(labels).toContain("Shuffle: off");
+    await press(page, "Escape");
+    // The visualizer remembers the player: V opens it from there and V leaves it for the player again.
+    await press(page, "v");
+    await waitFor(page, () => window.rvp.snapshot().lib.view === "visualizer");
+    expect((await snap(page)).lib.viz_return.mode).toBe("player");
+    await press(page, "v");
+    await waitFor(page, () => window.rvp.snapshot().lib.view !== "visualizer" && window.rvp.snapshot().lib.mode === "player");
+    expect(errors).toEqual([]);
+  });
+
   test("f) the paused screen matches the committed golden", async ({ page }) => {
     await load(page, LONG, { play: false });
     const s = await snap(page);
