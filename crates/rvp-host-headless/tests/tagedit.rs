@@ -152,7 +152,7 @@ impl Rig {
     fn form(&mut self) -> serde_json::Value {
         // The editor is described by the snapshot once it has been drawn.
         self.run(40);
-        let s: serde_json::Value = serde_json::from_str(&self.app.snapshot().json().to_string()).unwrap();
+        let s: serde_json::Value = serde_json::from_str(self.app.snapshot().json()).unwrap();
         s["lib"]["tagform"].clone()
     }
 

@@ -1087,6 +1087,19 @@ Features added on top of M12 (details in the docs named in brackets):
 - **Web build**: content-hashed names, `build-info.json`, the threaded build in the zip, a service worker that precaches the build the browser can run; `dist --target rustybucket` lays a release out for
   Rusty Bucket's release site.
 
+### Phase A2 of the 2026-10-06 batch
+
+- **Favorites**: a heart on every song and video (rows, posters, the album page's *Favorite* button, the now-playing card, the bar, context menus, key `H`), a Favorites view (key `9`) with Music and Videos
+  sections that plays as one queue. Kept by folder name, file name and length (`library/favorites`), so rescans, moved folders and tag edits keep them.
+- **About RW** (last in the rail, `F1`): three short paragraphs (DJ Unicorn Tears, Rusty Wave, Rusty Bucket), the version and build commit (`build.rs` of `rvp-app`; `RVP_BUILD_COMMIT` overrides it
+  for builds without git), links through the host (`Effect::OpenUrl`) and the licenses.
+- **Visualizer cycle**: `Shift+V` (or the button) changes the effect by itself; Settings has the order (in turn or random) and the time (15 s, 30 s, 1, 2, 5, 10 min); it holds still with reduced motion.
+- **Edit tags** (right-click, `E`): title, artist, album, album artist, track, disc, year, genre and the cover for a song, or the shared tags of an album. `rvp-tagwrite` writes ID3v2.4, Vorbis comments and
+  MP4 `ilst`, safely; see [`host-api.md`](host-api.md) for what each host does. Multi-select editing is not there (the library has no multi-select); an album's shared fields are the cheap version of it.
+- **Tooltips**: every control (rail, buttons, toggles, sliders, rows, dialogs, the tag editor, the audio panel) says what it does and its key, after 450 ms or when the keyboard reaches it, wrapped at 140
+  characters, inside the window; Settings has *Show tooltips*. `tips.rs` decides the text for every `LibHit` exhaustively, and a test walks every control of every view.
+- Search covers favorites' hearts, videos and edited tags at once (the library is patched the moment a file is written, and the folder is read again to confirm it).
+
 ## 12. Risks and open questions
 
 | # | Risk | Plan |

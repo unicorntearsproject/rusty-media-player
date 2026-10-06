@@ -1522,3 +1522,312 @@ fn the_tag_form_buttons_and_boxes_answer_the_pointer() {
     r.click(c.cx(), c.cy());
     assert!(!r.ui.tag_form_open());
 }
+
+// ---- tooltips ---------------------------------------------------------------------------------------------------------------------
+
+/// Draw a frame (so the geometry and the visible rows are current) and find every control: the first point of each distinct thing the
+/// pointer can be over, found by walking the window on a grid.
+fn controls_on_screen(r: &mut Rig, step: f32) -> Vec<(LibHit, (f32, f32))> {
+    let _ = r.draw();
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let (w, h) = r.ui.size();
+    let mut seen: Vec<(LibHit, (f32, f32))> = Vec::new();
+    let mut y = 2.0;
+    while y < h as f32 {
+        let mut x = 2.0;
+        while x < w as f32 {
+            let hit = r.ui.lib_hit(x, y, &g, &r.m, &ctx);
+            // Rows and cards repeat the same controls: three of each kind is enough.
+            let many = matches!(hit, LibHit::Ent(_) | LibHit::EntPlay(_) | LibHit::EntHeart(_));
+            let same = seen
+                .iter()
+                .filter(|(k, _)| core::mem::discriminant(k) == core::mem::discriminant(&hit))
+                .count();
+            if hit != LibHit::None && !seen.iter().any(|(k, _)| *k == hit) && (!many || same < 3) {
+                seen.push((hit, (x, y)));
+            }
+            x += step;
+        }
+        y += step;
+    }
+    seen
+}
+
+fn assert_all_have_tips(r: &mut Rig, what: &str) -> usize {
+    // An 18 px grid finds every control (the smallest is 28 px).
+    let controls = controls_on_screen(r, 18.0);
+    let (w, h) = r.ui.size();
+    for (hit, (x, y)) in &controls {
+        if matches!(hit, LibHit::Menu(..)) {
+            continue; // menu rows carry their own label and key
+        }
+        let ctx = LibCtx {
+            lib: &r.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
+        let (text, key) =
+            r.ui.lib_tip_text(*hit, &r.m, &ctx)
+                .unwrap_or_else(|| panic!("{what}: {hit:?} at ({x}, {y}) has no tooltip"));
+        assert!(text.chars().count() >= 8, "{what}: {hit:?}: {text:?}");
+        assert!(key.chars().count() <= 14, "{what}: {hit:?}: key {key:?}");
+        let a =
+            r.ui.lib_tip_anchor(*hit, &r.m, &ctx)
+                .unwrap_or_else(|| panic!("{what}: {hit:?} has no place to point at"));
+        assert!(
+            a.w > 0.0 && a.h > 0.0 && a.right() > 0.0 && a.x < w as f32 && a.bottom() > 0.0 && a.y < h as f32,
+            "{what}: {hit:?} anchor {a:?}"
+        );
+        // Drawn next to it, whatever its size, wrapped and inside the window.
+        let mut fb = FrameBuffer::new(w, h);
+        r.ui.draw_tip_box(&mut fb, &crate::tips::Tip { text, key, anchor: a }, w as f32, h as f32);
+    }
+    controls.len()
+}
+
+#[test]
+fn every_control_of_every_view_has_a_tooltip_that_says_what_it_does() {
+    for (w, h) in [(1280u32, 720u32), (800, 560)] {
+        let floor = if w > 1000 { 150 } else { 80 };
+        let mut total = 0;
+        let mut r = Rig::new();
+        r.ui.set_size(w, h, 1.0);
+        with_videos(&mut r, 5);
+        let songs: Vec<u32> = r.lib.all_tracks().iter().take(3).map(|t| t.id).collect();
+        for s in &songs {
+            r.lib.set_favorite(*s, true);
+        }
+        let film = r.lib.all_videos()[0].id;
+        r.lib.set_favorite(film, true);
+        let pl = r.lib.create_playlist("Mix");
+        r.lib.playlist_add(pl, &songs);
+        r.m = playing_model(&r.lib);
+        r.m.app.tags = true;
+        r.m.app.links = true;
+        let (album, artist) = (r.lib.albums()[0].id, r.lib.artists()[0].id);
+        for view in [
+            View::Albums,
+            View::Artists,
+            View::Tracks,
+            View::Videos,
+            View::Favorites,
+            View::Playlists,
+            View::Queue,
+            View::NowPlaying,
+            View::Visualizer,
+            View::About,
+        ] {
+            r.ui.show_view(view);
+            total += assert_all_have_tips(&mut r, &alloc::format!("{w}x{h} {view:?}"));
+        }
+        // The same views as a list, with a query, with something open inside them.
+        r.ui.lib.video_list = true;
+        r.ui.show_view(View::Videos);
+        total += assert_all_have_tips(&mut r, "video list");
+        r.ui.show_view(View::Search);
+        r.typed("song");
+        total += assert_all_have_tips(&mut r, "search results");
+        r.ui.show_view(View::Albums);
+        for d in [Detail::Album(album), Detail::Artist(artist), Detail::Playlist(pl)] {
+            r.ui.open_detail(d);
+            total += assert_all_have_tips(&mut r, &alloc::format!("{d:?}"));
+            r.ui.go_back(
+                &r.m.clone(),
+                &LibCtx {
+                    lib: &r.lib,
+                    now_art: None,
+                    scan: None,
+                    viz: None,
+                    video: None,
+                    resume: crate::lib_ui::no_resume(),
+                },
+            );
+        }
+        // The tag editor, the name prompt, an empty library with its buttons.
+        r.ui.open_tag_form(spec(None));
+        total += assert_all_have_tips(&mut r, "tag editor");
+        r.ui.lib.tagform = None;
+        r.ui.ask_playlist_name(None);
+        total += assert_all_have_tips(&mut r, "name prompt");
+        r.ui.lib.prompt = None;
+        let mut empty = Rig::new();
+        empty.ui.set_size(w, h, 1.0);
+        empty.lib = Library::new();
+        empty.ui.show_view(View::Albums);
+        total += assert_all_have_tips(&mut empty, "the empty library");
+        assert!(total > floor, "{w}x{h}: only {total} controls were found: the walk is not walking");
+    }
+}
+
+#[test]
+fn tooltips_wait_a_moment_follow_the_keyboard_go_away_when_off_and_stay_in_the_window() {
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    r.ui.show_view(View::Albums);
+    let _ = r.draw();
+    let (x, y) = center(r.rail_item(View::Tracks));
+    r.handle(InputEvent::PointerMove { x, y });
+    let ctx = || LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    assert_eq!(r.ui.lib_tip_target(), Some(LibHit::Rail(View::Tracks)));
+    // Not at once; after the delay, and a redraw is asked for.
+    assert!(!r.ui.lib_tip_tick(r.now));
+    assert!(r.ui.lib_tip_now(&r.m, &ctx()).is_none());
+    r.now += crate::ui::TOOLTIP_DELAY_US + 1000;
+    assert!(r.ui.lib_tip_tick(r.now), "a redraw is due to show it");
+    r.ui.now = r.now;
+    let tip = r.ui.lib_tip_now(&r.m, &ctx()).expect("shown after the delay");
+    assert!(tip.text.starts_with("Tracks") && tip.key == "3", "{tip:?}");
+    // It goes away with the pointer, with an open menu and with the setting.
+    r.handle(InputEvent::PointerMove { x: 1270.0, y: 5.0 });
+    assert_eq!(r.ui.lib_tip_target(), None);
+    r.handle(InputEvent::PointerMove { x, y });
+    r.right_click(x, y);
+    assert!(r.ui.menu_open() && r.ui.lib_tip_target().is_none());
+    r.key(Key::Escape);
+    r.handle(InputEvent::PointerMove { x: x + 4.0, y });
+    assert!(r.ui.lib_tip_target().is_some());
+    r.ui.set_tooltips(false);
+    assert!(r.ui.lib_tip_target().is_none() && !r.ui.tooltips());
+    r.ui.set_tooltips(true);
+    // The keyboard: the rail's focus, the bar's focus, a selected row and the search box have tooltips too.
+    r.key(Key::Other("Tab".into())); // content -> rail
+    let _ = r.draw();
+    assert!(matches!(r.ui.lib_tip_target(), Some(LibHit::Rail(_))));
+    r.key(Key::Other("Tab".into())); // rail -> bar
+    let _ = r.draw();
+    assert!(matches!(r.ui.lib_tip_target(), Some(LibHit::Bar(_))));
+    r.key(Key::Other("Tab".into()));
+    r.key(Key::Down);
+    let _ = r.draw();
+    assert!(matches!(r.ui.lib_tip_target(), Some(LibHit::Ent(_))));
+    r.key(Key::Char('/'));
+    let _ = r.draw();
+    assert_eq!(r.ui.lib_tip_target(), Some(LibHit::Search));
+    // A tooltip is kept inside the window wherever its control is, and long text is wrapped at 140 characters.
+    let (w, h) = r.ui.size();
+    let long = "word ".repeat(120);
+    for a in [
+        crate::gfx::RectF::new(0.0, 0.0, 30.0, 30.0),
+        crate::gfx::RectF::new(w as f32 - 30.0, h as f32 - 30.0, 30.0, 30.0),
+        crate::gfx::RectF::new(600.0, 300.0, 30.0, 30.0),
+    ] {
+        let mut fb = FrameBuffer::new(w, h);
+        r.ui.draw_tip_box(
+            &mut fb,
+            &crate::tips::Tip { text: long.clone(), key: "Shift+V".into(), anchor: a },
+            w as f32,
+            h as f32,
+        );
+    }
+    for l in crate::tips::wrap_chars(&long, crate::tips::TIP_WIDTH_CHARS) {
+        assert!(l.chars().count() <= 140, "{l:?}");
+    }
+    assert_eq!(
+        crate::tips::wrap_chars(&"x".repeat(300), 140).iter().map(|l| l.chars().count()).collect::<Vec<_>>(),
+        [140, 140, 20]
+    );
+    assert_eq!(crate::tips::wrap_chars("a b  c\n d", 140), ["a b c d"]);
+    assert!(crate::tips::wrap_chars("", 140).is_empty());
+}
+
+#[test]
+fn the_player_bar_the_dialogs_and_the_audio_panel_have_tooltips_for_every_control() {
+    use crate::ui::{Btn, Target};
+    let mut ui = Ui::new(UiConfig { reduce_motion: true });
+    ui.set_size(1280, 720, 1.0);
+    let m = UiModel { state: MediaState::Playing, volume: 0.5, rate: 1.0, ..UiModel::default() };
+    for b in [
+        Btn::Play,
+        Btn::Back,
+        Btn::Fwd,
+        Btn::Mute,
+        Btn::Speed,
+        Btn::Tracks,
+        Btn::Playlist,
+        Btn::Open,
+        Btn::Fullscreen,
+        Btn::Welcome,
+        Btn::Prev,
+        Btn::Next,
+        Btn::Shuffle,
+        Btn::Repeat,
+        Btn::QueueView,
+        Btn::VizView,
+        Btn::ModeSwitch,
+        Btn::Favorite,
+    ] {
+        let (text, _) =
+            ui.play_tip_text(Target::Btn(b), &m).unwrap_or_else(|| panic!("{b:?} has no tooltip"));
+        assert!(text.len() >= 8, "{b:?}");
+    }
+    assert!(ui.play_tip_text(Target::Seek, &m).is_some() && ui.play_tip_text(Target::Volume, &m).is_some());
+    // A dialog's switches and buttons: hover each (after the delay) and a tooltip comes.
+    let mut spec = crate::dialog::DialogSpec::default();
+    spec.title = "Settings".into();
+    spec.toggles.push(crate::dialog::DialogToggle {
+        label: "Show tooltips".into(),
+        desc: "Notes on controls.".into(),
+        on: true,
+    });
+    spec.buttons.push(crate::dialog::DialogButton::new("Close", true));
+    spec.buttons.push(crate::dialog::DialogButton::new("Theme\u{2026}", false));
+    let m = UiModel { dialog: Some(spec), ..m };
+    for c in [
+        crate::dialog::DialogControl::Toggle(0),
+        crate::dialog::DialogControl::Button(0),
+        crate::dialog::DialogControl::Button(1),
+    ] {
+        ui.dialog.hover = Some(c);
+        ui.keyboard_mode = false;
+        ui.overlay_tip_tick(&m, 0);
+        assert!(ui.dialog_tip_now(&m).is_none(), "{c:?} not at once");
+        ui.now = crate::ui::TOOLTIP_DELAY_US + 10;
+        assert!(ui.overlay_tip_tick(&m, ui.now), "{c:?}");
+        let tip = ui.dialog_tip_now(&m).unwrap_or_else(|| panic!("{c:?} has no tooltip"));
+        assert!(!tip.text.is_empty());
+        ui.now = 0;
+    }
+    ui.set_tooltips(false);
+    ui.dialog.hover = Some(crate::dialog::DialogControl::Button(0));
+    assert!(!ui.overlay_tip_tick(&m, 10_000_000) && ui.dialog_tip_now(&m).is_none());
+    ui.set_tooltips(true);
+    // The audio panel: every control.
+    ui.open_audio_settings();
+    let m = UiModel { dialog: None, ..m };
+    for c in [
+        crate::audio_panel::AudioControl::Crossfade,
+        crate::audio_panel::AudioControl::CrossfadeLength,
+        crate::audio_panel::AudioControl::AutoLevel,
+        crate::audio_panel::AudioControl::Target,
+        crate::audio_panel::AudioControl::Mode,
+        crate::audio_panel::AudioControl::Done,
+    ] {
+        if let Some(p) = &mut ui.audio_panel {
+            p.hover = Some(c);
+        }
+        ui.keyboard_mode = false;
+        ui.now = 0;
+        ui.overlay_tip_tick(&m, 0);
+        ui.now = crate::ui::TOOLTIP_DELAY_US + 10;
+        assert!(ui.overlay_tip_tick(&m, ui.now), "{c:?}");
+        assert!(ui.audio_tip_now().is_some(), "{c:?} has no tooltip");
+    }
+}

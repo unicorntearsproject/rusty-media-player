@@ -326,6 +326,20 @@ impl Ctx {
         text.replace("@VERSION@", &self.version).replace("@DATE@", &self.date)
     }
 
+    /// The commit the build is made from (the About page shows it); a container has no git of its own, so it is handed in.
+    fn build_commit(&self) -> String {
+        std::env::var("RVP_BUILD_COMMIT")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                capture(Command::new("git").current_dir(&self.root).args(["rev-parse", "--short=10", "HEAD"]))
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or_else(|| "unknown".into())
+    }
+
     fn cargo_cmd(&self) -> Command {
         // Packages are built with a stable toolchain when `rustup` has one pinned for this (RVP_TOOLCHAIN, default 1.99.0).
         let tc = std::env::var("RVP_TOOLCHAIN").unwrap_or_else(|_| "1.99.0".into());
@@ -372,6 +386,8 @@ impl Ctx {
                 &format!("{}:/work", self.root.display()),
                 "-v",
                 &format!("{}:/cargo-cache", cache.display()),
+                "-e",
+                &format!("RVP_BUILD_COMMIT={}", self.build_commit()),
                 "-e",
                 "CARGO_HOME=/cargo-cache",
                 "-e",
@@ -789,6 +805,8 @@ impl Ctx {
             "label=disable",
             "-e",
             &format!("HOME={}", home().display()),
+            "-e",
+            &format!("RVP_BUILD_COMMIT={}", self.build_commit()),
             "-e",
             "RVP_TOOLCHAIN=1.99.0",
             "-v",

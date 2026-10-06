@@ -130,7 +130,7 @@ impl Ui {
                 rect(g.mode[1])
             );
             j += &format!("\"add_folder\":{},\"search\":{},", rect(g.add_folder), rect(g.search));
-            j += &format!("\"settings\":{},", rect(g.settings));
+            j += &format!("\"settings\":{},\"about\":{},", rect(g.settings), rect(g.about));
             let msg: Vec<String> = l
                 .msg_btns
                 .iter()
@@ -206,10 +206,15 @@ impl Ui {
             .collect();
         j += &format!("\"ents\":[{}],", ents.join(","));
         j += &format!("\"ent_count\":{},", l.rows.as_ref().map_or(0, |r| r.ents.len()));
+        j += &format!("\"viz_cycle\":{},", model.viz_cycle);
         j += &format!("\"menu_open\":{},", self.menu_open());
         // The editor as it was last drawn (null when it is closed).
         let form = if self.lib.tagform.is_some() { self.lib.tagform_json.as_str() } else { "null" };
-        j += &format!("\"tagform\":{form}}}");
+        j += &format!("\"tagform\":{form},");
+        j += &match &self.lib.tip_shown {
+            Some((text, key)) => format!("\"tip\":{{\"text\":{},\"key\":{}}}}}", esc(text), esc(key)),
+            None => "\"tip\":null}".to_string(),
+        };
         j
     }
 }

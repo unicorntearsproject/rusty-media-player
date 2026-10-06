@@ -116,7 +116,7 @@ impl Ui {
             bx += w + 10.0 * s;
         }
         y += 40.0 * s + 28.0 * s;
-        if let Some(fb) = fb.as_deref_mut() {
+        if let Some(fb) = fb {
             self.text(
                 fb,
                 Face::Sans,

@@ -60,6 +60,10 @@ impl Ui {
         self.draw_tooltip(fb, &l, model);
         self.draw_audio_panel(fb, model);
         self.draw_app_dialog(fb, model);
+        // The dialog's and the audio panel's controls have tooltips too (drawn over them).
+        if let Some(tip) = self.dialog_tip_now(model).or_else(|| self.audio_tip_now()) {
+            self.draw_tip_box(fb, &tip, l.w, l.h);
+        }
         if self.drag_over {
             self.draw_drop_outline(fb, &l);
         }
@@ -627,43 +631,17 @@ impl Ui {
         self.text(fb, Face::SansMedium, 14.0, r.x + 18.0 * s, r.cy(), &text, t::text_strong(), a, 0.0);
     }
 
-    pub(crate) fn tooltip_text(&self, target: Target, model: &UiModel) -> Option<(String, &'static str)> {
-        let b = match target {
-            Target::Btn(b) => b,
-            Target::Volume => {
-                return Some((
-                    alloc::format!("Volume {}%", (model.volume * 100.0 + 0.5) as i32),
-                    "Up / Down",
-                ));
-            }
-            _ => return None,
-        };
-        let (label, key) = match b {
-            Btn::Play => (if model.state.is_active() { "Pause" } else { "Play" }, "Space"),
-            Btn::Back => ("Back 10 s", "J"),
-            Btn::Fwd => ("Forward 10 s", "L"),
-            Btn::Mute => (if model.muted { "Unmute" } else { "Mute" }, "M"),
-            Btn::Speed => ("Playback speed", "[ ]"),
-            Btn::Tracks => ("Audio and subtitles", "A / S"),
-            Btn::Playlist => ("Playlist", "Q"),
-            Btn::Open => ("Open file", "O"),
-            Btn::Fullscreen => (if model.fullscreen { "Leave fullscreen" } else { "Fullscreen" }, "F"),
-            Btn::ModeSwitch => ("Library", "B"),
-            Btn::Shuffle => (model.shuffle_label(), "Z"),
-            Btn::Repeat => (model.repeat_label(), "R"),
-            Btn::Welcome | Btn::Prev | Btn::Next | Btn::QueueView | Btn::VizView | Btn::Favorite => {
-                return None;
-            }
-        };
-        Some((label.into(), key))
-    }
-
     fn draw_tooltip(&mut self, fb: &mut FrameBuffer, l: &Layout, model: &UiModel) {
         if !self.tooltip_ready() || self.controls_alpha < 0.5 {
             return;
         }
-        let Some((label, key)) = self.tooltip_text(self.hover, model) else { return };
-        let anchor = match self.hover {
+        let target = if self.keyboard_mode && self.focus.is_some() {
+            Target::Btn(self.focus.unwrap_or(Btn::Play))
+        } else {
+            self.hover
+        };
+        let Some((text, key)) = self.play_tip_text(target, model) else { return };
+        let anchor = match target {
             Target::Btn(b) => match l.rect_of(b) {
                 Some(r) => r,
                 None => return,
@@ -672,26 +650,10 @@ impl Ui {
                 Some(r) => r,
                 None => return,
             },
+            Target::Seek => l.seek_hit,
             _ => return,
         };
-        let s = l.s;
-        let lw = self.text_w(Face::SansMedium, 12.5, &label, 0.0);
-        let kw = self.text_w(Face::MonoBold, 11.0, key, 0.0);
-        let w = lw + kw + 40.0 * s;
-        let r = RectF::new(
-            (anchor.cx() - w * 0.5).clamp(8.0 * s, l.w - w - 8.0 * s),
-            anchor.y - 12.0 * s - 30.0 * s,
-            w,
-            30.0 * s,
-        );
-        fb.shadow_rrect(r, 8.0 * s, 4.0 * s, 12.0 * s, Rgba::new(5, 2, 15, 140), 1.0);
-        fb.fill_rrect(r, 8.0 * s, Paint::Solid(t::ink_700()), 1.0);
-        fb.stroke_rrect(r, 8.0 * s, 1.0 * s, t::ink_500(), 1.0);
-        let x =
-            self.text(fb, Face::SansMedium, 12.5, r.x + 12.0 * s, r.cy(), &label, t::text_body(), 1.0, 0.0);
-        let chip = RectF::new(x + 10.0 * s, r.cy() - 9.0 * s, kw + 12.0 * s, 18.0 * s);
-        fb.fill_rrect(chip, 5.0 * s, Paint::Solid(fade(t::cyan_500(), 0.14)), 1.0);
-        self.text(fb, Face::MonoBold, 11.0, chip.x + 6.0 * s, chip.cy(), key, t::cyan_400(), 1.0, 0.0);
+        self.draw_tip_box(fb, &crate::tips::Tip { text, key, anchor }, l.w, l.h);
     }
 
     pub(crate) fn draw_drop_outline(&mut self, fb: &mut FrameBuffer, l: &Layout) {

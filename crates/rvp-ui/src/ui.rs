@@ -187,6 +187,18 @@ pub struct Ui {
     pub(crate) pressed: Option<Target>,
     pub(crate) hover: Target,
     pub(crate) hover_since: i64,
+    /// Tooltips are on (the Settings switch).
+    pub(crate) tips_on: bool,
+    /// What the library tooltip is about, since when, and whether it was drawn.
+    pub(crate) tip_target: Option<crate::lib_ui::LibHit>,
+    pub(crate) tip_since: i64,
+    pub(crate) tip_drawn: bool,
+    /// Since when the keyboard has been on the player face control `focus`.
+    pub(crate) focus_since: i64,
+    /// The dialog or audio-panel control the tooltip is about, since when, and whether it was drawn.
+    pub(crate) dlg_sig: Option<i32>,
+    pub(crate) dlg_since: i64,
+    pub(crate) dlg_drawn: bool,
     pub(crate) last_activity: i64,
     pub(crate) controls_alpha: f32,
     pub(crate) last_update: i64,
@@ -239,6 +251,14 @@ impl Ui {
             pressed: None,
             hover: Target::Video,
             hover_since: 0,
+            tips_on: true,
+            tip_target: None,
+            tip_since: 0,
+            tip_drawn: false,
+            focus_since: 0,
+            dlg_sig: None,
+            dlg_since: 0,
+            dlg_drawn: false,
             last_activity: 0,
             controls_alpha: 1.0,
             last_update: 0,
@@ -575,9 +595,16 @@ impl Ui {
                 redraw = true;
             }
         }
-        // The tooltip appears after a delay.
-        if matches!(self.hover, Target::Btn(_) | Target::Seek | Target::Volume) {
-            let age = now_us - self.hover_since;
+        // The tooltip appears after a delay (for the pointer, or for the keyboard's focus).
+        if self.tips_on
+            && (matches!(self.hover, Target::Btn(_) | Target::Seek | Target::Volume) || self.focus.is_some())
+        {
+            let age = now_us
+                - if self.focus.is_some() && self.keyboard_mode {
+                    self.focus_since
+                } else {
+                    self.hover_since
+                };
             if age >= TOOLTIP_DELAY_US && age - dt < TOOLTIP_DELAY_US + 50_000 {
                 redraw = true;
             }
@@ -587,7 +614,13 @@ impl Ui {
         {
             redraw = true; // the spinner
         }
+        if self.overlay_tip_tick(model, now_us) {
+            redraw = true;
+        }
         if self.lib_chrome() {
+            if self.lib_tip_tick(now_us) {
+                redraw = true;
+            }
             // The equaliser bars and the text caret.
             if self.lib.animated && !self.config.reduce_motion && now_us - self.lib.anim_at >= 120_000 {
                 self.lib.anim_at = now_us;
@@ -635,10 +668,15 @@ impl Ui {
 
     /// True if a tooltip should be shown for the hovered control.
     pub(crate) fn tooltip_ready(&self) -> bool {
-        self.menu.is_empty()
+        self.tips_on
+            && self.menu.is_empty()
             && self.drag.is_none()
-            && matches!(self.hover, Target::Btn(_) | Target::Seek | Target::Volume)
-            && self.now - self.hover_since >= TOOLTIP_DELAY_US
+            && if self.keyboard_mode && self.focus.is_some() {
+                self.now - self.focus_since >= TOOLTIP_DELAY_US
+            } else {
+                matches!(self.hover, Target::Btn(_) | Target::Seek | Target::Volume)
+                    && self.now - self.hover_since >= TOOLTIP_DELAY_US
+            }
     }
 
     // ---- input -----------------------------------------------------------------------------------------
@@ -993,6 +1031,7 @@ impl Ui {
             (Some(i), true) => (i + n - 1) % n,
         };
         self.focus = Some(order[next]);
+        self.focus_since = self.now;
     }
 
     // ---- menus -----------------------------------------------------------------------------------------
@@ -1389,15 +1428,19 @@ mod tests {
             assert_eq!(click(&mut ui, r.cx(), r.cy(), &m, 1_000_000), [a], "{b:?}");
         }
         // Tooltips name the state and the key, from the same text as the menus.
-        let tip = |ui: &Ui, b: Btn, m: &UiModel| ui.tooltip_text(Target::Btn(b), m).unwrap();
-        assert_eq!(tip(&ui, Btn::Shuffle, &m), ("Shuffle: off".into(), "Z"));
-        assert_eq!(tip(&ui, Btn::Repeat, &m), ("Repeat: off".into(), "R"));
+        let tip = |ui: &Ui, b: Btn, m: &UiModel| ui.play_tip_text(Target::Btn(b), m).unwrap();
+        assert!(
+            tip(&ui, Btn::Shuffle, &m).0.starts_with("Shuffle is off") && tip(&ui, Btn::Shuffle, &m).1 == "Z"
+        );
+        assert!(
+            tip(&ui, Btn::Repeat, &m).0.starts_with("Repeat is off") && tip(&ui, Btn::Repeat, &m).1 == "R"
+        );
         m.shuffle = true;
         m.repeat = 1;
-        assert_eq!(tip(&ui, Btn::Shuffle, &m), ("Shuffle: on".into(), "Z"));
-        assert_eq!(tip(&ui, Btn::Repeat, &m), ("Repeat: all".into(), "R"));
+        assert!(tip(&ui, Btn::Shuffle, &m).0.starts_with("Shuffle is on"));
+        assert!(tip(&ui, Btn::Repeat, &m).0.starts_with("Repeat all"));
         m.repeat = 2;
-        assert_eq!(tip(&ui, Btn::Repeat, &m).0, "Repeat: one");
+        assert!(tip(&ui, Btn::Repeat, &m).0.starts_with("Repeat one"));
         let menu = actions::playlist_menu(&m);
         let label = |a: Action| menu.iter().find(|i| i.action == Some(a)).unwrap().label.clone();
         assert_eq!(label(Action::CycleRepeat), m.repeat_label());

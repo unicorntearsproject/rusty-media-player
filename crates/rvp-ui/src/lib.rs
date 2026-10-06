@@ -28,6 +28,7 @@ mod logo;
 pub mod model;
 mod subs;
 pub mod theming;
+pub mod tips;
 pub mod tk;
 pub mod ui;
 

@@ -1341,6 +1341,7 @@ impl App {
         m.now_art = m.now_track.and_then(|t| self.lib.lib.track(t)).map_or(0, |t| t.art);
         m.now_favorite = m.now_track.is_some_and(|t| self.lib.lib.is_favorite(t));
         m.viz_cycle = self.svc.settings.viz_cycle;
+        self.ui.set_tooltips(self.svc.settings.tooltips);
         m.repeat = match self.playlist.repeat() {
             Repeat::Off => 0,
             Repeat::All => 1,

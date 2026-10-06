@@ -491,7 +491,16 @@ fn settings_lists_what_the_host_can_do_and_works_without_a_host() {
     let mut r = Rig::with(None);
     r.do_action(Action::ShowSettings);
     assert_eq!(r.title().as_deref(), Some("Settings"));
-    assert_eq!(r.buttons(), ["Audio settings\u{2026}", "Theme\u{2026}", "Close"]);
+    assert_eq!(
+        r.buttons(),
+        [
+            "Audio settings\u{2026}",
+            "Theme\u{2026}",
+            "Visualizer order: in turn",
+            "Visualizer cycle time: 1 min",
+            "Close"
+        ]
+    );
     r.press("Close");
     assert!(r.title().is_none());
     // With services that offer everything.
@@ -505,6 +514,8 @@ fn settings_lists_what_the_host_can_do_and_works_without_a_host() {
         [
             "Audio settings\u{2026}",
             "Theme\u{2026}",
+            "Visualizer order: in turn",
+            "Visualizer cycle time: 1 min",
             "Set as default media player\u{2026}",
             "Add to app menu",
             "Check for updates\u{2026}",

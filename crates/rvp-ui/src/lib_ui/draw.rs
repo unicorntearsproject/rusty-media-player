@@ -8,7 +8,7 @@ use crate::gfx::{FrameBuffer, Paint, RectF, fade};
 use crate::icon::Icon;
 use crate::model::{MediaState, UiModel, format_time};
 use crate::tk as t;
-use crate::ui::{Btn, Layout, TOOLTIP_DELAY_US, Ui};
+use crate::ui::{Btn, Layout, Ui};
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -289,7 +289,6 @@ impl Ui {
             self.draw_lib_bar(fb, &g, model, ctx, a);
         }
         self.draw_toast(fb, &l);
-        self.draw_lib_tooltip(fb, &g, model);
         if self.drag_over {
             self.draw_drop_outline(fb, &l);
         }
@@ -306,6 +305,15 @@ impl Ui {
             self.draw_tagform(fb, g.m.w, g.m.h, ctx);
         }
         self.draw_app_dialog(fb, model);
+        // Tooltips last, over everything: the library's own controls, the dialog's and the audio panel's.
+        let tip = self
+            .lib_tip_now(model, ctx)
+            .or_else(|| self.dialog_tip_now(model))
+            .or_else(|| self.audio_tip_now());
+        self.lib.tip_shown = tip.as_ref().map(|t| (t.text.clone(), t.key.clone()));
+        if let Some(tip) = tip {
+            self.draw_tip_box(fb, &tip, g.m.w, g.m.h);
+        }
         self.lib.animated = animated;
     }
 
@@ -943,7 +951,9 @@ impl Ui {
                 }
                 RowKind::Gap => {}
                 RowKind::About => {
-                    self.about_page(Some(fb), RectF::new(body.x, y, body.w, row.h), model);
+                    // The buttons are listed with the hero's (the snapshot and the tests find them there).
+                    let btns = self.about_page(Some(fb), RectF::new(body.x, y, body.w, row.h), model);
+                    self.lib.hero.extend(btns.iter().map(|b| (b.id, b.rect, b.label.clone())));
                 }
                 RowKind::Message(head, sub) => {
                     let rect = RectF::new(body.x, y, body.w, row.h);
@@ -2478,50 +2488,6 @@ impl Ui {
         .iter()
         .position(|b| *b == btn)
         .unwrap_or(0)
-    }
-
-    fn draw_lib_tooltip(&mut self, fb: &mut FrameBuffer, g: &Geom, model: &UiModel) {
-        let LibHit::Bar(btn) = self.lib.hover else { return };
-        if !self.menu.is_empty() || self.lib.drag.is_some() || self.now - self.hover_since < TOOLTIP_DELAY_US
-        {
-            return;
-        }
-        let Some((_, anchor)) = g.bar_btns.iter().find(|(b, _)| *b == btn) else { return };
-        let (label, key) = match btn {
-            Btn::Play => (if model.state.is_active() { "Pause" } else { "Play" }, "Space"),
-            Btn::Prev => ("Previous", "P"),
-            Btn::Next => ("Next", "N"),
-            Btn::Shuffle => (model.shuffle_label(), "Z"),
-            Btn::Repeat => (model.repeat_label(), "R"),
-            Btn::Mute => (if model.muted { "Unmute" } else { "Mute" }, "M"),
-            Btn::QueueView => ("Queue", "5"),
-            Btn::VizView => {
-                (if self.lib.view == View::Visualizer { "Leave visualizer" } else { "Visualizer" }, "V")
-            }
-            Btn::ModeSwitch => ("Player", "B"),
-            Btn::Favorite => {
-                (if model.now_favorite { "Remove from favorites" } else { "Add to favorites" }, "H")
-            }
-            _ => return,
-        };
-        let s = self.scale;
-        let lw = self.text_w(Face::SansMedium, 12.5, label, 0.0);
-        let kw = self.text_w(Face::MonoBold, 11.0, key, 0.0);
-        let w = lw + kw + 40.0 * s;
-        let r = RectF::new(
-            (anchor.cx() - w * 0.5).clamp(8.0 * s, g.m.w - w - 8.0 * s),
-            anchor.y - 12.0 * s - 30.0 * s,
-            w,
-            30.0 * s,
-        );
-        fb.shadow_rrect(r, 8.0 * s, 4.0 * s, 12.0 * s, Rgba::new(5, 2, 15, 140), 1.0);
-        fb.fill_rrect(r, 8.0 * s, Paint::Solid(t::ink_700()), 1.0);
-        fb.stroke_rrect(r, 8.0 * s, 1.0 * s, t::ink_500(), 1.0);
-        let x =
-            self.text(fb, Face::SansMedium, 12.5, r.x + 12.0 * s, r.cy(), label, t::text_body(), 1.0, 0.0);
-        let chip = RectF::new(x + 10.0 * s, r.cy() - 9.0 * s, kw + 12.0 * s, 18.0 * s);
-        fb.fill_rrect(chip, 5.0 * s, Paint::Solid(fade(t::cyan_500(), 0.14)), 1.0);
-        self.text(fb, Face::MonoBold, 11.0, chip.x + 6.0 * s, chip.cy(), key, t::cyan_400(), 1.0, 0.0);
     }
 
     // ---- the prompt ------------------------------------------------------------------------------------------------------------------

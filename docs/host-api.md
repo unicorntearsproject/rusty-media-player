@@ -238,6 +238,47 @@ One bounded GET (2 MiB) of a text document, polled. Only the theme dialog uses i
 update client (HTTPS only); a page answers with `fetch` (a cross-origin link the server does not allow fails, and the dialog tells the person to paste the CSS instead);
 Rusty Bucket keeps the default and the dialog says to paste.
 
+## Opening links (`Host::opens_links`, `Effect::OpenUrl`)
+
+```rust
+fn opens_links(&self) -> bool { false }                 // on Host
+Effect::OpenUrl(String)                                  // an `https://` address
+```
+
+The About page's two links (rustybucket.ai, DJ Unicorn Tears on X). A host that answers `true` opens the address in the person's browser: a page with `window.open(url, "_blank",
+"noopener,noreferrer")`, inside the same event handler (so a pop-up blocker lets it through), the desktop with `xdg-open`, `rundll32 url.dll,FileProtocolHandler` or `open`. Only `https` addresses
+without spaces or control characters are opened (the desktop checks again, `rvp_host_desktop::links::is_web_url`). A host that cannot (Rusty Bucket) keeps `false`, and the page shows the
+addresses as text. The Licenses button is not a link: it saves `THIRD_PARTY_LICENSES.md` through `Effect::Download`.
+
+## Writing files: the tag editor (`FileWriter`)
+
+```rust
+trait FileWriter {
+    fn can_write(&mut self, root: &str) -> Result<(), String>;                 // Ok, or the words that tell the user why not
+    fn write(&mut self, root: &str, path: &str, data: Vec<u8>) -> u32;         // replace `path` below `root` with `data`; a ticket
+    fn poll_write(&mut self, ticket: u32) -> Option<Result<(), String>>;       // the answer, once; after an Err the file is as it was
+}
+fn file_writer(&mut self) -> Option<&mut dyn FileWriter> { None }               // on Host
+Effect::PickCover                                                                // the editor's Replace button; answer with App::cover_picked(name, bytes)
+```
+
+Editing tags is the one thing the player does that cannot be undone, so the contract is strict. The app reads the file, edits it with `rvp-tagwrite`, and checks that the edited bytes still
+read as the same audio before it asks the host to write; the host replaces the file **whole and safely** or changes nothing:
+
+- **Desktop**: a temporary file beside it, `sync_all`, the old file's permissions, an atomic `rename`, and the folder synced. A path that leaves the folder (`..`, absolute) or a file that is not
+  there is refused (nothing is ever created).
+- **Browser**: `window.rvpCanWrite` / `rvpWriteFile` / `rvpWritePoll` (`web/main.js`), with the File System Access API and the folder's own handle. `rvpCanWrite` runs inside the click that opens
+  the editor and asks for the read-write permission then; a browser without the API, or a folder added through the `webkitdirectory` fallback (no handle), answers with the reason and the editor opens
+  read-only. The browser's `createWritable()` writes a swap file that replaces the file only on `close()`.
+- **Rusty Bucket**: no `FileWriter` (the app ABI has no writes to library files), so "Edit tags" is not offered at all (`AppModel::tags` is false).
+
+Formats and what is kept: MP3 (ID3v2.4; v2.2/v2.3 tags are upgraded, unknown frames kept, an ID3v1 tag kept in step), FLAC (other blocks kept), Ogg Vorbis and Opus (comment header repaginated, the
+audio pages' contents untouched, covers as `METADATA_BLOCK_PICTURE`), MP4/M4A (`ilst` atoms; chunk offsets moved when the movie box grows, a `free` box fills the gap when it shrinks). The audio is
+never changed.
+
+Storage keys added: `library/favorites` (hearts, kept by folder name, file name and length, so they survive rescans and moves), and the settings `tooltips`, `viz_cycle`, `viz_random`, `viz_secs` in
+`settings/app` (these load on every host, also one without `AppServices`).
+
 ## `window.rvp.snapshot()`: the stable subset
 
 The browser page exposes `window.rvp` for tests and tooling (the page's own JavaScript, a Playwright suite, a kiosk wrapper). `window.rvp.snapshot()` returns
@@ -268,4 +309,5 @@ are what the Rusty Bucket and desktop hosts' smoke output reports where they rep
 - 2026-10-05: the Rusty Bucket mapping and its open questions (M12). No trait changed.
 - 2026-10-06: optional `AppServices` capability (update checks, app-menu entry); `settings/app` key.
 - 2026-10-06: M12 against the Bucket Simulator: answers to the open questions recorded; the pause fix (`Session` pauses the audio sink with the clock) is verified there.
+- 2026-10-06 (Phase A2): `Host::opens_links`, `Effect::OpenUrl`, `Effect::PickCover`, the optional `FileWriter` capability and `Host::file_writer`; the `library/favorites` key; app settings load without `AppServices`.
 - 2026-10-06: the stable `window.rvp.snapshot()` subset (`version`, `ready`, `state`, `position_us`, `duration_us`, `item`, `error`) is documented; `version` and `item` are new snapshot fields.

@@ -396,6 +396,8 @@ pub struct LibUi {
     pub(crate) tagform: Option<tagform::TagForm>,
     /// The editor as JSON, made while drawing it (for the snapshot).
     pub(crate) tagform_json: String,
+    /// The tooltip drawn in the last frame (text and key), for the snapshot.
+    pub(crate) tip_shown: Option<(String, String)>,
     pub(crate) commands: Vec<UiCommand>,
     pub(crate) viz_info: bool,
     pub(crate) viz_on: bool,
@@ -448,6 +450,7 @@ impl Default for LibUi {
             prompt: None,
             tagform: None,
             tagform_json: String::new(),
+            tip_shown: None,
             commands: Vec::new(),
             viz_info: true,
             viz_on: true,
