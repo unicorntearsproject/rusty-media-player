@@ -172,7 +172,7 @@ pub async fn make_poster<S: Source>(src: S, codecs: &dyn CodecFactory) -> Result
     if at > 0 {
         d.seek(at).await?;
     }
-    let mut dec = codecs.video(&info)?;
+    let mut dec = codecs.video_light(&info)?;
     let mut sent = 0usize;
     while let Some(p) = d.next_packet().await? {
         if p.stream_id != info.id {

@@ -49,3 +49,64 @@ Every finding below is to be fixed before tagging (user decision).
 ## Needs the user's eyes
 
 - The DJ Unicorn Tears paragraph on the About page (`crates/rvp-ui/src/lib_ui/about.rs`, `PARAGRAPHS`) uses facts from the arc.dev profile.
+
+## After fixes (RW Coder, 2026-10-06)
+
+Every row is fixed in the commit that follows this document. Tests are named where a fix has one.
+
+| # | Done | Test |
+| --- | --- | --- |
+| B1 | Flatpak default player: the host's `mimeapps.list` (`HOST_XDG_CONFIG_HOME`, else `$HOME/.config`) is edited **in place** (only that file is shared: `--filesystem=xdg-config/mimeapps.list`); if it does not exist, or is not writable, the dialog says so with the exact `xdg-mime default …` command instead of "Set". | `defaults::tests::a_symlinked_mimeapps_list_stays_a_link_and_flatpak_writes_in_place` |
+| B2 | `--share=network` added. | `xtask dist check` (`flatpak_permissions_ok`) |
+| B3 | `xdg-music` and `xdg-videos` read-write; `can_write` probes the folder (makes and removes a file) when the editor opens, so a read-only folder is explained (with the `flatpak override` command in Flatpak) before anyone types. | `writer::tests::a_read_only_folder_is_refused_up_front_when_the_editor_opens`, `the_flatpak_must_grant_what_tags_themes_and_defaults_need` |
+| B4 | The tag writer canonicalizes the target and replaces the real file; a symlinked track stays a link. | `writer::tests::a_symlinked_track_stays_a_link_and_its_target_is_what_changes` |
+| B5 | `mimeapps.list` that is a symlink: temp file beside the real file, link kept. | same test as B1 |
+| B6 | Posters and loudness measurement also wait while a film is *opening or buffering* (only `Playing` held them before); folder reading (headers, tags) is the one background job that runs while a film plays. | `videos_scan::posters_wait_while_a_video_plays_and_go_on_when_it_is_paused` |
+| B7 | The edited bytes are checked in place (no `clone()`): at most two copies of the file instead of three, the old one dropped as soon as the new exists; the web build's cap is 64 MB (desktop 256 MB) with a message that names it. | the tag editor tests (`tagedit.rs`) exercise `prepare` |
+| B8 | `lock_ring` recovers a poisoned mutex; the device callback and the player thread can no longer panic on another thread's failure. | `audio::poison_tests::a_poisoned_ring_is_still_usable_by_both_threads` |
+| B9 | `perf-web` starts the page's server once for all passes and gives each pass its own Playwright output folder (`RVP_E2E_OUTPUT`). `--both` now runs all 8 specs. | run below |
+| P1 | The decode pool no longer polls: `Pool::run` wakes only the workers it needs, the caller sleeps until the last task unparks it; H.264's pipeline waits (`submit`, `wait_idle`, parse workers) park until the worker unparks them; the remaining waits (`MotionSlot::wait`, `JobSlot::wait`, the decoder thread's poll of an inner decoder) use an exponential back-off (`rvp_core::par::Backoff`, 25 µs to 1 ms) instead of a 60 µs poll. A `perf record` of H.264 typical shows no spin or wake symbols left. See the honest numbers below. | `rvp-par` and `rvp-core` tests (pool, pipeline, `Backoff` through the h264 waits) |
+| P2 | No regression found when measured against the M9 commit **on the same machine on the same day** (below). Nothing was changed in the web decode path except the shared back-off; `wasm-opt -O3`/`-O4` were tried and give nothing measurable (kept `-O2`, the level is now `RVP_WASM_OPT`). | – |
+| P3 | Cause: the poster job used the full player decoders (a thread pool per decoder, big frame pools: AV1 kept 150 MB). Posters now use `CodecFactory::video_light`: single-threaded, no pool; plus the library no longer starts new tag reads while 4 results are waiting to be filed (backpressure), and big covers are shrunk straight from the decoder's output (no full-size RGBA copy). | `videos_scan::posters_are_made_with_the_light_decoder_that_has_no_threads_of_its_own`, `art::tests::shrinking_straight_from_the_components_gives_the_same_picture` |
+
+### Measurements after (desktop)
+
+Same method as the audit: `/usr/bin/time` user time over 20 s of 1080p30 playback (23 s wall including start-up and exit), Xvfb, `HOME`/`XDG_*` in an empty folder, `--no-audio`. The host was shared (load average 3–4 from other sessions), so every figure carries about ±10 %.
+
+| Fixture | User time ÷ wall, before | after | App threads only (`/proc/<pid>/task`, 8 s) after |
+| --- | --- | --- | --- |
+| H.264 typical | 0.93 | 0.87 – 0.94 | 0.99 cores (was 1.10 before the first fix) |
+| H.264 stress | 1.94 | 1.78 – 1.98 | 2.19 |
+| VP9 | 0.62 | 0.67 – 0.69 | 0.81 |
+| AV1 | 0.91 | 0.88 – 0.91 | 1.15 |
+
+**P1's target (H.264 typical ≤ 0.5 core) is not met.** The polling was real (the pool spun, the helper threads woke 3 000 to 16 000 times a second) and is gone, but it was not where most of the CPU goes. `perf record` of H.264 typical (12 s, one frame per 33 ms):
+
+| Where | Share |
+| --- | --- |
+| UI thread: `yuv420_rows_to_rgba` 14 % (was 22 % before the 8-bit rewrite, bit-exact against the reference, tested), `blit_scaled` 7 % | ~0.30 core |
+| Decoder threads: `mc_luma_scalar`, `combine_scalar`, CABAC residuals, deblocking, memmove | ~0.60 core |
+
+The desktop build has **no native SIMD kernels** (the SIMD128 kernels are WebAssembly-only), so motion compensation and deblocking run as scalar code. Getting under 0.5 core means x86 kernels (SSE2 is baseline; AVX2 behind runtime detection), which is a feature of its own and would need `unsafe`; or building for `x86-64-v2` (RHEL 9's minimum) at the cost of old CPUs. Left for the user to decide.
+
+Memory, desktop RSS: playing 1080p, no library: 105–158 MB (unchanged); **scanning 12 1080p films for posters: 182 MB → 56 MB** (H.264 110 → 55, VP9 97 → 51, AV1 178 → 47); scanning 160 tracks with 6 MB embedded covers: 50 MB.
+
+### Measurements after (web, `cargo xtask perf-web --both --secs 30`)
+
+| Build | Fixture | dropped | session ms/tick |
+| --- | --- | --- | --- |
+| threads | AV1 / H.264 stress / H.264 typical / VP9 | **0 / 0 / 0 / 0 %** | 2.0 / 2.0 / 1.9 / 1.9 |
+| single | H.264 typical / VP9 | 1.8 % / 0.33 % (loaded host; 0 % when quiet) | 12.9 / 7.5 |
+| single | H.264 stress | 7.6 % (5.7 – 8.5 % over six runs) | 37 – 39 |
+| single | AV1 | 9.1 – 9.6 % when the host is quiet (26 % while another run shared it) | 9 – 10 |
+
+P2, same machine, same day, single-thread H.264 stress, three runs each: **M9 commit `7ad474d` 6.64 / 7.09 / 6.82 % dropped, 35.7 – 36.0 ms/tick; HEAD 7.84 / 8.46 / 5.71 %, 37.0 – 39.0 ms/tick.** The audit's 6.44 % and M9's recorded 4.96 % were taken on a quieter day; run to run the same commit varies by ±1.5 ms. At most a 4 % rise in decode time, inside the noise, and no code on that path changed since M9 (the codec crates are untouched); the UI per-tick costs (`render` 3.5 ms, `present` 0.65 ms) are the same. The single-thread build at 1080p30 stress is at its limit, as the plan says; the threads build has none.
+
+## UX-visible changes (for the report)
+
+- Rail: Settings and About RW use compact buttons; Add folder hides in very short windows (earlier, in A2).
+- Flatpak: the Music and Videos folders are now writable by the app, the app can use the network (theme links), and "Set as default media player" really changes the host's defaults, or says exactly what to do when it cannot.
+- Tag editor: a folder that cannot be written is explained when the editor opens, not when saving.
+- Web: files over 64 MB cannot have their tags edited (message says so).
+- Posters wait while a film opens, buffers or plays (they used to wait only while it played).
+

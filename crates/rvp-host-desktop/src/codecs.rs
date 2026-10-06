@@ -12,6 +12,15 @@ impl CodecFactory for DesktopCodecs {
         rvp_codec_audio::audio_decoder(info)
     }
 
+    fn video_light(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
+        // Posters: decoded on the calling thread, one picture at a time (the pooled decoders hold a lot of memory for as long as they live).
+        match info.codec.as_str() {
+            "av1" => rvp_codec_av1::av1_decoder_light(info),
+            "h264" => rvp_codec_h264::h264_decoder_with(info, None, None),
+            _ => build_video(info),
+        }
+    }
+
     fn video(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         if matches!(info.codec.as_str(), "av1" | "h264" | "vp9") {
             let info = info.clone();

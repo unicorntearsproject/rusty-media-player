@@ -39,4 +39,9 @@ pub trait CodecFactory {
     fn audio(&self, info: &StreamInfo) -> Result<Box<dyn AudioDecoder>>;
     /// A decoder for a video stream, or `Unsupported`.
     fn video(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>>;
+    /// A decoder for getting a picture or two out of a stream (a poster): no threads of its own and as little memory as it can have,
+    /// since nobody is waiting for speed and it may run while something else plays. By default the ordinary decoder.
+    fn video_light(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
+        self.video(info)
+    }
 }

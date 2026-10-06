@@ -35,6 +35,14 @@ pub fn av1_decoder(info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
     Ok(Box::new(Av1Decoder::new()?))
 }
 
+/// An AV1 decoder that uses no threads of its own and keeps its memory small (for a picture or two, such as a poster).
+pub fn av1_decoder_light(info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
+    if info.kind != StreamKind::Video || info.codec != "av1" {
+        return Err(Error::Unsupported(format!("not an AV1 stream: {}", info.codec)));
+    }
+    Ok(Box::new(Av1Decoder::open(1)?))
+}
+
 /// An AV1 decoder.
 pub struct Av1Decoder {
     ctx: Option<Dav1dContext>,
@@ -44,6 +52,12 @@ pub struct Av1Decoder {
 impl Av1Decoder {
     /// Open a decoder.
     pub fn new() -> Result<Self> {
+        let threads = if rvp_par::available() { rvp_core::par::threads().min(8) } else { 1 };
+        Self::open(threads)
+    }
+
+    /// Open a decoder with `threads` threads (1: it decodes on the calling thread).
+    fn open(threads: usize) -> Result<Self> {
         let mut settings = MaybeUninit::<Dav1dSettings>::uninit();
         // SAFETY: `dav1d_default_settings` fully initialises the pointed-to settings.
         let mut settings = unsafe {
@@ -52,7 +66,6 @@ impl Av1Decoder {
         };
         // Several threads only where blocking is allowed and the host has said it has threads (see the module docs);
         // otherwise rav1d decodes inside `dav1d_send_data`/`dav1d_get_picture` on the calling thread.
-        let threads = if rvp_par::available() { rvp_core::par::threads().min(8) } else { 1 };
         if threads > 1 {
             rav1d::src::lib::set_thread_spawn(rvp_par::spawn_boxed);
             settings.n_threads = threads as i32;

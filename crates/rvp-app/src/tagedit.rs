@@ -85,7 +85,10 @@ impl Source for SharedBytes {
 /// reads the new ones in place, so at most two copies of the file are ever held (not three).
 async fn prepare<S: Source>(src: S, name: &str, edit: &Edit, want_us: i64) -> Result<Vec<u8>, String> {
     let old = read_all(src, MAX_EDIT_FILE).await.map_err(|e| {
-        format!("it could not be read, or it is bigger than the {} MB that can be edited here ({e})", MAX_EDIT_FILE >> 20)
+        format!(
+            "it could not be read, or it is bigger than the {} MB that can be edited here ({e})",
+            MAX_EDIT_FILE >> 20
+        )
     })?;
     let fmt = format_of(name, &old[..old.len().min(16)])
         .ok_or_else(|| "tags in this kind of file cannot be written".to_string())?;

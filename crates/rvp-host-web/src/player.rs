@@ -19,6 +19,15 @@ impl CodecFactory for WebCodecs {
         rvp_codec_audio::audio_decoder(info)
     }
 
+    fn video_light(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
+        // Posters: on the calling thread with the least memory, never on the worker threads the film being watched needs.
+        match info.codec.as_str() {
+            "av1" => rvp_codec_av1::av1_decoder_light(info),
+            "h264" => rvp_codec_h264::h264_decoder_with(info, None, None),
+            _ => build_video(info),
+        }
+    }
+
     fn video(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         // With shared memory the decoder runs on a worker thread of its own, so decoding never competes with the UI
         // thread; without it the decoder runs inside the tick as before.

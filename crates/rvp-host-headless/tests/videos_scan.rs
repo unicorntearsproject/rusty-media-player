@@ -538,3 +538,47 @@ fn posters_wait_while_a_video_plays_and_go_on_when_it_is_paused() {
     }
     assert!(r.app.library().pending_posters().is_empty(), "the posters were made once the film was paused");
 }
+
+/// A factory that counts which kind of video decoder is asked for.
+struct Counting {
+    inner: DefaultCodecs,
+    light: std::cell::Cell<usize>,
+    full: std::cell::Cell<usize>,
+}
+
+impl CodecFactory for Counting {
+    fn audio(&self, i: &rvp_core::StreamInfo) -> rvp_core::Result<Box<dyn rvp_core::AudioDecoder>> {
+        self.inner.audio(i)
+    }
+
+    fn video(&self, i: &rvp_core::StreamInfo) -> rvp_core::Result<Box<dyn rvp_core::VideoDecoder>> {
+        self.full.set(self.full.get() + 1);
+        self.inner.video(i)
+    }
+
+    fn video_light(&self, i: &rvp_core::StreamInfo) -> rvp_core::Result<Box<dyn rvp_core::VideoDecoder>> {
+        self.light.set(self.light.get() + 1);
+        self.inner.video(i)
+    }
+}
+
+#[test]
+fn posters_are_made_with_the_light_decoder_that_has_no_threads_of_its_own() {
+    if skip() {
+        return;
+    }
+    let d = folder("app_light_posters");
+    let counting = Rc::new(Counting {
+        inner: DefaultCodecs::default(),
+        light: Default::default(),
+        full: Default::default(),
+    });
+    let mut lib = Library::new();
+    let _ = run(&mut lib, &d, Some(counting.clone() as Rc<dyn CodecFactory>));
+    assert!(
+        lib.all_videos().iter().filter(|v| !v.unreadable).all(|v| v.poster != 0),
+        "every film has a poster"
+    );
+    assert!(counting.light.get() >= 3, "{} light decoders", counting.light.get());
+    assert_eq!(counting.full.get(), 0, "posters never ask for the threaded decoder");
+}

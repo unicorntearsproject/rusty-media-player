@@ -196,6 +196,30 @@ fn rpm_parts(version: &str) -> (String, String) {
     }
 }
 
+/// What the Flatpak needs to be allowed to do for the features that touch the outside (checked, so a manifest edit cannot quietly take one away):
+/// the user's music and videos read and write (the tag editor), the network (a theme link), and the host's `mimeapps.list` ("Set as default
+/// media player"; Flatpak's own `XDG_CONFIG_HOME` is a private copy the desktop never reads).
+fn flatpak_permissions_ok(manifest: &str) -> Result<(), String> {
+    let args: Vec<&str> =
+        manifest.lines().filter_map(|l| l.trim().strip_prefix("- --")).map(str::trim).collect();
+    for want in [
+        "filesystem=xdg-music",
+        "filesystem=xdg-videos",
+        "share=network",
+        "filesystem=xdg-config/mimeapps.list",
+    ] {
+        if !args.contains(&want) {
+            return Err(format!("the Flatpak manifest does not grant --{want}"));
+        }
+    }
+    if let Some(a) = args.iter().find(|a| a.starts_with("filesystem=") && a.ends_with(":ro")) {
+        return Err(format!(
+            "the Flatpak manifest grants --{a}: the tag editor needs write access to music and videos"
+        ));
+    }
+    Ok(())
+}
+
 /// `version = "x"` under `[workspace.package]`.
 fn workspace_version(root: &Path) -> Result<String, String> {
     let text = fs::read_to_string(root.join("Cargo.toml")).map_err(|e| e.to_string())?;
@@ -998,6 +1022,9 @@ impl Ctx {
                 return Err(format!("`{t}` is in the .desktop file but not in the AppStream <provides>"));
             }
         }
+        let flatpak = fs::read_to_string(self.root.join(format!("packaging/flatpak/{APP_ID}.yml")))
+            .map_err(|e| e.to_string())?;
+        flatpak_permissions_ok(&flatpak)?;
         let iss = fs::read_to_string(self.root.join("packaging/windows/rusty-wave.iss"))
             .map_err(|e| e.to_string())?;
         for ext in ["mp4", "mkv", "webm", "mp3", "flac", "ogg", "opus", "wav", "m4a", "m3u8", "pls"] {
@@ -1142,5 +1169,26 @@ mod version_tests {
         // rpm compares the release field piece by piece: 0.1.rc1 is older than 1 (the release).
         let key = |r: &str| r.split('.').map(|p| p.parse::<u32>().ok()).collect::<Vec<_>>();
         assert!(key("0.1.rc1") < key("1") || key("0.1.rc1")[0] < key("1")[0]);
+    }
+
+    #[test]
+    fn the_flatpak_must_grant_what_tags_themes_and_defaults_need() {
+        let ok = "finish-args:\n  - --filesystem=xdg-music\n  - --filesystem=xdg-videos\n  - --share=network\n  - --filesystem=xdg-config/mimeapps.list\n";
+        assert!(flatpak_permissions_ok(ok).is_ok());
+        for gone in ["--share=network", "--filesystem=xdg-config/mimeapps.list", "--filesystem=xdg-music"] {
+            let bad = ok.replace(&format!("  - {gone}\n"), "");
+            assert!(
+                flatpak_permissions_ok(&bad).unwrap_err().contains(gone.trim_start_matches("--")),
+                "{gone}"
+            );
+        }
+        let ro = ok.replace("xdg-videos", "xdg-videos:ro");
+        assert!(flatpak_permissions_ok(&ro).is_err());
+        let real = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../packaging/flatpak/io.github.unicorntearsproject.RustyWave.yml"),
+        )
+        .unwrap();
+        assert!(flatpak_permissions_ok(&real).is_ok());
     }
 }

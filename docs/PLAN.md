@@ -1100,6 +1100,11 @@ Features added on top of M12 (details in the docs named in brackets):
   characters, inside the window; Settings has *Show tooltips*. `tips.rs` decides the text for every `LibHit` exhaustively, and a test walks every control of every view.
 - Search covers favorites' hearts, videos and edited tags at once (the library is patched the moment a file is written, and the folder is read again to confirm it).
 
+### Desktop CPU while playing, after the audit (2026-10-06)
+
+Desktop 1080p30, 20 s, user time ÷ wall (shared host, ±10 %): H.264 typical 0.93 → 0.87–0.94, stress 1.94 → 1.78–1.98, VP9 0.62 → 0.67–0.69, AV1 0.91 → 0.88–0.91. The decode pool and the H.264 pipeline no longer poll (they park and are woken); what is left is scalar
+kernel code (no native SIMD on the desktop build). Posters decode with single-threaded decoders: scanning 12 1080p films went from 182 MB to 56 MB RSS. Details in `docs/audits/audit-1.0.0-rc1.md`.
+
 ## 12. Risks and open questions
 
 | # | Risk | Plan |

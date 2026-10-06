@@ -115,6 +115,11 @@ pub fn decode(bytes: &[u8], max_side: u32) -> Option<Image> {
     if rgb_or_rgba.len() < w * h * comps || !(1..=4).contains(&comps) {
         return None;
     }
+    // A big picture is shrunk straight from what the decoder made, without a full-size RGBA copy of it (a 3000 x 3000 cover would be another
+    // 36 MB, with several covers being read at once).
+    if w.max(h) as u32 > max_side && max_side > 0 {
+        return Some(downscale_components(&rgb_or_rgba, w, h, comps, max_side));
+    }
     // To opaque RGBA (alpha is composited over black).
     let mut rgba = Vec::with_capacity(w * h * 4);
     for p in rgb_or_rgba.chunks_exact(comps).take(w * h) {
@@ -129,6 +134,48 @@ pub fn decode(bytes: &[u8], max_side: u32) -> Option<Image> {
     }
     let img = Image { w: w as u32, h: h as u32, rgba };
     Some(if img.w.max(img.h) > max_side { downscale(&img, max_side) } else { img })
+}
+
+/// One pixel of 1 to 4 components as opaque RGB (alpha composited over black).
+fn opaque(p: &[u8], comps: usize) -> [u32; 3] {
+    let (r, g, b, a) = match comps {
+        1 => (p[0], p[0], p[0], 255),
+        2 => (p[0], p[0], p[0], p[1]),
+        3 => (p[0], p[1], p[2], 255),
+        _ => (p[0], p[1], p[2], p[3]),
+    };
+    let m = |c: u8| ((c as u32 * a as u32 + 127) / 255) as u8 as u32;
+    [m(r), m(g), m(b)]
+}
+
+/// [`downscale`] of a picture given as `comps` components per pixel (what the decoders produce), with the same result as converting to
+/// RGBA first, without making that copy.
+fn downscale_components(src: &[u8], w: usize, h: usize, comps: usize, max_side: u32) -> Image {
+    let long = w.max(h).max(1) as u64;
+    let dw = ((w as u64 * max_side as u64 / long) as u32).max(1);
+    let dh = ((h as u64 * max_side as u64 / long) as u32).max(1);
+    let mut out = Vec::with_capacity((dw * dh * 4) as usize);
+    for dy in 0..dh {
+        let y0 = (dy as u64 * h as u64 / dh as u64) as usize;
+        let y1 = (((dy as u64 + 1) * h as u64).div_ceil(dh as u64) as usize).clamp(y0 + 1, h);
+        for dx in 0..dw {
+            let x0 = (dx as u64 * w as u64 / dw as u64) as usize;
+            let x1 = (((dx as u64 + 1) * w as u64).div_ceil(dw as u64) as usize).clamp(x0 + 1, w);
+            let mut s = [0u32; 3];
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let i = (y * w + x) * comps;
+                    let p = opaque(&src[i..i + comps], comps);
+                    s[0] += p[0];
+                    s[1] += p[1];
+                    s[2] += p[2];
+                }
+            }
+            let n = ((x1 - x0) * (y1 - y0)) as u32;
+            out.extend_from_slice(&[(s[0] / n) as u8, (s[1] / n) as u8, (s[2] / n) as u8, 255]);
+        }
+    }
+    Image { w: dw, h: dh, rgba: out }
 }
 
 /// Shrink `img` so its longest side is `max_side`, averaging the source pixels under each new one.
@@ -213,5 +260,22 @@ mod tests {
         }
         // Whatever the decoder makes of the hand-made bytes, it must not panic.
         let _ = dimensions(png);
+    }
+
+    #[test]
+    fn shrinking_straight_from_the_components_gives_the_same_picture() {
+        for comps in 1..=4usize {
+            let (w, h) = (97usize, 61usize);
+            let src: Vec<u8> = (0..w * h * comps).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
+            // The long way: to RGBA first, then shrink.
+            let mut rgba = Vec::new();
+            for p in src.chunks_exact(comps) {
+                let q = opaque(p, comps);
+                rgba.extend_from_slice(&[q[0] as u8, q[1] as u8, q[2] as u8, 255]);
+            }
+            let long = downscale(&Image { w: w as u32, h: h as u32, rgba }, 24);
+            let direct = downscale_components(&src, w, h, comps, 24);
+            assert_eq!(direct, long, "{comps} components");
+        }
     }
 }

@@ -306,7 +306,9 @@ impl Scanner {
         match self.phase {
             Phase::Tags => {
                 // Start reads (opening a file is immediate in every host: the bytes are read inside the task).
-                while self.alive < IN_FLIGHT && !self.reads.is_empty() {
+                // Reads wait while results are piling up unfiled (each may carry a cover of several MB, and filing it means decoding it).
+                let backlog = |s: &Self| s.tag_results.borrow().len() + s.video_results.borrow().len();
+                while self.alive < IN_FLIGHT && backlog(self) < IN_FLIGHT && !self.reads.is_empty() {
                     let Some(entry) = self.reads.pop_front() else { break };
                     match rvp_core::task::block_on(host.open(OpenRequest::Id(entry.id.clone()))) {
                         Ok(src) => {
@@ -321,7 +323,7 @@ impl Scanner {
                         Err(e) => self.tag_results.borrow_mut().push((self.root, entry, Err(e.into()))),
                     }
                 }
-                while self.alive < IN_FLIGHT && !self.video_reads.is_empty() {
+                while self.alive < IN_FLIGHT && backlog(self) < IN_FLIGHT && !self.video_reads.is_empty() {
                     let Some(entry) = self.video_reads.pop_front() else { break };
                     match rvp_core::task::block_on(host.open(OpenRequest::Id(entry.id.clone()))) {
                         Ok(src) => {
