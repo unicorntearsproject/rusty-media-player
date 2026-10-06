@@ -134,6 +134,8 @@ impl App {
             scan: lib.scan_status.as_ref(),
             viz: Some(&lib.viz),
             video,
+            // The resume markers of the videos (filled by the app from the saved positions).
+            resume: rvp_ui::lib_ui::no_resume(),
         }
     }
 

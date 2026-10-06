@@ -178,6 +178,15 @@ pub struct LibCtx<'a> {
     pub viz: Option<&'a Viz>,
     /// The latest video frame (RGBA, width, height) when the item playing has a picture.
     pub video: Option<(&'a [u8], u32, u32)>,
+    /// How far into each video the player left off, 0..1, by video id (the progress marker on a poster); empty when nothing is saved.
+    pub resume: &'a BTreeMap<u32, f32>,
+}
+
+static NO_RESUME: BTreeMap<u32, f32> = BTreeMap::new();
+
+/// An empty resume map, for a context that has none.
+pub fn no_resume() -> &'static BTreeMap<u32, f32> {
+    &NO_RESUME
 }
 
 /// A text prompt over the screen.
