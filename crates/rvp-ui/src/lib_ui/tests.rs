@@ -800,7 +800,7 @@ fn the_added_folders_show_in_the_rail_at_every_size() {
             let n = g.folders.len();
             if h >= 720 {
                 assert!(n >= roots.min(3), "{w}x{h}, {roots} folders: only {n} rows");
-            } else if h >= 600 {
+            } else if h >= 660 {
                 assert!(n >= 1, "{w}x{h}, {roots} folders: no row");
             }
             if n > 0 {
@@ -814,5 +814,19 @@ fn the_added_folders_show_in_the_rail_at_every_size() {
             }
             r.draw();
         }
+    }
+}
+
+#[test]
+fn the_rail_has_a_settings_button_that_opens_settings_and_never_overlaps_the_others() {
+    for (w, h) in [(1280, 720), (1024, 600), (800, 500), (1280, 540)] {
+        let mut r = Rig::new();
+        r.ui.set_size(w, h, 1.0);
+        let ctx = LibCtx { lib: &r.lib, now_art: None, scan: None, viz: None, video: None };
+        let g = r.ui.lib_geom(&r.m, &ctx);
+        assert!(g.settings.y >= g.add_folder.bottom(), "{w}x{h}: the Settings button sits under Add folder");
+        assert!(g.settings.bottom() <= g.m.rail.bottom());
+        let (x, y) = (g.settings.cx(), g.settings.cy());
+        assert_eq!(r.click(x, y), [Action::ShowSettings], "{w}x{h}");
     }
 }

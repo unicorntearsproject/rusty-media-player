@@ -66,6 +66,8 @@ pub struct Search {
     pub albums: Vec<usize>,
     /// Matching artists (indexes into [`Library::artists`]).
     pub artists: Vec<usize>,
+    /// Matching videos, by title.
+    pub videos: Vec<crate::video::VideoId>,
 }
 
 /// The library.
@@ -90,6 +92,10 @@ pub struct Library {
     pub(crate) by_file: BTreeMap<String, Vec<TrackId>>,
     pub(crate) playlists: Vec<SavedPlaylist>,
     pub(crate) next_playlist_id: u32,
+    /// The videos, ascending by id (see `videos.rs`).
+    pub(crate) videos: Vec<crate::video::Video>,
+    /// The videos changed since they were last saved.
+    pub(crate) videos_dirty: bool,
     pub(crate) rev: u64,
     /// The index (not the pictures) changed since it was last saved.
     pub(crate) dirty: bool,
@@ -284,7 +290,8 @@ impl Library {
             .filter(|&i| has(&format!("{} {}", fold(&self.albums[i].title), fold(&self.albums[i].artist))))
             .collect();
         let artists = (0..self.artists.len()).filter(|&i| has(&fold(&self.artists[i].name))).collect();
-        Search { tracks, albums, artists }
+        let videos = self.search_videos(&words);
+        Search { tracks, albums, artists, videos }
     }
 
     /// Recompute the albums, artists and search text after the tracks changed.
@@ -412,7 +419,7 @@ impl Library {
 
     /// Ids of every picture the tracks use (the pictures worth keeping).
     pub fn used_art(&self) -> BTreeSet<ArtId> {
-        self.tracks.iter().map(|t| t.art).filter(|&a| a != 0).collect()
+        self.tracks.iter().map(|t| t.art).chain(self.poster_art()).filter(|&a| a != 0).collect()
     }
 
     /// Thumbnails that were added since the last call, as `(id, thumbnail)`, to be saved.
@@ -451,6 +458,7 @@ impl Library {
                 core::cmp::Ordering::Equal => {}
             }
         }
+        self.remove_root_videos(ri);
         self.roots.remove(ri);
         self.dirty = true;
         self.rebuild();

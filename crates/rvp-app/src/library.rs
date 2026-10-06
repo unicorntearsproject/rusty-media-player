@@ -459,12 +459,19 @@ impl App {
         H: Host<Video = FrameSink>,
         H::Source: 'static,
     {
+        // Tracks and videos share one id space, so a queue may hold either (a video is played on the Player face).
         let items: Vec<(u32, String, String)> = ids
             .iter()
-            .filter_map(|&id| self.lib.lib.track(id))
-            .filter(|t| !t.src.is_empty())
-            .map(|t| (t.id, t.display_title().to_string(), t.src.clone()))
+            .filter_map(|&id| {
+                self.lib.lib.track(id).map(|t| (t.id, t.display_title().to_string(), t.src.clone())).or_else(
+                    || self.lib.lib.video(id).map(|v| (v.id, v.display_title().to_string(), v.src.clone())),
+                )
+            })
+            .filter(|(_, _, src)| !src.is_empty())
             .collect();
+        let starts_video = items
+            .get(start.min(items.len().saturating_sub(1)))
+            .is_some_and(|(id, ..)| self.lib.lib.video(*id).is_some());
         if items.is_empty() {
             self.ui.show_toast(
                 if ids.is_empty() {
@@ -511,7 +518,8 @@ impl App {
                 if shuffle {
                     self.playlist.set_shuffle(true, now as u64);
                 }
-                self.lib.auto_mode = false;
+                // A video starts on the Player face; a song stays where the user is.
+                self.lib.auto_mode = starts_video;
                 self.requeue();
                 self.play_item(host, pick);
                 if how == Enqueue::ShuffleNow {

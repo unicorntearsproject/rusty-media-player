@@ -290,6 +290,7 @@ impl Ui {
         let lib = ctx.lib;
         match scope {
             Scope::Track(id) => lib.track(id).map(|t| t.id).into_iter().collect(),
+            Scope::Video(id) => lib.video(id).map(|v| v.id).into_iter().collect(),
             Scope::Album(id) => lib.album(id).map(|a| a.tracks.clone()).unwrap_or_default(),
             Scope::Artist(id) => lib
                 .artist(id)
@@ -423,6 +424,9 @@ impl Ui {
             }
             if g.add_folder.contains(x, y) {
                 return LibHit::AddFolder;
+            }
+            if g.settings.contains(x, y) {
+                return LibHit::Settings;
             }
             for (i, r) in &g.folders {
                 if r.contains(x, y) {
@@ -609,7 +613,8 @@ impl Ui {
             }
             InputEvent::Paste(text) => {
                 // Pasted text goes where typing goes: a name prompt, else the search box (one line, no control characters).
-                let clean: alloc::string::String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+                let clean: alloc::string::String =
+                    text.chars().filter(|c| !c.is_control()).take(200).collect();
                 if let Some(p) = &mut self.lib.prompt {
                     let room = 80usize.saturating_sub(p.text.chars().count());
                     p.text.extend(clean.chars().take(room));
@@ -874,6 +879,7 @@ impl Ui {
             LibHit::Rail(v) => self.show_view(v),
             LibHit::ModeSwitch(m) => out.push(Action::SetMode(m)),
             LibHit::AddFolder => out.push(Action::Lib(LibAction::AddFolder)),
+            LibHit::Settings => out.push(Action::ShowSettings),
             LibHit::Folder(i) => {
                 if let Some(r) = ctx.lib.roots().get(i) {
                     let _ = r;

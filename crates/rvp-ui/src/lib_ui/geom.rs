@@ -76,6 +76,8 @@ pub(crate) struct Geom {
     pub nav: Vec<(View, RectF)>,
     pub mode: [RectF; 2],
     pub add_folder: RectF,
+    /// The Settings button under it.
+    pub settings: RectF,
     pub folders: Vec<(usize, RectF)>,
     /// Folders that do not fit under the others: a "+N more" line after the last row.
     pub folders_more: usize,
@@ -126,6 +128,7 @@ impl Ui {
             nav: Vec::new(),
             mode: [RectF::default(); 2],
             add_folder: RectF::default(),
+            settings: RectF::default(),
             folders: Vec::new(),
             folders_more: 0,
             back: None,
@@ -183,7 +186,8 @@ impl Ui {
         let mut y = top + if compact { 92.0 * s } else { 58.0 * s };
         let bottom = r.bottom() - 16.0 * s;
         let btn_h = 40.0 * s;
-        g.add_folder = RectF::new(px, bottom - btn_h, iw, btn_h);
+        g.settings = RectF::new(px, bottom - btn_h, iw, btn_h);
+        g.add_folder = RectF::new(px, bottom - 2.0 * btn_h - 8.0 * s, iw, btn_h);
         // The folders live in the space between the entries and the add button (and the scan's progress line when it shows). The
         // entries shrink first (down to a compact row), so that up to three folders always have their rows; on a window too short
         // even for one, the folders are left out.

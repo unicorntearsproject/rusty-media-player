@@ -71,6 +71,8 @@ pub enum Detail {
 pub enum Scope {
     /// One track (library id).
     Track(u32),
+    /// One video (library id).
+    Video(u32),
     /// An album (id).
     Album(u32),
     /// All of an artist's albums.
@@ -204,6 +206,8 @@ pub enum LibHit {
     ModeSwitch(Mode),
     /// The add-folder button in the rail.
     AddFolder,
+    /// The Settings button in the rail.
+    Settings,
     /// A folder row in the rail (root index).
     Folder(usize),
     /// The search box.

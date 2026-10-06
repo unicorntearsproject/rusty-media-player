@@ -20,6 +20,8 @@ mod plist;
 mod scan;
 mod scanner;
 mod thumbs;
+mod video;
+mod videos;
 
 pub use art::{Image, THUMB_SIDE, Thumb};
 pub use index::{Library, ScanReport, Search, TrackSort};
@@ -29,3 +31,8 @@ pub use plist::{ListFormat, PlEntry, SavedPlaylist};
 pub use scan::{AUDIO_EXTENSIONS, ScanPlan, TrackTags, is_audio_name, read_all, read_tags};
 pub use scanner::{ScanEvent, ScanStatus, Scanner};
 pub use thumbs::DEFAULT_THUMB_BUDGET;
+pub use video::{
+    POSTER_SIDE, VIDEO_EXTENSIONS, Video, VideoId, VideoInfo, is_video_name, make_poster, poster_id,
+    poster_time_us, read_video_info,
+};
+pub use videos::{VIDEOS_KEY, VideoSort};

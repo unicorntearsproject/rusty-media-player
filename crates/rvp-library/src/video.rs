@@ -230,8 +230,18 @@ mod tests {
 
     #[test]
     fn names_are_told_apart() {
-        assert!(is_video_name("Film.MKV") && is_video_name("a.b.mp4") && is_video_name("x.webm") && is_video_name("y.m4v"));
-        assert!(!is_video_name("song.mp3") && !is_video_name("cover.jpg") && !is_video_name("noext") && !is_video_name("a.mp4.txt"));
+        assert!(
+            is_video_name("Film.MKV")
+                && is_video_name("a.b.mp4")
+                && is_video_name("x.webm")
+                && is_video_name("y.m4v")
+        );
+        assert!(
+            !is_video_name("song.mp3")
+                && !is_video_name("cover.jpg")
+                && !is_video_name("noext")
+                && !is_video_name("a.mp4.txt")
+        );
     }
 
     #[test]

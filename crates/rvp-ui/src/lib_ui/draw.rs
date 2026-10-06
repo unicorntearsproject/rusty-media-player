@@ -7,11 +7,11 @@ use crate::font::Face;
 use crate::gfx::{FrameBuffer, Paint, RectF, fade};
 use crate::icon::Icon;
 use crate::model::{MediaState, UiModel, format_time};
+use crate::tk as t;
 use crate::ui::{Btn, Layout, TOOLTIP_DELAY_US, Ui};
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::tk as t;
 use theme::Rgba;
 
 /// Rectangles of the now-playing screen.
@@ -253,7 +253,11 @@ impl Ui {
         let r = g.m.rail;
         let compact = g.m.compact;
         fb.fill_rect_paint(r, Paint::Solid(t::ink_850()), 0.97);
-        fb.fill_rect_paint(RectF::new(r.right() - 1.0 * s, r.y, 1.0 * s, r.h), Paint::Solid(t::white()), 0.07);
+        fb.fill_rect_paint(
+            RectF::new(r.right() - 1.0 * s, r.y, 1.0 * s, r.h),
+            Paint::Solid(t::white()),
+            0.07,
+        );
         let px = if compact { 10.0 * s } else { 16.0 * s };
         if !compact {
             // The brand: the logo and the kicker.
@@ -475,6 +479,16 @@ impl Ui {
         };
         let pressed = self.lib_pressed(LibHit::AddFolder);
         self.draw_pill(fb, &b, hot, pressed, false);
+        let hot = self.lib.hover == LibHit::Settings;
+        let b = PillBtn {
+            id: 0,
+            rect: g.settings,
+            label: if compact { String::new() } else { "Settings".into() },
+            icon: Icon::Settings,
+            primary: false,
+        };
+        let pressed = self.lib_pressed(LibHit::Settings);
+        self.draw_pill(fb, &b, hot, pressed, false);
         let _ = model;
     }
 
@@ -691,7 +705,16 @@ impl Ui {
             fb.stroke_rrect(sr, sr.h * 0.5, 1.0 * s, fade(t::white(), 0.22), 1.0);
             let label = self.sort_label();
             self.text(fb, Face::SansMedium, 13.0, sr.x + 18.0 * s, sr.cy(), &label, t::text_body(), 1.0, 0.0);
-            self.icon(fb, Icon::ChevronDown, sr.right() - 20.0 * s, sr.cy(), 15.0, t::text_muted(), 1.0, false);
+            self.icon(
+                fb,
+                Icon::ChevronDown,
+                sr.right() - 20.0 * s,
+                sr.cy(),
+                15.0,
+                t::text_muted(),
+                1.0,
+                false,
+            );
         }
         for b in g.header_btns.clone() {
             let h = LibHit::Button(b.id);
@@ -991,7 +1014,13 @@ impl Ui {
                     let pb =
                         RectF::new(cover.right() - 58.0 * s, cover.bottom() - 58.0 * s, 44.0 * s, 44.0 * s);
                     let pb = if play_hot { pb.inflate(2.0 * s) } else { pb };
-                    fb.glow_rrect(pb, pb.h * 0.5, 16.0 * s, t::magenta_500(), if play_hot { 0.7 } else { 0.4 });
+                    fb.glow_rrect(
+                        pb,
+                        pb.h * 0.5,
+                        16.0 * s,
+                        t::magenta_500(),
+                        if play_hot { 0.7 } else { 0.4 },
+                    );
                     fb.fill_rrect(pb, pb.h * 0.5, Paint::Gradient(t::gradient_tears()), 1.0);
                     self.icon(fb, Icon::Play, pb.cx() + 1.5 * s, pb.cy(), 20.0, t::white(), 1.0, true);
                 }
@@ -1229,7 +1258,17 @@ impl Ui {
                 }
                 let d = dur_text(q.duration_us);
                 let w = self.text_w(Face::Mono, 12.0, &d, 0.0);
-                self.text(fb, Face::Mono, 12.0, r.right() - 16.0 * s - w, r.cy(), &d, t::text_dim(), 1.0, 0.0);
+                self.text(
+                    fb,
+                    Face::Mono,
+                    12.0,
+                    r.right() - 16.0 * s - w,
+                    r.cy(),
+                    &d,
+                    t::text_dim(),
+                    1.0,
+                    0.0,
+                );
             }
             EntKind::Playlist(id) => {
                 let Some(p) = lib.playlist(id) else { return false };
@@ -1273,7 +1312,8 @@ impl Ui {
                 if miss > 0 {
                     sub = alloc::format!("{sub} \u{b7} ");
                 }
-                let x1 = self.text(fb, Face::Sans, 12.5, x0, r.cy() + 12.0 * s, &sub, t::text_dim(), 1.0, 0.0);
+                let x1 =
+                    self.text(fb, Face::Sans, 12.5, x0, r.cy() + 12.0 * s, &sub, t::text_dim(), 1.0, 0.0);
                 if miss > 0 {
                     self.text(
                         fb,
@@ -1598,7 +1638,17 @@ impl Ui {
             self.icon(fb, Icon::AudioLines, cx, cy, 36.0, t::violet_400(), 1.0, false);
             let head = "Nothing is playing";
             let w = self.text_w(Face::SansBold, 24.0, head, -0.2);
-            self.text(fb, Face::SansBold, 24.0, cx - w * 0.5, cy + 74.0 * s, head, t::text_strong(), 1.0, -0.2);
+            self.text(
+                fb,
+                Face::SansBold,
+                24.0,
+                cx - w * 0.5,
+                cy + 74.0 * s,
+                head,
+                t::text_strong(),
+                1.0,
+                -0.2,
+            );
             let sub = "Pick an album, or drop some music here.";
             let w = self.text_w(Face::Sans, 14.0, sub, 0.0);
             self.text(fb, Face::Sans, 14.0, cx - w * 0.5, cy + 102.0 * s, sub, t::text_muted(), 1.0, 0.0);
@@ -1729,7 +1779,17 @@ impl Ui {
                 }
                 let d = dur_text(e.duration_us);
                 let tw = self.text_w(Face::Mono, 12.0, &d, 0.0);
-                self.text(fb, Face::Mono, 12.0, r.right() - 12.0 * s - tw, r.cy(), &d, t::text_dim(), 1.0, 0.0);
+                self.text(
+                    fb,
+                    Face::Mono,
+                    12.0,
+                    r.right() - 12.0 * s - tw,
+                    r.cy(),
+                    &d,
+                    t::text_dim(),
+                    1.0,
+                    0.0,
+                );
             }
         }
         false
@@ -2141,7 +2201,8 @@ impl Ui {
         fb.shadow_rrect(r, 8.0 * s, 4.0 * s, 12.0 * s, Rgba::new(5, 2, 15, 140), 1.0);
         fb.fill_rrect(r, 8.0 * s, Paint::Solid(t::ink_700()), 1.0);
         fb.stroke_rrect(r, 8.0 * s, 1.0 * s, t::ink_500(), 1.0);
-        let x = self.text(fb, Face::SansMedium, 12.5, r.x + 12.0 * s, r.cy(), label, t::text_body(), 1.0, 0.0);
+        let x =
+            self.text(fb, Face::SansMedium, 12.5, r.x + 12.0 * s, r.cy(), label, t::text_body(), 1.0, 0.0);
         let chip = RectF::new(x + 10.0 * s, r.cy() - 9.0 * s, kw + 12.0 * s, 18.0 * s);
         fb.fill_rrect(chip, 5.0 * s, Paint::Solid(fade(t::cyan_500(), 0.14)), 1.0);
         self.text(fb, Face::MonoBold, 11.0, chip.x + 6.0 * s, chip.cy(), key, t::cyan_400(), 1.0, 0.0);
@@ -2179,8 +2240,17 @@ impl Ui {
         fb.fill_rrect(field, 12.0 * s, Paint::Solid(t::ink_900()), 1.0);
         fb.stroke_rrect(field, 12.0 * s, 2.0 * s, t::focus_ring(), 1.0);
         let shown = self.fonts.fit(Face::Sans, 15.0 * s, &p.text, field.w - 32.0 * s);
-        let x =
-            self.text(fb, Face::Sans, 15.0, field.x + 16.0 * s, field.cy(), &shown, t::text_strong(), 1.0, 0.0);
+        let x = self.text(
+            fb,
+            Face::Sans,
+            15.0,
+            field.x + 16.0 * s,
+            field.cy(),
+            &shown,
+            t::text_strong(),
+            1.0,
+            0.0,
+        );
         if p.text.is_empty() {
             self.text(
                 fb,
