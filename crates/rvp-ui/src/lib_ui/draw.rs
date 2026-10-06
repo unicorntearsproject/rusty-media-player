@@ -502,7 +502,7 @@ impl Ui {
             if !compact {
                 let label = alloc::format!(
                     "{} {} / {}",
-                    if sc.analysing { "Measuring" } else { "Scanning" },
+                    if sc.posters { "Posters" } else if sc.analysing { "Measuring" } else { "Scanning" },
                     sc.done,
                     sc.total.max(sc.done)
                 );
