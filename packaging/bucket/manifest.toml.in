@@ -1,0 +1,33 @@
+# The manifest of "Rusty Wave.bucket" (Rusty Bucket App API draft v0.3, docs/developer/bucket-format.md in ../rust-os).
+# `cargo xtask bucket` fills in the version and the builds it actually built (at the marker below), then packs this next to the wasm
+# modules and the icon.
+
+[app]
+id = "io.github.idometeor.RustyWave"   # the same ID as the desktop file, AppStream, MPRIS and Flatpak; never changes
+name = "Rusty Wave"
+version = "@VERSION@"
+api = "bucket_v0"
+api_min = "0.3"                        # compared as the minor number
+publisher = "Unicorn Tears Project"
+description = "Video and music player"
+icon = "icon.png"
+
+# @BUILDS@
+
+[needs]
+capabilities = ["CANVAS"]              # everything else is optional: no sound device, no shell, no library folder still plays
+optional = ["AUDIO_OUT", "VIDEO_YUV", "NOW_PLAYING", "VISUALIZER", "LIBRARY"]
+memory_max_mb = 2048                   # shared memory of the threads build included; the OS may grant less (memory.grow then fails)
+class = "media"                        # keeps playing audio while it is not in front
+
+[run]
+restart = "on-trap"                    # a panic in a decoder is a trap; the queue and position are in the store and come back
+restart_limit = "3/60s"
+
+[permissions]
+files = ["pick", "save", "library"]
+
+[[opens]]
+extensions = ["mp4", "m4v", "mkv", "webm", "mka", "mp3", "mp2", "flac", "ogg", "oga", "opus", "wav", "m4a", "m4b", "aac",
+              "srt", "vtt", "m3u", "m3u8", "pls"]
+role = "view"

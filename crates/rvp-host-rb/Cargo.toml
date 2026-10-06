@@ -1,6 +1,6 @@
 [package]
 name = "rvp-host-rb"
-description = "Rusty Bucket host adapter (stub until the app ABI exists)"
+description = "Rusty Bucket host adapter: Rusty Wave's host traits on top of the App API (bucket_v0 v0.3)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,3 +12,20 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bucket-v0-sys = { path = "../bucket-v0-sys", default-features = false }
+rvp-core.workspace = true
+rvp-host.workspace = true
+rvp-app.workspace = true
+rvp-ui.workspace = true
+
+# Threads exist only in the shared-memory wasm build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rvp-par.workspace = true
+
+# On native targets the imports are routed to a backend (the mock host in tests).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bucket-v0-sys = { path = "../bucket-v0-sys", default-features = false, features = ["backend"] }
+
+[dev-dependencies]
+bucket-v0-mock = { path = "../bucket-v0-mock" }
+rvp-codec-audio.workspace = true

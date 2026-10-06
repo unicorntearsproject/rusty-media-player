@@ -1,0 +1,39 @@
+[package]
+name = "rvp-wave-bucket"
+description = "Rusty Wave as a Rusty Bucket app: the wasm module (bucket_main) that cargo xtask bucket packages into Rusty Wave.bucket"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[features]
+# The decoders. Off, the module still links against the whole API (cargo test builds it that way to check the import list fast) but
+# cannot play anything.
+default = ["codecs"]
+# `smoke`: an extra export that runs jobs on spawned threads and checks stacks and thread-locals (used by `cargo xtask bucket`).
+smoke = []
+codecs = ["dep:rvp-codec-audio", "dep:rvp-codec-av1", "dep:rvp-codec-h264", "dep:rvp-codec-vp9"]
+
+[dependencies]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bucket-v0-sys = { path = "../bucket-v0-sys", default-features = false }
+rvp-core.workspace = true
+rvp-par.workspace = true
+rvp-ui.workspace = true
+rvp-host-rb = { path = "../rvp-host-rb" }
+rvp-codec-audio = { workspace = true, optional = true }
+rvp-codec-av1 = { workspace = true, optional = true }
+rvp-codec-h264 = { workspace = true, optional = true }
+rvp-codec-vp9 = { workspace = true, optional = true }
+
+[dev-dependencies]
+bucket-v0-sys = { path = "../bucket-v0-sys" }
