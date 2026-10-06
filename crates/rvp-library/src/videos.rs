@@ -322,3 +322,143 @@ impl<'a> Rd<'a> {
         String::from_utf8(self.take(n)?.to_vec()).map_err(|_| "not utf-8".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::art::Thumb;
+    use crate::model::Root;
+
+    fn entry(path: &str, size: u64, mtime: i64) -> FileEntry {
+        FileEntry { id: format!("id:{path}"), path: path.to_string(), size, mtime_ms: mtime }
+    }
+
+    fn info(title: &str, dur: i64) -> VideoInfo {
+        VideoInfo {
+            title: title.into(),
+            duration_us: dur,
+            width: 1280,
+            height: 720,
+            vcodec: "av1".into(),
+            acodec: "opus".into(),
+        }
+    }
+
+    fn lib_with(root: &str, files: &[(&str, &str, i64, i64)]) -> Library {
+        let mut l = Library::new();
+        let list: Vec<FileEntry> = files.iter().map(|f| entry(f.0, 100, f.3)).collect();
+        let plan = l.begin_scan(root, "Films", &list);
+        for (e, f) in plan.read_videos.iter().zip(files) {
+            l.apply_video(plan.root, e, Ok(info(f.1, f.2)));
+        }
+        l.finish_scan();
+        l
+    }
+
+    #[test]
+    fn orders_by_title_added_and_length() {
+        let l = lib_with(
+            "r",
+            &[("x/b.mp4", "", 30, 300), ("x/a10.mp4", "", 10, 100), ("x/a9.mp4", "Zed", 20, 200)],
+        );
+        let names = |v: Vec<VideoId>| -> Vec<String> {
+            v.into_iter().map(|i| l.video(i).unwrap().display_title().to_string()).collect()
+        };
+        assert_eq!(names(l.sorted_videos(VideoSort::Title, true)), ["a10", "b", "Zed"]);
+        assert_eq!(names(l.sorted_videos(VideoSort::Title, false)), ["Zed", "b", "a10"]);
+        assert_eq!(names(l.sorted_videos(VideoSort::Added, true)), ["a10", "Zed", "b"]);
+        assert_eq!(names(l.sorted_videos(VideoSort::Length, true)), ["a10", "Zed", "b"]);
+        assert_eq!(names(l.sorted_videos(VideoSort::Length, false)), ["b", "Zed", "a10"]);
+        assert_eq!(l.total_video_duration_us(), 60);
+        assert_eq!(l.search("zed").videos.len(), 1);
+    }
+
+    #[test]
+    fn natural_title_order_counts_numbers() {
+        let l = lib_with("r", &[("a10.mp4", "", 1, 1), ("a9.mp4", "", 1, 2), ("a2.mp4", "", 1, 3)]);
+        let order: Vec<&str> = l
+            .sorted_videos(VideoSort::Title, true)
+            .into_iter()
+            .map(|i| l.video(i).unwrap().file_name())
+            .collect();
+        assert_eq!(order, ["a2.mp4", "a9.mp4", "a10.mp4"]);
+    }
+
+    #[test]
+    fn saving_and_loading_round_trips_with_posters_and_flags() {
+        let mut l = lib_with("r", &[("a.mp4", "A", 5_000_000, 1), ("b.mkv", "", 6_000_000, 2)]);
+        let bad = entry("bad.mp4", 1, 1);
+        l.apply_video(0, &bad, Err(Error::Invalid("x".into())));
+        let (a, b) = (l.all_videos()[0].id, l.all_videos()[1].id);
+        l.set_poster(a, Some(Thumb { w: 1, h: 1, rgb: alloc::vec![1, 2, 3] }));
+        l.set_poster(b, None);
+        assert!(l.videos_dirty());
+        let bytes = l.save_videos();
+        assert!(!l.videos_dirty());
+
+        let mut m = Library::new();
+        m.roots = l.roots.clone();
+        m.load_videos(&bytes).unwrap();
+        assert_eq!(m.all_videos().len(), 3);
+        for (x, y) in l.all_videos().iter().zip(m.all_videos()) {
+            let mut x = x.clone();
+            x.src.clear();
+            assert_eq!(&x, y);
+        }
+        assert!(m.video(a).unwrap().poster != 0 && m.video(b).unwrap().poster_tried);
+        assert!(m.all_videos().iter().any(|v| v.unreadable));
+        assert!(!m.videos_dirty());
+        assert_eq!(m.video_count(), 2);
+        assert!(
+            m.used_art().contains(&m.video(a).unwrap().poster),
+            "posters are kept when pictures are pruned"
+        );
+        // New ids continue past the loaded ones.
+        let next = m.begin_scan("r", "Films", &[entry("c.mp4", 1, 1)]);
+        m.apply_video(next.root, &next.read_videos[0], Ok(info("C", 1)));
+        assert!(m.all_videos().iter().find(|v| v.path == "c.mp4").unwrap().id > b);
+    }
+
+    #[test]
+    fn roots_are_matched_by_id_not_position() {
+        let mut l = Library::new();
+        l.roots = alloc::vec![
+            Root { id: "one".into(), name: "One".into(), connected: true },
+            Root { id: "two".into(), name: "Two".into(), connected: true },
+        ];
+        let p = l.begin_scan("two", "Two", &[entry("t.mp4", 1, 1)]);
+        l.apply_video(p.root, &p.read_videos[0], Ok(info("T", 1)));
+        let p = l.begin_scan("one", "One", &[entry("o.mp4", 1, 1)]);
+        l.apply_video(p.root, &p.read_videos[0], Ok(info("O", 1)));
+        let bytes = l.save_videos();
+        // The folder list changed: "one" is gone, "two" is now first.
+        let mut m = Library::new();
+        m.roots = alloc::vec![Root { id: "two".into(), name: "Two".into(), connected: false }];
+        m.load_videos(&bytes).unwrap();
+        assert_eq!(m.all_videos().len(), 1, "the video of the missing folder is dropped");
+        assert_eq!((m.all_videos()[0].path.as_str(), m.all_videos()[0].root), ("t.mp4", 0));
+        assert!(m.all_videos()[0].src.is_empty(), "not connected until a listing arrives");
+    }
+
+    #[test]
+    fn forgetting_a_folder_drops_its_videos() {
+        let mut l = lib_with("r", &[("a.mp4", "A", 1, 1)]);
+        assert_eq!(l.video_count(), 1);
+        l.save_videos();
+        l.remove_root("r");
+        assert_eq!(l.all_videos().len(), 0);
+        assert!(l.videos_dirty());
+    }
+
+    #[test]
+    fn bad_bytes_are_refused() {
+        let mut l = Library::new();
+        assert!(l.load_videos(b"").is_err());
+        assert!(l.load_videos(b"NOPE\x01").is_err());
+        let good = lib_with("r", &[("a.mp4", "A", 1, 1)]).save_videos();
+        for cut in [5, 9, good.len() - 1] {
+            let mut m = Library::new();
+            assert!(m.load_videos(&good[..cut]).is_err(), "cut at {cut}");
+        }
+    }
+}

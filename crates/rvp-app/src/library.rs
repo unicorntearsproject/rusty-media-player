@@ -2,6 +2,7 @@
 //! "play next" and "add to queue", playlists (including importing and exporting files), what is playing (tags and cover art), the
 //! visualizer's feed, and the switch between the Library and the Player face.
 use super::{App, Effect};
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
@@ -11,7 +12,7 @@ use rvp_core::{Error, Timestamp};
 use rvp_host::{FrameSink, Host, OpenRequest, Storage};
 use rvp_library::{
     INDEX_KEY, Image, Library, ListFormat, PLAYLISTS_KEY, ScanEvent, ScanReport, ScanStatus, Scanner,
-    art_key, encode_thumb,
+    VIDEOS_KEY, art_key, encode_thumb,
 };
 use rvp_player::exec::Executor;
 use rvp_ui::{Enqueue, LibAction, LibCtx, Mode, PlaylistEntry, Scope, UiCommand, View};
@@ -66,6 +67,12 @@ pub(crate) struct LibState {
     /// Pictures that storage did not have (not asked for again).
     pub missing_art: alloc::collections::BTreeSet<u64>,
     pub queue_cache: Option<(QueueKey, Rc<Vec<PlaylistEntry>>)>,
+    /// Saved positions of the videos as a fraction of their length (0..1), for the resume markers.
+    pub resume: BTreeMap<u32, f32>,
+    /// What the video list looked like when `resume` was last read from storage.
+    pub resume_sig: Option<u64>,
+    /// The library revision the poster job last looked at.
+    pub poster_rev: u64,
 }
 
 impl LibState {
@@ -88,6 +95,9 @@ impl LibState {
             analysis_rev: u64::MAX,
             missing_art: Default::default(),
             queue_cache: None,
+            resume: BTreeMap::new(),
+            resume_sig: None,
+            poster_rev: u64::MAX,
         }
     }
 }
@@ -126,6 +136,12 @@ impl App {
         self.lib.scan_status.as_ref()
     }
 
+    /// Saved positions of the library's videos as a fraction of their length (0..1), for the resume markers. Only videos that would
+    /// resume (not at the start, not nearly finished) are listed. Positions are saved under `resume:` and the video's file name.
+    pub fn video_resume_fractions(&self) -> &BTreeMap<u32, f32> {
+        &self.lib.resume
+    }
+
     /// What the library face draws from.
     pub(crate) fn lib_ctx<'a>(lib: &'a LibState, video: Option<(&'a [u8], u32, u32)>) -> LibCtx<'a> {
         LibCtx {
@@ -134,8 +150,7 @@ impl App {
             scan: lib.scan_status.as_ref(),
             viz: Some(&lib.viz),
             video,
-            // The resume markers of the videos (filled by the app from the saved positions).
-            resume: rvp_ui::lib_ui::no_resume(),
+            resume: &lib.resume,
         }
     }
 
@@ -150,6 +165,10 @@ impl App {
         }
         if let Some(bytes) = rvp_core::task::block_on(host.storage().load(PLAYLISTS_KEY)) {
             let _ = self.lib.lib.load_playlists(&bytes);
+        }
+        // The videos name their folders by id, so they are read once the index has its roots.
+        if let Some(bytes) = rvp_core::task::block_on(host.storage().load(VIDEOS_KEY)) {
+            let _ = self.lib.lib.load_videos(&bytes);
         }
     }
 
@@ -175,9 +194,16 @@ impl App {
 
     /// Save what changed: the index and its new thumbnails, the playlists.
     pub(crate) fn lib_save<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
-        if self.lib.lib.index_dirty() {
+        let (index, videos) = (self.lib.lib.index_dirty(), self.lib.lib.videos_dirty());
+        if index {
             let bytes = self.lib.lib.save_index();
             rvp_core::task::block_on(host.storage().store(INDEX_KEY, &bytes));
+        }
+        if videos {
+            let bytes = self.lib.lib.save_videos();
+            rvp_core::task::block_on(host.storage().store(VIDEOS_KEY, &bytes));
+        }
+        if index || videos {
             self.lib_save_art(host);
         }
         self.lib_save_playlists(host);
@@ -239,6 +265,13 @@ impl App {
                 }
             }
         }
+        // Videos without a poster get one once the scans are done (a failure marks the video, so this does not repeat).
+        if self.lib.loaded && self.lib.lib.revision() != self.lib.poster_rev && !self.lib.scanner.busy() {
+            self.lib.poster_rev = self.lib.lib.revision();
+            let pending = self.lib.lib.pending_posters();
+            self.lib.scanner.start_posters(pending);
+        }
+        self.lib_refresh_resume(host);
         // Measuring is background work: it waits while a picture is playing (decoding for the measurement would take frames).
         let video_playing = self.session.as_ref().is_some_and(|s| {
             s.container_has_video() && matches!(s.state(), rvp_player::SessionState::Playing)
@@ -246,7 +279,7 @@ impl App {
         if self.lib.scanner.busy() && (self.lib.scanner.scanning() || !video_playing) {
             match self.lib.scanner.tick(&mut self.lib.lib, host) {
                 ScanEvent::Finished(rep) => self.lib_scan_done(host, rep, now),
-                ScanEvent::Analysed => self.lib_save(host),
+                ScanEvent::Analysed | ScanEvent::Posters => self.lib_save(host),
                 _ => {}
             }
         }
@@ -260,6 +293,67 @@ impl App {
         self.refresh_now_meta(now);
         self.auto_switch_mode();
         self.lib_viz_tick(now);
+    }
+
+    /// What the host opens library item `id` with: `Some` (possibly empty when its folder is not connected) when `id` is a track or a
+    /// video of the library, `None` when the library has no such item.
+    pub(crate) fn lib_item_src(&self, id: u32) -> Option<String> {
+        if let Some(t) = self.lib.lib.track(id) {
+            return Some(t.src.clone());
+        }
+        self.lib.lib.video(id).map(|v| v.src.clone())
+    }
+
+    // ---- resume markers -----------------------------------------------------------------------------------------------------------
+
+    /// The key a file's playback position is saved under: its file name (what the host's source calls it), so a video opened from the
+    /// library and the same file opened by hand share one position.
+    pub(crate) fn resume_key_for(file_name: &str) -> String {
+        format!("resume:{file_name}")
+    }
+
+    /// Read the saved positions of the videos into `lib.resume` when the video list changed (and the scans are done).
+    fn lib_refresh_resume<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
+        if !self.lib.loaded || self.lib.scanner.busy() {
+            return;
+        }
+        let sig = self.lib.lib.all_videos().iter().fold(self.lib.lib.all_videos().len() as u64, |a, v| {
+            a.rotate_left(7) ^ (v.id as u64) ^ (v.duration_us as u64).rotate_left(21) ^ v.path.len() as u64
+        });
+        if self.lib.resume_sig == Some(sig) {
+            return;
+        }
+        self.lib.resume_sig = Some(sig);
+        let mut map = BTreeMap::new();
+        for v in self.lib.lib.all_videos().iter().filter(|v| !v.unreadable && v.duration_us > 0) {
+            let key = Self::resume_key_for(v.file_name());
+            let Some(bytes) = rvp_core::task::block_on(host.storage().load(&key)) else { continue };
+            let Ok(raw) = <[u8; 8]>::try_from(bytes.as_slice()) else { continue };
+            if let Some(f) =
+                super::resume_fraction(i64::from_le_bytes(raw).saturating_mul(1000), v.duration_us)
+            {
+                map.insert(v.id, f);
+            }
+        }
+        self.lib.resume = map;
+    }
+
+    /// A position was just saved for the item playing: keep its marker current without reading storage again.
+    pub(crate) fn note_resume(&mut self, pos: Timestamp, dur: Timestamp, saved: bool) {
+        let Some(id) = self.playlist.current_id().and_then(|i| self.playlist.get(i)).and_then(|i| i.track)
+        else {
+            return;
+        };
+        let Some(v) = self.lib.lib.video(id) else { return };
+        let vid = v.id;
+        match saved.then(|| super::resume_fraction(pos, dur.max(v.duration_us))).flatten() {
+            Some(f) => {
+                self.lib.resume.insert(vid, f);
+            }
+            None => {
+                self.lib.resume.remove(&vid);
+            }
+        }
     }
 
     fn lib_scan_done<H: Host<Video = FrameSink>>(&mut self, host: &mut H, rep: ScanReport, now: Timestamp) {
@@ -666,6 +760,8 @@ impl App {
                 self.ui.show_toast("Playing next", now);
             }
             LibAction::SortTracks(by, asc) => self.ui.set_track_sort(by, asc),
+            // The video list's layout and order live in the UI's state; nothing for the app to do yet.
+            LibAction::VideoLayout(_) | LibAction::SortVideos(..) => {}
             LibAction::VizStep(d) => {
                 self.lib.viz.effect = self.lib.viz.effect.step(d as i32);
                 self.base_dirty = true;

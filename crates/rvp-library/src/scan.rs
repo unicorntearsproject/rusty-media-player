@@ -8,6 +8,7 @@ use crate::art;
 use crate::fold::hash64;
 use crate::index::{FolderArt, Library};
 use crate::model::*;
+use crate::video::is_video_name;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -136,8 +137,10 @@ pub async fn read_all<S: Source>(mut src: S, max: usize) -> Result<Vec<u8>, Erro
 pub struct ScanPlan {
     /// Index of the root in [`Library::roots`].
     pub root: u16,
-    /// Files to read: new ones and ones whose size or time changed.
+    /// Audio files to read: new ones and ones whose size or time changed.
     pub read: Vec<FileEntry>,
+    /// Video files to read (with `read_video_info`): new ones and ones whose size or time changed.
+    pub read_videos: Vec<FileEntry>,
 }
 
 impl Library {
@@ -148,6 +151,7 @@ impl Library {
             Some(i) => i,
             None => {
                 self.roots.push(Root { id: root_id.to_string(), name: name.to_string(), connected: true });
+                self.dirty = true; // the videos name their folder by id, so the index must list it
                 self.roots.len() - 1
             }
         };
@@ -162,7 +166,15 @@ impl Library {
                 known.insert(t.path.clone(), i);
             }
         }
+        // The videos of this root, by path.
+        let mut known_videos: BTreeMap<String, usize> = BTreeMap::new();
+        for (i, v) in self.videos.iter().enumerate() {
+            if v.root == ri16 {
+                known_videos.insert(v.path.clone(), i);
+            }
+        }
         let mut read = Vec::new();
+        let mut read_videos = Vec::new();
         let mut pictures: BTreeMap<String, (usize, &FileEntry)> = BTreeMap::new();
         for f in files {
             let file_name = f.path.rsplit('/').next().unwrap_or(&f.path);
@@ -178,6 +190,19 @@ impl Library {
                         }
                     }
                     None => read.push(f.clone()),
+                }
+            } else if is_video_name(file_name) {
+                match known_videos.remove(&f.path) {
+                    Some(i) => {
+                        let v = &mut self.videos[i];
+                        v.src = f.id.clone();
+                        if v.size != f.size || v.mtime_ms != f.mtime_ms {
+                            read_videos.push(f.clone());
+                        } else {
+                            self.report.unchanged += 1;
+                        }
+                    }
+                    None => read_videos.push(f.clone()),
                 }
             } else if let Some(rank) = cover_rank(file_name) {
                 if f.size <= MAX_FOLDER_ART {
@@ -201,6 +226,18 @@ impl Library {
             });
             self.dirty = true;
         }
+        // Videos that were not listed are gone.
+        if !known_videos.is_empty() {
+            self.report.removed += known_videos.len();
+            let gone: alloc::collections::BTreeSet<usize> = known_videos.into_values().collect();
+            let mut i = 0;
+            self.videos.retain(|_| {
+                let keep = !gone.contains(&i);
+                i += 1;
+                keep
+            });
+            self.videos_dirty = true;
+        }
         // Folder pictures: keep what is unchanged (with its picture), note what must be read.
         let mut next: BTreeMap<(u16, String), FolderArt> = BTreeMap::new();
         for (dir, (_, f)) in pictures {
@@ -222,7 +259,7 @@ impl Library {
         }
         self.folder_art.retain(|(r, _), _| *r != ri16);
         self.folder_art.extend(next);
-        ScanPlan { root: ri16, read }
+        ScanPlan { root: ri16, read, read_videos }
     }
 
     /// File the result of reading `entry` (a file of root `root`).
@@ -437,6 +474,11 @@ impl Library {
                 t.src.clear();
             }
         }
+        for v in &mut self.videos {
+            if !self.roots.get(v.root as usize).is_some_and(|r| r.connected) {
+                v.src.clear();
+            }
+        }
     }
 
     /// Ids of pictures that were dropped since the last call (their saved copies can go).
@@ -558,6 +600,90 @@ mod tests {
         let plan = l.begin_scan("r", "M", &files);
         assert!(plan.read.is_empty());
         assert!(l.pending_folder_art().is_empty());
+    }
+
+    fn vinfo(title: &str, dur: i64) -> crate::video::VideoInfo {
+        crate::video::VideoInfo {
+            title: title.into(),
+            duration_us: dur,
+            width: 640,
+            height: 360,
+            vcodec: "h264".into(),
+            acodec: "aac".into(),
+        }
+    }
+
+    #[test]
+    fn videos_are_folded_in_like_tracks() {
+        let mut l = Library::new();
+        let first = [
+            entry("v/a.mp4", 10, 1),
+            entry("v/b.mkv", 20, 1),
+            entry("v/c.webm", 30, 1),
+            entry("v/s.mp3", 5, 1),
+            entry("v/notes.txt", 5, 1),
+        ];
+        let plan = l.begin_scan("r", "Films", &first);
+        assert_eq!((plan.read.len(), plan.read_videos.len()), (1, 3));
+        for e in &plan.read_videos {
+            l.apply_video(plan.root, e, Ok(vinfo(&e.path, 5_000_000)));
+        }
+        for e in &plan.read {
+            l.apply_tags(plan.root, e, Ok(tags("s", "x")));
+        }
+        l.finish_scan();
+        assert_eq!((l.report.added, l.video_count(), l.track_count()), (4, 3, 1));
+        let id_b = l.all_videos().iter().find(|v| v.path == "v/b.mkv").unwrap().id;
+        assert!(l.video(id_b).is_some() && l.track(id_b).is_none(), "one id space, told apart by lookup");
+
+        // b changes, c is deleted, d is new, a is untouched (with a new session id); audio is unchanged.
+        let second = [
+            FileEntry { id: "new-a".into(), ..entry("v/a.mp4", 10, 1) },
+            entry("v/b.mkv", 21, 2),
+            entry("v/d.m4v", 40, 1),
+            entry("v/s.mp3", 5, 1),
+        ];
+        let plan = l.begin_scan("r", "Films", &second);
+        let mut paths: Vec<&str> = plan.read_videos.iter().map(|e| e.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, ["v/b.mkv", "v/d.m4v"]);
+        assert!(plan.read.is_empty());
+        assert_eq!(l.report.removed, 1, "c is gone");
+        assert!(l.videos_dirty());
+        for e in &plan.read_videos {
+            l.apply_video(plan.root, e, Ok(vinfo(&e.path, 6_000_000)));
+        }
+        l.finish_scan();
+        assert_eq!((l.report.added, l.report.changed, l.report.removed, l.report.unchanged), (1, 1, 1, 2));
+        assert_eq!(l.video_count(), 3);
+        assert_eq!(l.all_videos().iter().find(|v| v.path == "v/b.mkv").unwrap().id, id_b, "ids survive");
+        assert_eq!(l.all_videos().iter().find(|v| v.path == "v/a.mp4").unwrap().src, "new-a");
+        assert!(l.all_videos().iter().all(|v| v.path != "v/c.webm"));
+        assert_eq!(l.track_count(), 1, "audio untouched");
+    }
+
+    #[test]
+    fn a_changed_video_loses_its_poster_and_unreadable_ones_are_not_retried() {
+        let mut l = Library::new();
+        let files = [entry("a.mp4", 10, 1), entry("bad.mp4", 3, 1)];
+        let plan = l.begin_scan("r", "M", &files);
+        l.apply_video(plan.root, &plan.read_videos[0], Ok(vinfo("A", 1_000_000)));
+        l.apply_video(plan.root, &plan.read_videos[1], Err(Error::Invalid("x".into())));
+        l.finish_scan();
+        assert_eq!((l.report.failed, l.video_count(), l.all_videos().len()), (1, 1, 2));
+        let id = l.all_videos().iter().find(|v| v.path == "a.mp4").unwrap().id;
+        l.set_poster(id, Some(crate::art::Thumb { w: 1, h: 1, rgb: alloc::vec![9, 9, 9] }));
+        assert_ne!(l.video(id).unwrap().poster, 0);
+        assert!(l.pending_posters().is_empty());
+        assert!(l.begin_scan("r", "M", &files).read_videos.is_empty(), "nothing changed, nothing read");
+        let files2 = [entry("a.mp4", 11, 2), entry("bad.mp4", 3, 1)];
+        let plan = l.begin_scan("r", "M", &files2);
+        assert_eq!(plan.read_videos.len(), 1);
+        l.apply_video(plan.root, &plan.read_videos[0], Ok(vinfo("A", 1_000_000)));
+        assert_eq!(l.video(id).unwrap().poster, 0, "a changed file gets a new poster");
+        assert_eq!(l.pending_posters().len(), 1);
+        l.finish_scan();
+        assert_eq!(l.take_dropped_art().len(), 1, "the old poster picture is released");
     }
 
     #[test]

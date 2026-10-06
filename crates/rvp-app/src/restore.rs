@@ -178,7 +178,7 @@ impl App {
             ..SavedQueue::default()
         };
         for i in self.playlist.items() {
-            let in_library = i.track.is_some_and(|t| self.lib.lib.track(t).is_some());
+            let in_library = i.track.is_some_and(|t| self.lib_item_src(t).is_some());
             if !in_library && !(stable && !i.source.is_empty()) {
                 continue; // a dropped file in a browser: nothing to open it with next time
             }
@@ -281,9 +281,9 @@ impl App {
         let stable = host.stable_ids();
         let mut ids = Vec::with_capacity(q.items.len());
         for it in &q.items {
-            let track = it.track.filter(|&t| self.lib.lib.track(t).is_some());
-            let lib_src =
-                track.and_then(|t| self.lib.lib.track(t)).map(|t| t.src.clone()).filter(|s| !s.is_empty());
+            // A library item is a track or a video (they share one id space).
+            let track = it.track.filter(|&t| self.lib_item_src(t).is_some());
+            let lib_src = track.and_then(|t| self.lib_item_src(t)).filter(|s| !s.is_empty());
             let source = lib_src.unwrap_or_else(|| if stable { it.source.clone() } else { String::new() });
             if source.is_empty() && track.is_none() {
                 ids.push(None);

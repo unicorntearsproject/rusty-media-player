@@ -15,8 +15,8 @@ mod library;
 mod restore;
 mod services;
 mod setup;
-mod theme_ui;
 mod snapshot;
+mod theme_ui;
 
 pub use restore::{POSITION_KEY, QUEUE_KEY, SavedItem, SavedQueue};
 
@@ -47,6 +47,11 @@ const RESUME_END_FRACTION: Timestamp = 50;
 /// stretch (the larger of 5 s and 2% of the length), which counts as finished.
 fn resumable(pos: Timestamp, dur: Timestamp) -> bool {
     pos > 0 && pos + RESUME_END_MIN_US.max(dur / RESUME_END_FRACTION) <= dur
+}
+
+/// How far into an item of length `dur` a resumable saved position `pos` is (0..1); `None` when it is not worth going back to.
+fn resume_fraction(pos: Timestamp, dur: Timestamp) -> Option<f32> {
+    (dur > 0 && resumable(pos, dur)).then(|| (pos as f64 / dur as f64).clamp(0.0, 1.0) as f32)
 }
 
 /// The "a song starts from the top" rule: only a music track played from the library, without video, shorter than
@@ -484,7 +489,7 @@ impl App {
             self.restore.forced_pos = None;
         }
         self.title = source.name().to_string();
-        self.resume_key = Some(format!("resume:{}", self.title));
+        self.resume_key = Some(Self::resume_key_for(&self.title));
         self.resume_checked = !resume;
         self.last_resume_save = now;
         self.loop_a = None;
@@ -521,12 +526,32 @@ impl App {
         if self.is_library_song(s.container_has_video(), dur) {
             return; // a song from the library starts from the top every time
         }
-        let value: Vec<u8> = if s.state() == SessionState::Ended || !resumable(pos, dur) {
+        let done = s.state() == SessionState::Ended || !resumable(pos, dur);
+        let value: Vec<u8> = if done {
             Vec::new() // finished (or nearly), or at the start: next time starts from the beginning
         } else {
             (pos / 1000).to_le_bytes().to_vec()
         };
         rvp_core::task::block_on(host.storage().store(&key, &value));
+        self.note_resume(pos, dur, !done);
+    }
+
+    /// The file name of queue item `id`: what the host's source calls the file, which is what its resume position is saved under.
+    /// Library items are named by their title in the queue, so their file name comes from the library.
+    fn item_file_name(&self, id: u32) -> String {
+        let Some(item) = self.playlist.get(id) else { return self.title.clone() };
+        match item.track {
+            Some(t) => {
+                if let Some(v) = self.lib.lib.video(t) {
+                    v.file_name().to_string()
+                } else if let Some(tr) = self.lib.lib.track(t) {
+                    tr.file_name().to_string()
+                } else {
+                    item.name.clone()
+                }
+            }
+            None => item.name.clone(),
+        }
     }
 
     /// A music track played from the library that is shorter than [`RESUME_MIN_AUDIO_US`] (a song, not an audiobook): it does not
@@ -743,7 +768,8 @@ impl App {
                 self.loop_b = None;
                 self.warnings_seen = 0;
                 self.queued = None;
-                self.resume_key = Some(format!("resume:{}", self.title));
+                let file = self.item_file_name(tag);
+                self.resume_key = Some(Self::resume_key_for(&file));
                 self.resume_checked = true;
                 self.last_resume_save = now;
                 self.base_dirty = true;
@@ -815,7 +841,7 @@ impl App {
                 Err(e) => self.ui.show_toast(&format!("Couldn't open that: {e}"), now),
             }
         }
-        let actions = if self.ui.mode() == Mode::Library {
+        let actions = if self.ui.lib_chrome() {
             let video = host.video();
             let frame = (video.width > 0).then_some((video.rgba.as_slice(), video.width, video.height));
             let ctx = Self::lib_ctx(&self.lib, frame);
@@ -1406,7 +1432,9 @@ impl App {
         self.ui.set_size(sw, sh, dpr);
         let ui_dirty = self.ui.update(now, &self.model);
 
-        let lib_mode = self.ui.mode() == Mode::Library;
+        // The Player face with nothing loaded lives inside the library's frame.
+        self.ui.set_player_empty(self.model.state == MediaState::Idle && !self.model.has_media());
+        let lib_mode = self.ui.lib_chrome();
         let has_media = self.model.has_media();
         // The layer under the chrome depends on the face, the view and whether the visualizer is on.
         let base_key = (
@@ -1527,6 +1555,16 @@ mod tests {
     }
 
     const S: Timestamp = 1_000_000;
+
+    #[test]
+    fn the_resume_marker_is_a_fraction_only_for_resumable_positions() {
+        const S: Timestamp = 1_000_000;
+        assert_eq!(resume_fraction(30 * S, 60 * S), Some(0.5));
+        assert_eq!(resume_fraction(0, 60 * S), None, "at the start");
+        assert_eq!(resume_fraction(58 * S, 60 * S), None, "nearly finished");
+        assert_eq!(resume_fraction(S, 0), None, "unknown length");
+        assert!(resume_fraction(S, 60 * S).unwrap() > 0.0);
+    }
 
     #[test]
     fn a_saved_position_resumes_unless_it_is_at_the_start_or_the_very_end() {
