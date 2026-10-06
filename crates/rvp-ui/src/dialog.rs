@@ -43,6 +43,18 @@ pub struct DialogToggle {
     pub on: bool,
 }
 
+/// A one-line text box. What it shows is the application's to say (a long paste is summarised); keys typed while it is up go to the
+/// application as [`Action::DialogChar`] and [`Action::DialogBackspace`], and pasted text reaches it as [`rvp_host::InputEvent::Paste`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DialogInput {
+    /// A small label above the box.
+    pub label: String,
+    /// What the box shows (the end of it is kept in view).
+    pub text: String,
+    /// Greyed text shown while `text` is empty.
+    pub placeholder: String,
+}
+
 /// Everything a dialog shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DialogSpec {
@@ -56,6 +68,10 @@ pub struct DialogSpec {
     pub toggles: Vec<DialogToggle>,
     /// Buttons, left to right.
     pub buttons: Vec<DialogButton>,
+    /// A text box between the paragraphs and the switches.
+    pub input: Option<DialogInput>,
+    /// Slim switch rows without the explanation line (a long checklist); the rows also shrink on their own when the card would not fit.
+    pub compact: bool,
 }
 
 /// What can have the keyboard focus or the pointer.
@@ -88,6 +104,10 @@ pub struct DialogGeom {
     pub body_top: f32,
     /// The progress bar, if any.
     pub progress: Option<RectF>,
+    /// The text box, if any.
+    pub input: Option<RectF>,
+    /// Height of one switch row, pixels.
+    pub row_h: f32,
     /// Each switch's row (the whole row reacts) and its drawn switch.
     pub toggles: Vec<(RectF, RectF)>,
     /// Each button.
@@ -128,23 +148,6 @@ impl Ui {
         let n_lines: usize = lines.iter().map(|p| p.len()).sum();
         let gaps = spec.body.len().saturating_sub(1) as f32 * 8.0;
         let body_h = n_lines as f32 * LINE_H + gaps;
-        let mut y = 72.0 + body_h; // in unscaled units, relative to the card top
-        let progress_y = y + 8.0;
-        if spec.progress.is_some() {
-            y += 8.0 + 8.0 + 8.0;
-        }
-        y += 4.0;
-        let toggle_ys: Vec<f32> = spec
-            .toggles
-            .iter()
-            .map(|_| {
-                let at = y;
-                y += 60.0;
-                at
-            })
-            .collect();
-        y += 12.0;
-        // Buttons: one row when they fit, else stacked.
         let widths: Vec<f32> = {
             let mut v = Vec::new();
             for b in &spec.buttons {
@@ -156,32 +159,66 @@ impl Ui {
         let row_w: f32 = widths.iter().sum::<f32>() + 8.0 * widths.len().saturating_sub(1) as f32;
         let stacked = row_w > inner / s;
         let btn_h = 42.0;
-        let buttons_top = y;
-        let mut button_rects_rel: Vec<(f32, f32, f32, f32)> = Vec::new();
-        if stacked {
-            for (i, _) in spec.buttons.iter().enumerate() {
-                button_rects_rel.push((0.0, buttons_top + i as f32 * (btn_h + 8.0), inner / s, btn_h));
+        // Lay the card out (unscaled units, relative to its top); a long checklist shrinks its rows until the card fits the window.
+        let mut row_h = if spec.compact { 34.0 } else { 60.0 };
+        let (progress_y, input_y, toggle_ys, button_rects_rel, ch) = loop {
+            let mut y = 72.0 + body_h;
+            let progress_y = y + 8.0;
+            if spec.progress.is_some() {
+                y += 8.0 + 8.0 + 8.0;
             }
-            y = buttons_top + spec.buttons.len() as f32 * (btn_h + 8.0);
-        } else {
-            let mut x = inner / s - row_w;
-            for wd in &widths {
-                button_rects_rel.push((x, buttons_top, *wd, btn_h));
-                x += wd + 8.0;
+            y += 4.0;
+            let input_y = y;
+            if spec.input.is_some() {
+                y += 66.0;
             }
-            y = buttons_top + if spec.buttons.is_empty() { 0.0 } else { btn_h };
-        }
-        let ch = (y + 28.0) * s;
+            let toggle_ys: Vec<f32> = spec
+                .toggles
+                .iter()
+                .map(|_| {
+                    let at = y;
+                    y += row_h;
+                    at
+                })
+                .collect();
+            y += 12.0;
+            let buttons_top = y;
+            let mut rects: Vec<(f32, f32, f32, f32)> = Vec::new();
+            if stacked {
+                for (i, _) in spec.buttons.iter().enumerate() {
+                    rects.push((0.0, buttons_top + i as f32 * (btn_h + 8.0), inner / s, btn_h));
+                }
+                y = buttons_top + spec.buttons.len() as f32 * (btn_h + 8.0);
+            } else {
+                let mut x = inner / s - row_w;
+                for wd in &widths {
+                    rects.push((x, buttons_top, *wd, btn_h));
+                    x += wd + 8.0;
+                }
+                y = buttons_top + if spec.buttons.is_empty() { 0.0 } else { btn_h };
+            }
+            let ch = (y + 28.0) * s;
+            if ch <= h - 16.0 * s || row_h <= 24.0 || spec.toggles.is_empty() {
+                break (progress_y, input_y, toggle_ys, rects, ch);
+            }
+            row_h -= 2.0;
+        };
         let card = RectF::new(((w - cw) * 0.5).max(0.0), ((h - ch) * 0.5).max(8.0 * s), cw, ch);
         let x0 = card.x + pad;
         let close =
             RectF::new(card.right() - pad - 32.0 * s + 8.0 * s, card.y + 18.0 * s, 36.0 * s, 36.0 * s);
         let progress = spec.progress.map(|_| RectF::new(x0, card.y + progress_y * s, inner, 8.0 * s));
+        let input = spec.input.as_ref().map(|_| RectF::new(x0, card.y + (input_y + 20.0) * s, inner, 40.0 * s));
         let toggles = toggle_ys
             .iter()
             .map(|ty| {
-                let row = RectF::new(card.x + 8.0 * s, card.y + ty * s, card.w - 16.0 * s, 56.0 * s);
-                let sw = RectF::new(x0 + inner - 48.0 * s, card.y + (ty + 14.0) * s, 48.0 * s, 28.0 * s);
+                let row = RectF::new(card.x + 8.0 * s, card.y + ty * s, card.w - 16.0 * s, (row_h - 4.0) * s);
+                let sw = RectF::new(
+                    x0 + inner - 48.0 * s,
+                    card.y + (ty + (row_h - 4.0) * 0.5 - 14.0) * s,
+                    48.0 * s,
+                    28.0 * s,
+                );
                 (row, sw)
             })
             .collect();
@@ -190,7 +227,7 @@ impl Ui {
             .map(|(bx, by, bw, bh)| RectF::new(x0 + bx * s, card.y + by * s, bw * s, bh * s))
             .collect();
         self.dialog.lines = lines;
-        DialogGeom { card, close, body_top: card.y + 64.0 * s, progress, toggles, buttons }
+        DialogGeom { card, close, body_top: card.y + 64.0 * s, progress, input, row_h, toggles, buttons }
     }
 
     fn dialog_controls(spec: &DialogSpec) -> Vec<DialogControl> {
@@ -318,6 +355,15 @@ impl Ui {
         out: &mut Vec<Action>,
     ) {
         let n = controls.len();
+        // A text box takes what is typed (not the keys that press controls).
+        if spec.input.is_some() && !mods.ctrl && !mods.logo {
+            match key {
+                Key::Char(c) if !c.is_control() => return out.push(Action::DialogChar(*c)),
+                Key::Space => return out.push(Action::DialogChar(' ')),
+                Key::Other(name) if name == "Backspace" => return out.push(Action::DialogBackspace),
+                _ => {}
+            }
+        }
         match key {
             Key::Escape => out.push(Action::DialogClose),
             _ if n == 0 => {}
@@ -327,7 +373,7 @@ impl Ui {
             }
             Key::Down | Key::Right => self.dialog.focus = Some((self.dialog.focus.unwrap_or(0) + 1) % n),
             Key::Up | Key::Left => self.dialog.focus = Some((self.dialog.focus.unwrap_or(0) + n - 1) % n),
-            Key::Space | Key::Enter => {
+            Key::Enter | Key::Space => {
                 if let Some(c) = self.dialog.focus.and_then(|f| controls.get(f).copied()) {
                     Self::dialog_activate(spec, c, out);
                 }
@@ -407,14 +453,37 @@ impl Ui {
             fb.fill_rrect(fill, r.h * 0.5, Paint::Horizontal(t::MAGENTA_500, t::VIOLET_400), 1.0);
         }
         let focus = if self.keyboard_mode { self.dialog_focus(spec) } else { None };
+        // The text box.
+        if let (Some(r), Some(inp)) = (g.input, &spec.input) {
+            self.text(fb, Face::SansMedium, 12.0, r.x, r.y - 10.0 * s, &inp.label, t::TEXT_DIM, 1.0, 0.4);
+            fb.fill_rrect(r, 10.0 * s, Paint::Solid(t::INK_900), 1.0);
+            fb.stroke_rrect(r, 10.0 * s, 1.0 * s, t::CYAN_500, 0.9);
+            let room = r.w - 28.0 * s;
+            if inp.text.is_empty() {
+                let ph = self.fonts.fit(Face::Sans, 14.0 * s, &inp.placeholder, room);
+                self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &ph, t::TEXT_DISABLED, 1.0, 0.0);
+            } else {
+                // Keep the end in view: drop characters from the front until it fits.
+                let mut shown: String = inp.text.chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
+                while self.text_w(Face::Sans, 14.0, &shown, 0.0) * 1.0 > room / s && shown.chars().count() > 1 {
+                    shown = shown.chars().skip(1).collect();
+                }
+                let w = self.text_w(Face::Sans, 14.0, &shown, 0.0);
+                self.text(fb, Face::Sans, 14.0, r.x + 14.0 * s, r.cy(), &shown, t::TEXT_STRONG, 1.0, 0.0);
+                // The caret, steady (no blinking: nothing here flashes).
+                fb.fill_rrect(RectF::new(r.x + 14.0 * s + w * s + 2.0 * s, r.cy() - 9.0 * s, 1.5 * s, 18.0 * s), 0.5 * s, Paint::Solid(t::CYAN_400), 0.9);
+            }
+        }
         // The switches.
         for (i, tg) in spec.toggles.iter().enumerate() {
             let (row, sw) = g.toggles[i];
             let c = DialogControl::Toggle(i as u8);
             let room = inner - 64.0 * s;
             let label = self.fonts.fit(Face::SansMedium, 15.0 * s, &tg.label, room);
-            self.text(fb, Face::SansMedium, 15.0, x0, row.y + 20.0 * s, &label, t::TEXT_STRONG, 1.0, 0.0);
-            if !tg.desc.is_empty() {
+            let slim = g.row_h < 50.0;
+            let label_y = if slim { row.cy() } else { row.y + 20.0 * s };
+            self.text(fb, Face::SansMedium, 15.0, x0, label_y, &label, t::TEXT_STRONG, 1.0, 0.0);
+            if !tg.desc.is_empty() && !slim {
                 let d = self.fonts.fit(Face::Sans, 12.0 * s, &tg.desc, room);
                 self.text(fb, Face::Sans, 12.0, x0, row.y + 40.0 * s, &d, t::TEXT_DIM, 1.0, 0.0);
             }
@@ -469,6 +538,8 @@ mod tests {
                 DialogButton::new("Later", false),
                 DialogButton::new("Skip this version", false)
             ],
+            input: None,
+            compact: false,
         }
     }
 

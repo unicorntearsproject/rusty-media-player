@@ -11,7 +11,7 @@ const XF_A = path.join(LEVELS, "xf_a.flac"); // 8 s of 440 Hz
 const XF_B = path.join(LEVELS, "xf_b.flac"); // 8 s of 880 Hz
 const TAGGED = path.join(LEVELS, "tagged_long.flac"); // 40 s; ReplayGain track -6.50 dB: -11.5 LUFS, album -3.20 dB: -14.8 LUFS
 
-const { snap, waitFor: waitForAt, waitState, frames, press, settled } = require("./helpers");
+const { snap, waitFor: waitForAt, waitState, frames, press, settled, toFace } = require("./helpers");
 const waitFor = (page, fn, arg, timeout) => waitForAt(page, fn, arg, timeout, 30);
 const center = (r) => [r.x + r.w / 2, r.y + r.h / 2];
 
@@ -91,6 +91,7 @@ test.describe("Audio settings", () => {
 
   test("b) the context menu has every setting, and the panel is there on the Library face too", async ({ page }) => {
     const errors = await boot(page);
+    await toFace(page, "player"); // the first run opens on the Library
     await page.mouse.click(640, 300, { button: "right" });
     await waitFor(page, () => window.rvp.snapshot().menu_open);
     let s = await snap(page);
@@ -108,8 +109,7 @@ test.describe("Audio settings", () => {
     await waitFor(page, () => window.rvp.snapshot().audio.crossfade === true);
     expect((await snap(page)).toast).toContain("Crossfade on");
     // The Library face: U opens the panel there as well, over the library.
-    await press(page, "b");
-    await waitFor(page, () => window.rvp.snapshot().lib.mode === "library");
+    await toFace(page, "library");
     await openPanel(page);
     await closePanel(page);
     expect(errors).toEqual([]);
@@ -190,8 +190,7 @@ test.describe("Audio settings", () => {
 
   test("e) turning the automatic level on measures the library in the background, and the figures survive a reload", async ({ page }) => {
     const errors = await boot(page);
-    await press(page, "b");
-    await waitFor(page, () => window.rvp.snapshot().lib.mode === "library");
+    await toFace(page, "library");
     await page.setInputFiles("#dir", path.join(LEVELS, "lib"));
     await waitFor(page, () => window.rvp.snapshot().lib.tracks >= 4 && !window.rvp.snapshot().lib.scan, null, 60_000);
     // Only the tagged track has a figure (from its tags); the other three wait.

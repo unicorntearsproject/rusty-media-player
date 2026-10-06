@@ -106,6 +106,12 @@ pub enum Action {
     DialogToggle(u8),
     /// Close the application's dialog (Escape, the X).
     DialogClose,
+    /// A character typed into the text box of the application's dialog.
+    DialogChar(char),
+    /// Backspace in the text box of the application's dialog.
+    DialogBackspace,
+    /// Show the Settings dialog (theme, default player, app menu, updates, audio).
+    ShowSettings,
     /// Show the Audio settings panel (crossfade and automatic level).
     ShowAudioSettings,
     /// Crossfade on or off.
@@ -199,6 +205,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::Char('b'), Action::ToggleMode),
     sc(ShortKey::Char('v'), Action::ToggleVisualizer),
     sc(ShortKey::Char('u'), Action::ShowAudioSettings),
+    Shortcut { key: ShortKey::Char(','), shift: false, ctrl: true, action: Action::ShowSettings },
     // Ctrl+arrows keep seeking and the volume where the plain arrows move around lists in the library.
     Shortcut { key: ShortKey::Left, shift: false, ctrl: true, action: Action::SeekBy(-5_000) },
     Shortcut { key: ShortKey::Right, shift: false, ctrl: true, action: Action::SeekBy(5_000) },
@@ -601,6 +608,7 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         )
         .sep(),
     ];
+    v.push(MenuItem::act("Settings\u{2026}", Action::ShowSettings));
     // What the host offers beyond playback: only where it applies.
     if model.app.updates {
         v.push(MenuItem::act("Check for updates\u{2026}", Action::CheckForUpdates).sep());

@@ -278,7 +278,7 @@ impl Ctx {
                     let head = String::from_utf8_lossy(&b[..b.len().min(2048)]).into_owned();
                     let size = fs::metadata(f).map_err(|e| e.to_string())?.len();
                     let sha1 = capture(Command::new("sha1sum").arg(f))?;
-                    let url = format!("{}/{name}", self.base_url());
+                    let url = format!("{}/{name}", self.versioned_base());
                     manifest::check_zsync(
                         &head,
                         &url,

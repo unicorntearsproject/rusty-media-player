@@ -5,15 +5,39 @@
 // change to the page is a new service worker, which installs in the background and waits until the page asks to take over (the
 // "Update available" button, see pwa.js). Old caches are deleted when the new worker activates.
 const VERSION = "__RVP_VERSION__";
+// The page's own files, and the two wasm builds: the worker keeps only the one this browser can run (the threaded build needs a
+// cross-origin isolated page and shared memory, the same test the page makes), so nothing downloads that is never used.
 const PRECACHE = __RVP_PRECACHE__;
+const PKG = __RVP_PKG__;
+const PKG_MT = __RVP_PKG_MT__;
+const OTHER_BUILD = new Set(PKG.concat(PKG_MT).map((u) => new URL(u, self.location).href));
 const CACHE = `rvp-app-${VERSION}`;
 const SHARED = "rvp-shared";
+
+/**
+ * Whether the pages of this site are cross-origin isolated (the threaded wasm build needs that). A service worker's own
+ * `crossOriginIsolated` is not the pages' (it is false in some browsers even where the pages are isolated), so ask the server: the page
+ * is isolated when it is served with COOP `same-origin` and COEP `require-corp` or `credentialless`.
+ */
+async function pagesAreIsolated() {
+  try {
+    const r = await fetch("./", { cache: "no-cache" });
+    const coop = (r.headers.get("cross-origin-opener-policy") || "").toLowerCase();
+    const coep = (r.headers.get("cross-origin-embedder-policy") || "").toLowerCase();
+    return coop === "same-origin" && (coep === "require-corp" || coep === "credentialless");
+  } catch (err) {
+    return self.crossOriginIsolated === true;
+  }
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    // `reload`: do not let the browser's HTTP cache fill ours with something old.
-    await cache.addAll(PRECACHE.map((u) => new Request(u, { cache: "reload" })));
+    const threaded = PKG_MT.length > 0 && (await pagesAreIsolated());
+    const urls = PRECACHE.concat(threaded ? PKG_MT : PKG);
+    // `no-cache`: revalidate with the server, so a file the browser has just fetched answers with a 304 and nothing downloads twice, and
+    // a stale HTTP-cache entry never fills ours (the names carry a hash, so a changed file is a new URL anyway).
+    await cache.addAll(urls.map((u) => new Request(u, { cache: "no-cache" })));
   })());
 });
 
@@ -47,7 +71,11 @@ self.addEventListener("fetch", (event) => {
     const hit = await cache.match(req, { ignoreSearch: true });
     if (hit) return hit;
     try {
-      return await fetch(req);
+      const res = await fetch(req);
+      // The wasm build that was not precached (the other one of the two) is kept the first time the page asks for it, so a browser that
+      // falls back to it (the threads did not start) still starts offline next time.
+      if (res.ok && OTHER_BUILD.has(url.href)) cache.put(req, res.clone()).catch(() => {});
+      return res;
     } catch (err) {
       if (req.mode === "navigate") {
         const shell = await cache.match("./", { ignoreSearch: true });

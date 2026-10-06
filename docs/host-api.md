@@ -187,6 +187,78 @@ Answers from the Rusty Bucket side (v0.3 clarifications, 2026-10-05) and what th
 `restart()` and `exit()` do not return; the adapter's `restart` therefore returns only when the OS refused. The adapter writes trace lines (log level 4: `np.meta`,
 `np.playback`, `np.command`, `audio.open`, `audio.paused`, `audio.exit`, `library.*`, `threads:`, `open`), which the Simulator scenarios read.
 
+## First run, default folders and the default media player
+
+Three small additions to the optional capabilities (all with defaults, so a host that has nothing to offer changes nothing):
+
+```rust
+trait Library {
+    // ...take_listing, connected_roots...
+    fn standard_folders(&mut self) -> Vec<StandardFolder> { Vec::new() }   // the system's Music and Videos folders that exist
+    fn add_path(&mut self, path: &str) -> bool { false }                    // walk a folder without asking; the listing arrives by take_listing
+}
+struct StandardFolder { kind: StandardKind /* Music | Videos */, name: String, path: String }
+
+trait AppServices {
+    // ...updates, integration...
+    fn offers_enabled(&self) -> bool { true }                // false: no first-run pop-ups (tests, kiosks); `RVP_NO_OFFERS=1` on the desktop
+    fn default_player(&mut self) -> DefaultPlayer { Unavailable }
+    fn set_default_player(&mut self, type_ids: &[String]) -> Result<DefaultOutcome, String> { Err(..) }
+}
+enum DefaultPlayer { Unavailable, Available { note: String, silent: bool } }   // silent: the app may set it itself (Linux, macOS)
+enum DefaultOutcome { Set(usize), UserMustConfirm(String) }                    // Windows: registered, Default apps opened, the user confirms
+```
+
+* **First run** (no `settings/setup` value): the app opens on the Library face, and, when the library is empty, asks the host for `standard_folders()` and `add_path`s
+  each. Later runs open on the face the last one ended on; a Player face with nothing to show falls back to the Library. A file opened from outside still goes to the
+  face that suits it. `settings/setup` holds `face=` and `folders=done`.
+* **Standard folders** on the desktop come from the `directories` crate: the XDG user directories (`user-dirs.dirs`) on Linux, Known Folders on Windows, `~/Music` and
+  `~/Movies` on macOS. Browsers and Rusty Bucket keep the default (none).
+* **Default media player**: the checklist is [`MEDIA_TYPES`](../crates/rvp-host/src/types.rs) (every type the player opens, a test keeps it equal to the desktop file's
+  `MimeType` and the Windows installer's extensions); the app passes the ids the user ticked. Linux writes `~/.config/mimeapps.list` (`[Default Applications]`, what
+  `xdg-mime default` writes; an AppImage gets its app-menu entry first), Windows registers the per-user associations and opens *Default apps* (Windows does not let a
+  program take defaults silently, and the dialog says so), macOS calls `LSSetDefaultRoleHandlerForContentType` for each type's UTI. The first-run offer and "No thanks"
+  are remembered in `settings/app` (`default_player=ask|never|done`); closing the offer without answering counts as "no thanks". Settings has the button whenever
+  `default_player()` is `Available`.
+* **App-menu offer** (AppImage, portable Windows): the same rule: "No thanks", or closing the dialog, is final; Settings has "Add to app menu" and "Remove from app menu".
+
+## Input: paste
+
+`InputEvent::Paste(String)` carries text the user pasted: the browser's `paste` event, Ctrl+V (Cmd+V) on the desktop through the system clipboard. The theme dialog's box
+and the library's search box and name prompt take it. Hosts without a clipboard never send it.
+
+## Net (fetching a link)
+
+```rust
+trait Net { fn fetch_text(&mut self, url: &str) -> u32; fn poll_fetch(&mut self, id: u32) -> Option<Result<String, String>>; }
+fn net(&mut self) -> Option<&mut dyn Net> { None }      // on Host
+```
+
+One bounded GET (2 MiB) of a text document, polled. Only the theme dialog uses it, and only when the user presses *Preview* on a link. The desktop answers through the
+update client (HTTPS only); a page answers with `fetch` (a cross-origin link the server does not allow fails, and the dialog tells the person to paste the CSS instead);
+Rusty Bucket keeps the default and the dialog says to paste.
+
+## `window.rvp.snapshot()`: the stable subset
+
+The browser page exposes `window.rvp` for tests and tooling (the page's own JavaScript, a Playwright suite, a kiosk wrapper). `window.rvp.snapshot()` returns
+a JSON object that has many more fields (geometry of the controls, menu rows, library state, perf counters) which are **for the project's own tests and may
+change in any release**. These are the fields to depend on; they keep their names, types and meaning across releases of the same major version, and new
+fields are only ever added:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `version` | string | The app's version, `0.0.4` (a pre-release keeps its suffix). |
+| `ready` | boolean | `true` once the player runs; `false` while the page restarts it after a crash (then `state` is `"recovering"` and the rest is the last known). |
+| `state` | string | `idle`, `opening`, `paused`, `buffering`, `playing`, `ended`, `failed`, or `recovering` (the page is restarting the player). |
+| `position_us` | integer | Playback position of the current item, microseconds (0 when idle). |
+| `duration_us` | integer or `null` | Length of the current item, `null` when unknown (a stream, or nothing loaded). |
+| `item` | object or `null` | The current item: `{ "id": <queue item id>, "index": <place in the queue>, "title": <title shown> }`; `null` when nothing is loaded. |
+| `error` | string or `null` | Why the current item failed, in words for the user, else `null`. |
+
+`window.rvp.ready` (a boolean property set when the module has loaded) is true before the first `snapshot()` call is possible; wait for it, then poll
+`snapshot().ready` if you need to ride out a crash recovery. Times are always microseconds, as everywhere in the core. The same fields, with the same meaning,
+are what the Rusty Bucket and desktop hosts' smoke output reports where they report anything.
+
 ## Changes
 
 - 2026-10-05: first version (M8).
@@ -196,3 +268,4 @@ Answers from the Rusty Bucket side (v0.3 clarifications, 2026-10-05) and what th
 - 2026-10-05: the Rusty Bucket mapping and its open questions (M12). No trait changed.
 - 2026-10-06: optional `AppServices` capability (update checks, app-menu entry); `settings/app` key.
 - 2026-10-06: M12 against the Bucket Simulator: answers to the open questions recorded; the pause fix (`Session` pauses the audio sink with the clock) is verified there.
+- 2026-10-06: the stable `window.rvp.snapshot()` subset (`version`, `ready`, `state`, `position_us`, `duration_us`, `item`, `error`) is documented; `version` and `item` are new snapshot fields.

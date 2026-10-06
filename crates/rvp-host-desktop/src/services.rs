@@ -3,7 +3,10 @@
 //!
 //! The work runs on background threads; the app polls. A restart is *requested* here and carried out by the window loop after the
 //! window has closed and its state is saved, so the new copy never starts beside a half-closed old one.
-use rvp_host::{AppServices, Integration, UpdateHow, UpdateState};
+use rvp_host::{
+    AppServices, DefaultOutcome, DefaultPlayer, Integration, UpdateHow, UpdateState, media_types_by_id,
+};
+use rvp_update::defaults;
 use rvp_update::integrate_linux as linux;
 #[cfg(windows)]
 use rvp_update::integrate_windows as windows;
@@ -247,6 +250,74 @@ impl AppServices for DesktopServices {
         v
     }
 
+    fn offers_enabled(&self) -> bool {
+        // Scripted runs (the smoke tests, kiosks) switch the first-run offers off.
+        std::env::var_os("RVP_NO_OFFERS").is_none_or(|v| v.is_empty() || v == "0")
+    }
+
+    fn default_player(&mut self) -> DefaultPlayer {
+        match &self.kind {
+            InstallKind::WindowsInstaller | InstallKind::WindowsPortable(_) => DefaultPlayer::Available {
+                note: "Windows does not let a program take over the defaults by itself. Rusty Wave registers itself and opens \
+                       Windows\u{2019} Default apps page; choose Rusty Wave there for the kinds of files you want."
+                    .into(),
+                silent: false,
+            },
+            InstallKind::MacApp => DefaultPlayer::Available {
+                note: "macOS may ask you to confirm the change.".into(),
+                silent: true,
+            },
+            InstallKind::AppImage(_) => DefaultPlayer::Available {
+                note: if matches!(self.read_integration(), Integration::On) {
+                    String::new()
+                } else {
+                    "Rusty Wave is added to the app menu first, so the system can find it.".into()
+                },
+                silent: true,
+            },
+            InstallKind::Package | InstallKind::Flatpak | InstallKind::Other if cfg!(target_os = "linux") => {
+                DefaultPlayer::Available { note: String::new(), silent: true }
+            }
+            _ => DefaultPlayer::Unavailable,
+        }
+    }
+
+    fn set_default_player(&mut self, type_ids: &[String]) -> Result<DefaultOutcome, String> {
+        let ids: Vec<&str> = type_ids.iter().map(String::as_str).collect();
+        let types = media_types_by_id(&ids);
+        if types.is_empty() {
+            return Err("no kind of file was chosen".into());
+        }
+        match &self.kind {
+            InstallKind::WindowsInstaller | InstallKind::WindowsPortable(_) => {
+                let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+                register_windows(&exe).map_err(|e| e.to_string())?;
+                defaults::open_windows_default_apps().map_err(|e| e.to_string())?;
+                Ok(DefaultOutcome::UserMustConfirm(
+                    "Rusty Wave is registered, and Windows\u{2019} Default apps page is open. Choose Rusty Wave for the kinds of files you ticked \
+                     (Windows keeps the final say). You can close this."
+                        .into(),
+                ))
+            }
+            InstallKind::MacApp => {
+                let exts: Vec<&str> = types.iter().flat_map(|t| t.extensions.iter().copied()).collect();
+                defaults::set_macos_defaults(defaults::MACOS_BUNDLE_ID, &exts)
+                    .map(|_| DefaultOutcome::Set(types.len()))
+                    .map_err(|e| e.to_string())
+            }
+            _ => {
+                // The desktop entry has to exist for the system to take it as a handler: add the app menu entry of an AppImage first.
+                if matches!(self.menu, Menu::AppImage { .. }) && self.read_integration() != Integration::On {
+                    self.set_integration(true)?;
+                }
+                let mimes: Vec<&str> = types.iter().flat_map(|t| t.mimes.iter().copied()).collect();
+                let home = defaults::config_home().ok_or("cannot find the configuration folder")?;
+                defaults::set_linux_defaults(&home, defaults::DESKTOP_ID, &mimes).map_err(|e| e.to_string())?;
+                Ok(DefaultOutcome::Set(types.len()))
+            }
+        }
+    }
+
     fn set_integration(&mut self, on: bool) -> Result<(), String> {
         self.cached.set(None);
         let r: std::io::Result<()> = match &self.menu {
@@ -287,6 +358,20 @@ fn set_windows(on: bool, exe: &Path) -> std::io::Result<()> {
     };
     windows::notify_assoc_changed();
     r
+}
+
+/// The file associations (and nothing else) for the current user, so Windows lists the app in *Default apps*.
+#[cfg(windows)]
+fn register_windows(exe: &Path) -> std::io::Result<()> {
+    let mut reg = windows::HkcuRegistry;
+    windows::add_associations(&mut reg, exe)?;
+    windows::notify_assoc_changed();
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn register_windows(_exe: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "this is not Windows"))
 }
 
 #[cfg(not(windows))]

@@ -69,6 +69,30 @@ pub enum Integration {
     On,
 }
 
+/// Whether the app can be made the system's default media player, and how.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DefaultPlayer {
+    /// This kind of install or system cannot (a browser, Rusty Bucket's shell, a Flatpak sandbox without access).
+    #[default]
+    Unavailable,
+    /// It can.
+    Available {
+        /// What to tell the user about how it works here (Windows only lets the user choose, in its own Settings page).
+        note: String,
+        /// The system lets the app set the defaults by itself (Linux, macOS); on Windows it only registers and sends the user to Settings.
+        silent: bool,
+    },
+}
+
+/// What setting the default did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefaultOutcome {
+    /// Done: these are the media types the system now opens with the app.
+    Set(usize),
+    /// The app registered itself and the system's own page was opened for the user to finish (Windows); the text says what to do there.
+    UserMustConfirm(String),
+}
+
 /// Update and app-menu services.
 pub trait AppServices {
     /// The running version, `0.0.3`.
@@ -93,6 +117,18 @@ pub trait AppServices {
     fn integration(&mut self) -> Integration;
     /// Add it (`true`) or take it out; errors are for the user.
     fn set_integration(&mut self, on: bool) -> Result<(), String>;
+    /// Whether the first-run offers (app menu, default player) may pop up. Tests and kiosks switch them off.
+    fn offers_enabled(&self) -> bool {
+        true
+    }
+    /// Whether the app can be made the default media player here.
+    fn default_player(&mut self) -> DefaultPlayer {
+        DefaultPlayer::Unavailable
+    }
+    /// Make the app the default for the media types of [`crate::MEDIA_TYPES`] with these ids (the user's choice from the checklist).
+    fn set_default_player(&mut self, _type_ids: &[String]) -> Result<DefaultOutcome, String> {
+        Err("this system cannot set a default media player from here".into())
+    }
 }
 
 /// A scripted [`AppServices`] for tests: the test sets the state, the player's requests are recorded.
@@ -112,6 +148,12 @@ pub struct ScriptedServices {
     pub integration_error: Option<String>,
     /// An error `restart` returns.
     pub restart_error: Option<String>,
+    /// The first-run offers are switched off.
+    pub offers_disabled: bool,
+    /// What `default_player` returns.
+    pub default_player: DefaultPlayer,
+    /// What `set_default_player` returns (`None`: `Set` with the number of ids).
+    pub default_result: Option<Result<DefaultOutcome, String>>,
     /// What `check_updates` turns the state into (set to simulate the answer arriving).
     pub check_result: Option<UpdateState>,
     /// The requests received, in order: `check`, `install`, `cancel`, `reset`, `restart`, `integrate:on|off`.
@@ -155,6 +197,16 @@ impl AppServices for ScriptedServices {
     }
     fn integration(&mut self) -> Integration {
         self.integration
+    }
+    fn offers_enabled(&self) -> bool {
+        !self.offers_disabled
+    }
+    fn default_player(&mut self) -> DefaultPlayer {
+        self.default_player.clone()
+    }
+    fn set_default_player(&mut self, type_ids: &[String]) -> Result<DefaultOutcome, String> {
+        self.calls.push(alloc::format!("default:{}", type_ids.join(",")));
+        self.default_result.clone().unwrap_or(Ok(DefaultOutcome::Set(type_ids.len())))
     }
     fn set_integration(&mut self, on: bool) -> Result<(), String> {
         self.calls.push(if on { "integrate:on" } else { "integrate:off" }.into());

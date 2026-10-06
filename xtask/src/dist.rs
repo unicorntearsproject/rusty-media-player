@@ -80,6 +80,8 @@ struct Ctx {
     sign: Option<String>,
     repo_url: Option<String>,
     base_url: Option<String>,
+    /// `--target rustybucket`: lay the release out for Rusty Bucket's release site (`<v>/` and `latest/`) instead of the bucket.
+    rustybucket: bool,
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -94,7 +96,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let (mut container, mut no_build, mut prepare_only) = (false, false, false);
     let (mut want_sign, mut sign_key, mut repo_url) = (false, None, None);
     let (mut extras, mut dry_run) = (manifest::Extras::default(), false);
-    let mut base_url = None;
+    let (mut base_url, mut rustybucket) = (None, false);
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -109,6 +111,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--tarball" => extras.tarball = true,
             "--all" => extras = manifest::Extras::ALL,
             "--base-url" => base_url = Some(it.next().ok_or("--base-url needs a value")?.clone()),
+            "--target" => {
+                rustybucket = match it.next().ok_or("--target needs a value")?.as_str() {
+                    "ut" | "bucket" => false,
+                    "rustybucket" => true,
+                    other => return Err(format!("unknown --target `{other}` (ut or rustybucket)")),
+                }
+            }
             "--dry-run" => dry_run = true,
             "--sign" => want_sign = true,
             "--sign-key" => {
@@ -125,7 +134,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .unwrap_or(cargo_version);
     let date = release_date(&root);
     let sign = if want_sign { Some(sign::resolve_key(&root, sign_key)?) } else { None };
-    let cx = Ctx { root, version, date, container, no_build, prepare_only, sign, repo_url, base_url };
+    let cx = Ctx { root, version, date, container, no_build, prepare_only, sign, repo_url, base_url, rustybucket };
     fs::create_dir_all(cx.out()).map_err(|e| e.to_string())?;
     match target.as_str() {
         "linux-bin" => cx.linux_bin().map(|_| ()),
@@ -579,7 +588,7 @@ impl Ctx {
         // The delta-update file: its internal URL is the immutable versioned AppImage (the `latest` alias is a copy of this file), so a
         // zsync client that reads the alias can only ever fetch the file the alias describes.
         let zsync = self.out().join(format!("rusty-wave-{}-x86_64.AppImage.zsync", self.version));
-        let versioned_url = format!("{}/rusty-wave-{}-x86_64.AppImage", self.base_url(), self.version);
+        let versioned_url = format!("{}/rusty-wave-{}-x86_64.AppImage", self.versioned_base(), self.version);
         sh(Command::new("zsyncmake")
             .arg("-u")
             .arg(&versioned_url)
@@ -871,7 +880,7 @@ impl Ctx {
 
     fn pwa(&self) -> Result<(), String> {
         if !self.no_build {
-            crate::web::build(false, false)?;
+            crate::web::build_as(false, true, Some(&self.version))?;
         }
         let zip = self.out().join(format!("{PKG}-web-{}.zip", self.version));
         zip_dir(&self.root.join("target/web"), &zip)?;

@@ -17,7 +17,7 @@ const VP9_OPUS = path.join(FIXTURES, "vp9", "av_opus.webm"); // 6 s, 320x240, li
 const VP9_VORBIS = path.join(FIXTURES, "vp9_vorbis.webm"); // 6 s, 320x240, VP9 + Vorbis
 const VP9_RESIZE = path.join(FIXTURES, "vp9", "r_keyframe.webm"); // 1.5 s, 320x240 then 480x270 then 200x120, video only
 
-const { snap, waitFor, waitState, frames, press, ticks, settled, playedFor, rateAgainstDevice } = require("./helpers");
+const { snap, waitFor, waitState, frames, press, ticks, settled, playedFor, rateAgainstDevice, toFace } = require("./helpers");
 
 async function load(page, file = LONG, { play = true } = {}) {
   const errors = [];
@@ -339,6 +339,7 @@ test.describe("player", () => {
   test("open: the Open button and the O key show the file picker", async ({ page }) => {
     await page.goto("/");
     await waitFor(page, () => window.rvp && window.rvp.ready);
+    await toFace(page, "player"); // the first run opens on the Library
     const s = await snap(page);
     const b = s.buttons.Welcome;
     const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.mouse.click(b.x + b.w / 2, b.y + b.h / 2)]);

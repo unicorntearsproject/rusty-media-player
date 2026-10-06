@@ -492,6 +492,16 @@ impl ApplicationHandler for Handler {
                     } else {
                         mods
                     };
+                    // Ctrl+V (Cmd+V on a Mac): the clipboard's text arrives as a `Paste` event.
+                    if event.state == ElementState::Pressed
+                        && !event.repeat
+                        && (mods.ctrl || mods.logo)
+                        && matches!(key, rvp_host::Key::Char('v' | 'V'))
+                    {
+                        if let Some(text) = clipboard_text() {
+                            self.push(InputEvent::Paste(text));
+                        }
+                    }
                     match event.state {
                         ElementState::Pressed => {
                             self.push(InputEvent::KeyDown { key, mods, repeat: event.repeat })
@@ -590,3 +600,8 @@ pub fn data_dir(opts: &Options) -> PathBuf {
 // `Storage` is used through `host.storage` in sync helpers above.
 #[allow(dead_code)]
 fn _assert_storage<S: Storage>() {}
+
+/// The text on the system clipboard (`None` when it holds none or cannot be read, as in a session without a clipboard).
+fn clipboard_text() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok().filter(|t| !t.is_empty())
+}

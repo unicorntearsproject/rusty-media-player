@@ -72,7 +72,18 @@ test("a service worker precaches the app, and with the network off it starts and
     const c = await caches.open(key);
     return { key, urls: (await c.keys()).map((r) => new URL(r.url).pathname) };
   });
-  for (const f of ["/", "/index.html", "/main.js", "/pwa.js", "/audio-worklet.js", "/pkg/rvp.js", "/pkg/rvp_bg.wasm", "/manifest.webmanifest", "/icons/icon-512.png", "/style.css"]) {
+  const info = await (await page.request.get("/build-info.json")).json();
+  // The worker keeps only the wasm build this browser can run: the threaded one on an isolated page that has it, else the plain one.
+  const isolated = await page.evaluate(() => self.crossOriginIsolated);
+  const pkg = isolated && info.threads ? "pkg-mt" : "pkg";
+  expect(info.schema).toBe(1);
+  expect(info.name).toBe("rusty-wave-web");
+  expect(info.commit).toMatch(/^[0-9a-f]{40}$|^unknown$/);
+  expect(info.built).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+  expect(info["build-info.json"]).toBeUndefined();
+  expect(Object.keys(info.files)).not.toContain("build-info.json");
+  const hashed = (n) => "/" + Object.keys(info.files).find((f) => f.replace(/\.[0-9a-f]{8}\./, ".") === n);
+  for (const f of ["/", "/index.html", hashed("main.js"), hashed("pwa.js"), hashed("audio-worklet.js"), hashed(`${pkg}/rvp.js`), hashed(`${pkg}/rvp_bg.wasm`), "/manifest.webmanifest", "/icons/icon-512.png", hashed("style.css")]) {
     expect(cached.urls, f).toContain(f);
   }
   expect(cached.key).toMatch(/^rvp-app-\d+\.\d+\.\d+/);

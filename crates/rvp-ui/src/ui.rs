@@ -662,7 +662,7 @@ impl Ui {
             InputEvent::KeyDown { key, mods, repeat } => {
                 self.on_key(key, mods, *repeat, now_us, model, &mut out)
             }
-            InputEvent::KeyUp { .. } => {}
+            InputEvent::KeyUp { .. } | InputEvent::Paste(_) => {}
         }
         out
     }

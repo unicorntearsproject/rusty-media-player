@@ -342,6 +342,12 @@ jobs:
         with:
           toolchain: ${{ env.RVP_TOOLCHAIN }}
           targets: wasm32-unknown-unknown
+      # The threaded wasm build (`pkg-mt/`, part of the web zip) rebuilds the standard library with atomics: nightly and rust-src.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rust-src
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -357,8 +363,8 @@ jobs:
           tar -xzf /tmp/binaryen.tgz -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/binaryen-version_123/bin" >> "$GITHUB_PATH"
           cargo install --locked wasm-bindgen-cli --version "$(sed -n '/name = "wasm-bindgen"/{n;s/version = "\(.*\)"/\1/p}' Cargo.lock | head -1)"
-      - name: Build the page
-        run: cargo xtask web
+      - name: Build the page (both wasm builds)
+        run: cargo +nightly xtask web --threads
       - name: Playwright tests of the installable app (manifest, offline, update)
         run: |
           RVP_FIXTURE_SET=basic bash tools/gen-fixtures.sh target/fixtures

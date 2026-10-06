@@ -32,6 +32,26 @@ pub struct Listing {
     pub files: Vec<FileEntry>,
 }
 
+/// Which of the system's standard folders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandardKind {
+    /// The user's Music folder.
+    Music,
+    /// The user's Videos (Movies) folder.
+    Videos,
+}
+
+/// One of the folders the operating system keeps a user's music and videos in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandardFolder {
+    /// Which one.
+    pub kind: StandardKind,
+    /// The name to show (`Music`).
+    pub name: String,
+    /// Where it is, in the host's own terms (a path).
+    pub path: String,
+}
+
 /// Directory access. Optional: hosts without it keep the default (`None`) and the library only has what is opened
 /// file by file.
 pub trait Library {
@@ -40,6 +60,16 @@ pub trait Library {
     fn take_listing(&mut self) -> Option<Listing>;
     /// Roots the host can read right now (a remembered browser folder is not readable again until the user allows it).
     fn connected_roots(&self) -> Vec<String>;
+    /// The system's Music and Videos folders that exist (XDG user directories, Windows Known Folders, `~/Music` and `~/Movies`), for the
+    /// first run to add. Hosts without such folders (a browser) keep the default: none.
+    fn standard_folders(&mut self) -> Vec<StandardFolder> {
+        Vec::new()
+    }
+    /// Add the folder at `path` to the library without asking: the host walks it and hands the result back through
+    /// [`Library::take_listing`] like any other folder. `false` when the host cannot.
+    fn add_path(&mut self, _path: &str) -> bool {
+        false
+    }
 }
 
 /// A [`Library`] over lists the test pushes in.
@@ -49,6 +79,10 @@ pub struct ScriptedLibrary {
     pub listings: alloc::collections::VecDeque<Listing>,
     /// What `connected_roots` returns.
     pub connected: Vec<String>,
+    /// What `standard_folders` returns.
+    pub standard: Vec<StandardFolder>,
+    /// The paths `add_path` was asked for.
+    pub added: Vec<String>,
 }
 
 impl Library for ScriptedLibrary {
@@ -58,5 +92,14 @@ impl Library for ScriptedLibrary {
 
     fn connected_roots(&self) -> Vec<String> {
         self.connected.clone()
+    }
+
+    fn standard_folders(&mut self) -> Vec<StandardFolder> {
+        self.standard.clone()
+    }
+
+    fn add_path(&mut self, path: &str) -> bool {
+        self.added.push(path.into());
+        true
     }
 }

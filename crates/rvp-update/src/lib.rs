@@ -1,5 +1,6 @@
 //! Updates and self-integration for the desktop app.
 pub mod apply;
+pub mod defaults;
 pub mod error;
 pub mod fetch;
 pub mod integrate_linux;

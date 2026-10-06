@@ -215,6 +215,48 @@ fn the_appimage_is_replaced_in_one_step_keeping_its_mode() {
     }
 }
 
+/// A source standing in for a CDN edge that ignores everything but "give me the whole file" (a cold CloudFront edge over S3 may answer a
+/// zsync multi-range request with a 200 and the full body): it records what was fetched.
+struct WholeFilesOnly {
+    inner: Net,
+    opened: std::sync::Mutex<Vec<String>>,
+}
+
+impl crate::fetch::Source for WholeFilesOnly {
+    fn open(&self, url: &str) -> Result<(Box<dyn std::io::Read + Send>, Option<u64>), UpdateError> {
+        self.opened.lock().unwrap().push(url.to_string());
+        self.inner.open(url)
+    }
+}
+
+#[test]
+fn the_updater_downloads_whole_files_so_a_server_that_ignores_ranges_changes_nothing() {
+    // The built-in updater never asks for a byte range (the zsync delta is for AppImageUpdate and other tools): it fetches the whole file
+    // and checks its size, SHA-256 and signature before touching anything. A server that answers every request with a 200 and the full
+    // body is therefore the normal case, and a download that arrives damaged is refused.
+    let work = tmp("whole");
+    let app = installed_appimage(&work, b"old appimage");
+    let r = appimage_release("whole-rel", "0.0.3", b"new appimage");
+    let src = Arc::new(WholeFilesOnly { inner: Net::new("test"), opened: Default::default() });
+    let mut cfg = r.config("0.0.2", InstallKind::AppImage(app.clone()), &work);
+    cfg.source = src.clone();
+    let file = offer_file(check(&cfg).unwrap());
+    install(&cfg, &file, &Cancel::new(), &mut |_, _| {}).unwrap();
+    assert_eq!(std::fs::read(&app).unwrap(), b"new appimage");
+    let opened = src.opened.lock().unwrap().clone();
+    assert_eq!(opened.iter().filter(|u| u.ends_with("rusty-wave-new.AppImage")).count(), 1, "{opened:?}");
+    // The same release with the file damaged in transit (right length, wrong bytes): refused, the installed file untouched.
+    let work2 = tmp("whole2");
+    let app2 = installed_appimage(&work2, b"old appimage");
+    let r2 = appimage_release("whole-rel2", "0.0.3", b"new appimage");
+    let mut cfg2 = r2.config("0.0.2", InstallKind::AppImage(app2.clone()), &work2);
+    cfg2.source = Arc::new(WholeFilesOnly { inner: Net::new("test"), opened: Default::default() });
+    let file2 = offer_file(check(&cfg2).unwrap());
+    std::fs::write(r2.dir.join("rusty-wave-new.AppImage"), b"NEW appimage").unwrap();
+    assert!(install(&cfg2, &file2, &Cancel::new(), &mut |_, _| {}).is_err());
+    assert_eq!(std::fs::read(&app2).unwrap(), b"old appimage");
+}
+
 #[test]
 fn a_damaged_or_forged_download_changes_nothing() {
     let work = tmp("inst2");

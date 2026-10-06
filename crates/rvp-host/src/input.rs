@@ -134,6 +134,8 @@ pub enum InputEvent {
         /// Identifier.
         id: String,
     },
+    /// Text the user pasted (Ctrl+V, the browser's paste event, the middle button on X11). Hosts that cannot read the clipboard never send it.
+    Paste(String),
     /// A file is being dragged over the window (`true`) or left it (`false`); lets the UI show a drop target.
     DragOver(bool),
     /// Window focus changed.

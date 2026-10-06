@@ -14,11 +14,13 @@ extern crate std;
 mod library;
 mod restore;
 mod services;
+mod setup;
 mod snapshot;
 
 pub use restore::{POSITION_KEY, QUEUE_KEY, SavedItem, SavedQueue};
 
 pub use services::{APP_SETTINGS_KEY, AppSettings, IntegrationChoice};
+pub use setup::{SETUP_KEY, Setup};
 pub use snapshot::Snapshot;
 
 use alloc::format;
@@ -142,6 +144,8 @@ pub struct App {
     hint_rev: u64,
     /// Update checks and the app-menu offer (only when the host has them).
     svc: services::Services,
+    /// The first run and the last face.
+    setup: setup::Setup,
 }
 
 /// What was last told to the host's now-playing sink.
@@ -225,6 +229,7 @@ impl App {
             settings_loaded: false,
             hint_rev: u64::MAX,
             svc: services::Services::default(),
+            setup: setup::Setup::default(),
             codecs,
         }
     }
@@ -822,6 +827,7 @@ impl App {
         H::Source: 'static,
     {
         let t0 = host.clock().now_us();
+        self.setup_tick(host);
         self.pump(host);
         self.settings_tick(host);
         self.services_tick(host);
@@ -1106,6 +1112,8 @@ impl App {
             }
             Action::Lib(a) => self.apply_lib(host, a, now),
             Action::ShowAudioSettings => self.ui.open_audio_settings(),
+            Action::ShowSettings => self.show_settings(now),
+            Action::DialogChar(_) | Action::DialogBackspace => {}
             Action::CheckForUpdates => self.check_for_updates(host, now),
             Action::ToggleIntegration => self.toggle_integration(host, now),
             Action::DialogButton(n) => self.dialog_button(host, n, now),

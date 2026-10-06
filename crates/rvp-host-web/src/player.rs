@@ -282,6 +282,11 @@ impl WebPlayer {
         self.dispatch(InputEvent::Resize { w, h, dpr: dpr as f32 });
     }
 
+    /// Text the user pasted into the page.
+    pub fn paste(&mut self, text: String) {
+        self.dispatch(InputEvent::Paste(text));
+    }
+
     /// Pointer moved (physical pixels).
     pub fn pointer_move(&mut self, x: f32, y: f32) {
         self.dispatch(InputEvent::PointerMove { x, y });

@@ -16,16 +16,20 @@ pub mod library;
 pub mod media;
 pub mod mock;
 pub mod services;
+pub mod types;
 
 pub use frame::FrameSink;
 
 pub use input::{InputEvent, Key, Modifiers, PointerButton, Rect};
-pub use library::{FileEntry, Library, Listing, ScriptedLibrary};
+pub use library::{FileEntry, Library, Listing, ScriptedLibrary, StandardFolder, StandardKind};
+pub use types::{MEDIA_TYPES, MediaType, media_types_by_id, mimes_of};
 pub use media::{
     Art, NowPlaying, NowPlayingMeta, PlayState, Playback, RecordingNowPlaying, RecordingTap,
     TransportCommand, VIZ_BANDS, VisualizerTap, VizBlock, VizSummary,
 };
-pub use services::{AppServices, Integration, ScriptedServices, UpdateHow, UpdateState};
+pub use services::{
+    AppServices, DefaultOutcome, DefaultPlayer, Integration, ScriptedServices, UpdateHow, UpdateState,
+};
 
 use alloc::{string::String, vec::Vec};
 use rvp_core::{AudioParams, Timestamp, VideoFrame};

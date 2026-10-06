@@ -103,4 +103,10 @@ const rateAgainstDevice = async (page, us, tries = 4) => {
   return last;
 };
 
-module.exports = { snap, waitFor, waitState, frames, press, ticks, settled, playedFor, rateAgainstDevice };
+/** Go to the `"library"` or `"player"` face (the first run opens on the Library; B switches, so press it only when needed). */
+const toFace = async (page, face) => {
+  if ((await snap(page)).lib.mode !== face) await press(page, "b");
+  await waitFor(page, (f) => window.rvp.snapshot().lib.mode === f, face);
+};
+
+module.exports = { snap, waitFor, waitState, frames, press, ticks, settled, playedFor, rateAgainstDevice, toFace };

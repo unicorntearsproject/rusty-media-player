@@ -52,6 +52,7 @@ impl App {
             MediaState::Failed => "failed",
         };
         let mut j = String::from("{");
+        j += &format!("\"version\":{},", esc(env!("CARGO_PKG_VERSION")));
         j += &format!("\"state\":\"{state}\",\"position_us\":{},", m.position_us);
         j += &match m.duration_us {
             Some(d) => format!("\"duration_us\":{d},"),
@@ -70,6 +71,11 @@ impl App {
             ui.controls_visible(),
             ui.controls_opacity()
         );
+        // The item playing: its id and place in the queue, and the title shown for it (null when nothing is loaded).
+        j += &match m.playlist.iter().position(|e| e.current) {
+            Some(i) => format!("\"item\":{{\"id\":{},\"index\":{i},\"title\":{}}},", m.playlist[i].id, esc(&m.title)),
+            None => "\"item\":null,".to_string(),
+        };
         j += &format!("\"toast\":{},", ui.toast_text().map_or("null".to_string(), esc));
         j += &format!("\"menu_open\":{},\"has_video\":{},", ui.menu_open(), m.has_video);
         let tracks = |v: &[rvp_ui::TrackItem]| -> String {

@@ -461,6 +461,8 @@ fn audio_opened_from_outside_goes_to_the_library_face_and_video_to_the_player() 
     }
     let mut r = Rig::new();
     r.run(100);
+    assert_eq!(r.app.ui().mode(), Mode::Library, "the first run opens on the Library");
+    r.act(Action::SetMode(Mode::Player));
     assert_eq!(r.app.ui().mode(), Mode::Player);
     let audio =
         music().join("Aurora Vale/Daybreak").read_dir().unwrap().map(|e| e.unwrap().path()).min().unwrap();

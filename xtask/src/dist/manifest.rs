@@ -11,6 +11,9 @@ use super::*;
 /// (any URL or `file://` path); `publish` always uses this one.
 pub(super) const DIST_BASE_URL: &str = "https://ut-software-dist.s3.amazonaws.com";
 
+/// Where Rusty Bucket's release site serves the app (`--target rustybucket`): `<base>/<version>/<file>` and `<base>/latest/<alias>`.
+pub(super) const RB_BASE_URL: &str = "https://software.rustybucket.ai/rusty-wave";
+
 pub(super) const MANIFEST_NAME: &str = "rusty-wave-latest.json";
 pub(super) const ZSYNC_ALIAS: &str = "rusty-wave-latest-x86_64.AppImage.zsync";
 
@@ -167,15 +170,18 @@ fn esc(s: &str) -> String {
     o
 }
 
-/// The manifest text (schema 1). `base` has no trailing slash; the URLs name the versioned files.
+/// The manifest text (schema 1). `base` has no trailing slash; the URLs name the versioned files. `latest` is where the aliases are
+/// (the same place on the bucket, a `latest/` folder on Rusty Bucket's site): the zsync file is named by its alias.
 pub(super) fn render(
     version: &str,
     released: &str,
     fingerprint: &str,
     base: &str,
+    latest: &str,
     entries: &[Entry],
 ) -> String {
     let base = base.trim_end_matches('/');
+    let latest = latest.trim_end_matches('/');
     let mut s = String::new();
     s.push_str("{\n  \"schema\": 1,\n");
     s.push_str(&format!("  \"version\": \"{}\",\n", esc(version)));
@@ -200,7 +206,7 @@ pub(super) fn render(
             let last = if e.note.is_some() { "," } else { "" };
             s.push_str(&format!(
                 "      \"zsync_url\": \"{}\"{last}\n",
-                esc(&format!("{base}/{ZSYNC_ALIAS}"))
+                esc(&format!("{latest}/{ZSYNC_ALIAS}"))
             ));
         }
         if let Some(n) = e.note {
@@ -240,9 +246,19 @@ impl Ctx {
         self.base_url.clone().unwrap_or_else(|| DIST_BASE_URL.to_string()).trim_end_matches('/').to_string()
     }
 
+    /// Where the versioned files of this release are served from: the bucket, or `<site>/<version>` on Rusty Bucket's.
+    pub(super) fn versioned_base(&self) -> String {
+        if self.rustybucket { format!("{RB_BASE_URL}/{}", self.version) } else { self.base_url() }
+    }
+
+    /// Where the `latest` aliases are served from: the bucket, or `<site>/latest`.
+    pub(super) fn latest_base(&self) -> String {
+        if self.rustybucket { format!("{RB_BASE_URL}/latest") } else { self.base_url() }
+    }
+
     /// The update information embedded in the AppImage.
     pub(super) fn update_info(&self) -> String {
-        format!("zsync|{}/{ZSYNC_ALIAS}", self.base_url())
+        format!("zsync|{}/{ZSYNC_ALIAS}", self.latest_base())
     }
 
     /// Write `rusty-wave-latest.json` in `dir` from the files named by `assets` that are in `dir` (with `strict`, a missing one is an
@@ -252,7 +268,6 @@ impl Ctx {
         dir: &Path,
         assets: &[Asset],
         strict: bool,
-        base: &str,
     ) -> Result<PathBuf, String> {
         let mut entries = Vec::new();
         for a in assets {
@@ -278,7 +293,7 @@ impl Ctx {
             return Err(format!("manifest: no release files in {} (build them first)", dir.display()));
         }
         let fpr = sign::resolve_public_fpr(&self.root)?;
-        let text = render(&self.version, &self.date, &fpr, base, &entries);
+        let text = render(&self.version, &self.date, &fpr, &self.versioned_base(), &self.latest_base(), &entries);
         let path = dir.join(MANIFEST_NAME);
         write(&path, text.as_bytes())?;
         if self.sign.is_some() {
@@ -291,7 +306,7 @@ impl Ctx {
     /// `target/dist/release`.
     pub(super) fn manifest(&self, x: Extras) -> Result<(), String> {
         let list = assets(&self.version, x);
-        let path = self.write_manifest(&self.out(), &list, false, &self.base_url())?;
+        let path = self.write_manifest(&self.out(), &list, false)?;
         print!("{}", fs::read_to_string(&path).map_err(|e| e.to_string())?);
         println!("{}", path.display());
         Ok(())
@@ -317,6 +332,7 @@ mod tests {
             "2026-10-06",
             "E13FF843723D54068E45A3FF54BF2FA407093CEE",
             "https://h.example/d/",
+            "https://h.example/d/latest/",
             &entries,
         );
         let sha = "ab".repeat(32);
@@ -355,7 +371,7 @@ mod tests {
     fn the_dmg_is_marked_as_an_unsigned_beta() {
         let mut e = entry("macos-dmg", "universal", "a.dmg", false);
         e.note = note(e.key);
-        let got = render("0.0.3", "2026-10-06", "F", "https://h", &[e]);
+        let got = render("0.0.3", "2026-10-06", "F", "https://h", "https://h", &[e]);
         assert!(got.contains("\"signature_url\": \"https://h/a.dmg.asc\",\n"), "{got}");
         assert!(got.contains("\"note\": \"beta: ad-hoc signed only"), "{got}");
         assert!(serde_json_ok(&got), "{got}");
@@ -369,7 +385,7 @@ mod tests {
     #[test]
     fn manifest_escapes_and_accepts_file_urls() {
         let e = [entry("macos-dmg", "universal", "a\"b\\c.dmg", false)];
-        let got = render("0.0.3", "2026-10-06", "F", "file:///tmp/dist", &e);
+        let got = render("0.0.3", "2026-10-06", "F", "file:///tmp/dist", "file:///tmp/dist", &e);
         assert!(got.contains(r#""name": "a\"b\\c.dmg""#), "{got}");
         assert!(got.contains(r#""url": "file:///tmp/dist/a\"b\\c.dmg""#), "{got}");
     }

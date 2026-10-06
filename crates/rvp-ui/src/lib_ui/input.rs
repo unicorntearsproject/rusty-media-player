@@ -607,6 +607,17 @@ impl Ui {
                     || matches!(key, Key::Escape | Key::Enter)
                     || matches!(key, Key::Other(n) if n == "Backspace" || n == "Tab");
             }
+            InputEvent::Paste(text) => {
+                // Pasted text goes where typing goes: a name prompt, else the search box (one line, no control characters).
+                let clean: alloc::string::String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+                if let Some(p) = &mut self.lib.prompt {
+                    let room = 80usize.saturating_sub(p.text.chars().count());
+                    p.text.extend(clean.chars().take(room));
+                } else if self.lib.zone == Zone::Search && !clean.is_empty() {
+                    self.lib.query.push_str(&clean);
+                    self.query_changed();
+                }
+            }
             InputEvent::KeyUp { .. } => {}
         }
         out

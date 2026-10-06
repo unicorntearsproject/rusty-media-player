@@ -104,6 +104,36 @@ fn s3_size(key: &str) -> Result<Option<u64>, String> {
 }
 
 impl Ctx {
+    /// `--target rustybucket`: lay the signed, verified release out for Rusty Bucket's release site and stop there (nothing is
+    /// uploaded: their script, `../rusty-bucket-aws/infra/scripts/publish-release.sh`, does that). `<out>/<version>/` holds the versioned
+    /// files, `<out>/latest/` the aliases and the signed manifest, whose URLs name `<site>/<version>/<file>`; the AppImage's update
+    /// information (embedded when it was built with the same `--target`) names `<site>/latest/`.
+    fn stage_rustybucket(&self, stage: &Path, plan: &Plan, dry_run: bool) -> Result<(), String> {
+        let ver = &self.version;
+        let site = self.dist().join("publish-rb").join("rusty-wave");
+        println!(
+            "publish (rustybucket): {} files in {ver}/ and {} in latest/, site {} ({})",
+            plan.versioned.len(),
+            plan.aliases.len(),
+            manifest::RB_BASE_URL,
+            if dry_run { "dry run: nothing written" } else { "staged, not uploaded" }
+        );
+        if dry_run {
+            return Ok(());
+        }
+        for f in &plan.versioned {
+            copy(&stage.join(f), &site.join(ver).join(f))?;
+        }
+        for (_, alias) in &plan.aliases {
+            copy(&stage.join(alias), &site.join("latest").join(alias))?;
+        }
+        println!("{}", site.display());
+        println!(
+            "upload with ../rusty-bucket-aws/infra/scripts/publish-release.sh (Rusty Bucket's script; not run by this command)"
+        );
+        Ok(())
+    }
+
     pub(super) fn publish(&self, x: Extras, dry_run: bool) -> Result<(), String> {
         if self.sign.is_none() {
             return Err("publish needs --sign (it signs the checksum file and the manifest and checks every signature first)".into());
@@ -145,7 +175,7 @@ impl Ctx {
         self.gpg_detach(&stage.join(&sums_name))?;
         sh(Command::new("sha256sum").current_dir(&stage).args(["-c", &sums_name]))?;
         // The manifest names the versioned files of this publish and their hashes; it is built from the staged copies.
-        let manifest_path = self.write_manifest(&stage, &assets, true, &self.base_url())?;
+        let manifest_path = self.write_manifest(&stage, &assets, true)?;
         let fpr = sign::resolve_public_fpr(&self.root)?;
         for (data, sig) in [
             (stage.join(&sums_name), stage.join(format!("{sums_name}.asc"))),
@@ -168,6 +198,9 @@ impl Ctx {
         // The aliases are byte copies of staged files.
         for (src, alias) in plan.aliases.iter().filter(|(s, a)| s != a) {
             copy(&stage.join(src), &stage.join(alias))?;
+        }
+        if self.rustybucket {
+            return self.stage_rustybucket(&stage, &plan, dry_run);
         }
         // 4. Refuse to overwrite a versioned file: check both destinations before touching either.
         let local = Path::new(LOCAL_DIR);

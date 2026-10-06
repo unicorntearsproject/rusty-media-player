@@ -205,6 +205,22 @@ test.describe("M8", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the stable snapshot subset: version, ready, state, position, duration, item and error", async ({ page }) => {
+    const errors = await load(page, LONG);
+    const s = await snap(page);
+    expect(s.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(s.ready).toBe(true);
+    expect(["opening", "playing", "paused", "buffering"]).toContain(s.state);
+    expect(typeof s.position_us).toBe("number");
+    expect(s.duration_us).toBeGreaterThan(0);
+    expect(s.item).toMatchObject({ index: 0 });
+    expect(typeof s.item.id).toBe("number");
+    expect(s.item.title).toBeTruthy();
+    expect(s.error).toBeNull();
+    expect(await page.evaluate(() => window.rvp.ready)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
   test("resume: the position survives a reload", async ({ page }) => {
     const errors = await load(page, LONG);
     const s = await snap(page);

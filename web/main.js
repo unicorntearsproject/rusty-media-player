@@ -36,10 +36,11 @@ async function loadWasm() {
     try {
       const url = new URL("./pkg-mt/rvp.js", import.meta.url);
       const wasmUrl = new URL("./pkg-mt/rvp_bg.wasm", import.meta.url);
-      const head = await fetch(wasmUrl, { method: "HEAD" });
-      if (head.ok) {
+      // One GET of the module (the service worker answers it from its cache offline; a HEAD it would not), used for compiling.
+      const wasmResponse = await fetch(wasmUrl);
+      if (wasmResponse.ok) {
         glue = await import(url.href + bust);
-        const module = await WebAssembly.compileStreaming(fetch(wasmUrl));
+        const module = await WebAssembly.compileStreaming(wasmResponse);
         const memory = new WebAssembly.Memory({ initial: 64, maximum: 32768, shared: true });
         await glue.default({ module_or_path: module, memory, thread_stack_size: 4 << 20 });
         const t = new Threads(module, memory, url.href + bust);
@@ -407,6 +408,15 @@ window.addEventListener("keyup", (e) => {
   if (e.target instanceof HTMLInputElement) return;
   player.key_up(e.key, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
 });
+// Pasted text (Ctrl+V / Cmd+V / the context menu) goes to the player: the theme dialog's box and the library search take it.
+window.addEventListener("paste", (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  const text = e.clipboardData && e.clipboardData.getData("text/plain");
+  if (!text) return;
+  e.preventDefault();
+  player.paste(text);
+  effects();
+});
 window.addEventListener("blur", () => player.focus(false));
 window.addEventListener("focus", () => player.focus(true));
 
@@ -474,9 +484,10 @@ setInterval(() => { if (document.hidden && !recovering) player.tick(); }, 25);
 window.rvp = {
   ready: true,
   snapshot: () => {
+    // `ready` is part of the stable subset (docs/host-api.md): true once the player runs, false while it restarts after a crash.
     const j = player.snapshot();
     if (j) lastSnapshot = JSON.parse(j);
-    return j ? lastSnapshot : { ...lastSnapshot, state: "recovering" };
+    return j ? { ...lastSnapshot, ready: true } : { ...lastSnapshot, state: "recovering", ready: false };
   },
   openFile,
   openFiles,

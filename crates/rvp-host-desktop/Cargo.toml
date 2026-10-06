@@ -34,6 +34,8 @@ fontdb = "0.24"
 ttf-parser = "0.25"
 raw-window-handle = "0.6"
 png = "0.18"
+# The clipboard, for pasting a link or a style sheet into the theme dialog and the search box (text only: no image support compiled in).
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation"] }

@@ -6,7 +6,7 @@
 //! automatic check on.
 use super::*;
 use alloc::string::String;
-use rvp_host::{Integration, UpdateHow, UpdateState};
+use rvp_host::{DefaultOutcome, DefaultPlayer, Integration, MEDIA_TYPES, UpdateHow, UpdateState};
 use rvp_ui::{DialogButton, DialogSpec, DialogToggle};
 
 /// Where the choices are kept.
@@ -37,21 +37,36 @@ pub struct AppSettings {
     pub skipped: String,
     /// The app-menu offer.
     pub integration: IntegrationChoice,
+    /// The default-media-player offer (`Ask` until the user answered it; `Never` after a "no thanks").
+    pub default_player: IntegrationChoice,
+}
+
+fn choice_name(c: IntegrationChoice) -> &'static str {
+    match c {
+        IntegrationChoice::Ask => "ask",
+        IntegrationChoice::Never => "never",
+        IntegrationChoice::Done => "done",
+    }
+}
+
+fn choice_from(s: &str) -> IntegrationChoice {
+    match s {
+        "never" => IntegrationChoice::Never,
+        "done" => IntegrationChoice::Done,
+        _ => IntegrationChoice::Ask,
+    }
 }
 
 impl AppSettings {
     /// The text to keep.
     pub fn to_text(&self) -> String {
         format!(
-            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\n",
+            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\ndefault_player={}\n",
             self.auto_check as u8,
             self.last_check,
             self.skipped.replace(['\n', '\r'], ""),
-            match self.integration {
-                IntegrationChoice::Ask => "ask",
-                IntegrationChoice::Never => "never",
-                IntegrationChoice::Done => "done",
-            }
+            choice_name(self.integration),
+            choice_name(self.default_player),
         )
     }
 
@@ -68,13 +83,8 @@ impl AppSettings {
                 "auto_check" => s.auto_check = v.trim() == "1",
                 "last_check" => s.last_check = v.trim().parse().unwrap_or(0),
                 "skipped" => s.skipped = v.trim().to_string(),
-                "integration" => {
-                    s.integration = match v.trim() {
-                        "never" => IntegrationChoice::Never,
-                        "done" => IntegrationChoice::Done,
-                        _ => IntegrationChoice::Ask,
-                    }
-                }
+                "integration" => s.integration = choice_from(v.trim()),
+                "default_player" => s.default_player = choice_from(v.trim()),
                 _ => {}
             }
         }
@@ -89,6 +99,10 @@ enum Screen {
     Update,
     /// The first-run offer to add the app to the app menu.
     Integrate,
+    /// Everything the user can set: theme, default player, app menu, updates, audio.
+    Settings,
+    /// "Set as default media player": the checklist of media types (`true` for the first-run offer, which can be declined for good).
+    Default(bool),
 }
 
 /// What a dialog button does (kept in step with the buttons of the spec on screen).
@@ -101,8 +115,17 @@ enum Btn {
     Close,
     Skip,
     AddToMenu,
-    NotNow,
     Never,
+    // The Settings dialog.
+    OpenAudio,
+    OpenTheme,
+    OpenDefault,
+    ToggleMenu,
+    OpenUpdates,
+    // The default-player dialog.
+    SetDefault,
+    CheckAll,
+    BackToSettings,
 }
 
 /// What a dialog switch does.
@@ -110,6 +133,8 @@ enum Btn {
 enum Tog {
     AutoCheck,
     AppMenu,
+    /// Media type `n` of [`MEDIA_TYPES`] in the default-player checklist.
+    Type(usize),
 }
 
 /// What the host last said (read every tick).
@@ -120,6 +145,8 @@ struct Cache {
     updates: bool,
     state: UpdateState,
     integration: Integration,
+    default_player: DefaultPlayer,
+    offers: bool,
     /// The version of the newest offer seen (the state forgets it while downloading).
     offer: String,
 }
@@ -137,6 +164,10 @@ pub(crate) struct Services {
     auto_started: bool,
     /// The app-menu offer was made this run.
     offered: bool,
+    /// The default-player offer was made this run.
+    default_offered: bool,
+    /// Which media types of the default-player checklist are ticked (all, until the user unticks).
+    default_checked: Vec<bool>,
     /// The version the prompt was shown for this run ("Later" keeps it quiet until the next run).
     announced: String,
     buttons: Vec<Btn>,
@@ -170,6 +201,8 @@ impl App {
             updates: svc.updates_supported(),
             state: svc.update_state(),
             integration: svc.integration(),
+            default_player: svc.default_player(),
+            offers: svc.offers_enabled(),
             offer: self.svc.cache.offer.clone(),
         };
         if let UpdateState::Available { version, .. } | UpdateState::Ready { version } = &cache.state {
@@ -250,6 +283,20 @@ impl App {
                 s.screen = Some(screen);
             }
         }
+        // The first-run offer to make the app the default media player: once the menu offer (if any) is out of the way, and only
+        // where the system lets an app do it.
+        if (s.offered || cache.integration == Integration::Unavailable)
+            && !s.default_offered
+            && s.screen.is_none()
+            && cache.offers
+            && matches!(cache.default_player, DefaultPlayer::Available { .. })
+        {
+            s.default_offered = true;
+            if s.settings.default_player == IntegrationChoice::Ask {
+                s.default_checked = alloc::vec![true; MEDIA_TYPES.len()];
+                s.screen = Some(Screen::Default(true));
+            }
+        }
         s.cache = cache;
         if persist {
             self.save_app_settings(host);
@@ -285,7 +332,8 @@ impl App {
     /// The dialog on screen, if any (this also fixes what its buttons and switches mean).
     pub(crate) fn dialog_spec(&mut self) -> Option<DialogSpec> {
         let screen = self.svc.screen?;
-        if !self.svc.cache.present {
+        // Settings and what hangs off it work without the host's services (the audio and theme parts do); the rest needs them.
+        if !self.svc.cache.present && !matches!(screen, Screen::Settings) {
             self.svc.screen = None;
             return None;
         }
@@ -308,14 +356,89 @@ impl App {
                              and to pick it for opening media files."
                                 .into(),
                         );
-                        spec.body.push("You can take it out again from the right-click menu.".into());
-                        for (label, primary, kind) in [
-                            ("Add to the app menu", true, Btn::AddToMenu),
-                            ("Not now", false, Btn::NotNow),
-                            ("Don't ask again", false, Btn::Never),
-                        ] {
+                        spec.body.push("You can add or remove it later in Settings.".into());
+                        for (label, primary, kind) in
+                            [("Add to the app menu", true, Btn::AddToMenu), ("No thanks", false, Btn::Never)]
+                        {
                             spec.buttons.push(DialogButton::new(label, primary));
                             buttons.push(kind);
+                        }
+                    }
+                }
+            }
+            Screen::Settings => {
+                spec.title = "Settings".into();
+                let ver = if c.version.is_empty() { env!("CARGO_PKG_VERSION").to_string() } else { c.version.clone() };
+                spec.body.push(format!("Rusty Wave {ver}"));
+                if let Some(n) = &self.svc.notice {
+                    spec.body.push(n.clone());
+                }
+                let mut add = |label: &str, primary: bool, kind: Btn| {
+                    spec.buttons.push(DialogButton::new(label, primary));
+                    buttons.push(kind);
+                };
+                add("Audio settings\u{2026}", false, Btn::OpenAudio);
+                add("Theme\u{2026}", false, Btn::OpenTheme);
+                if matches!(c.default_player, DefaultPlayer::Available { .. }) {
+                    add("Set as default media player\u{2026}", false, Btn::OpenDefault);
+                }
+                match c.integration {
+                    Integration::Unavailable => {}
+                    Integration::Off => add("Add to app menu", false, Btn::ToggleMenu),
+                    Integration::On => add("Remove from app menu", false, Btn::ToggleMenu),
+                }
+                if c.updates {
+                    add("Check for updates\u{2026}", false, Btn::OpenUpdates);
+                }
+                add("Close", true, Btn::Close);
+            }
+            Screen::Default(offer) => {
+                spec.compact = true;
+                let (note, silent) = match &c.default_player {
+                    DefaultPlayer::Available { note, silent } => (note.clone(), *silent),
+                    DefaultPlayer::Unavailable => (String::new(), false),
+                };
+                spec.title = if offer {
+                    "Make Rusty Wave your default media player?".into()
+                } else {
+                    "Set as default media player".into()
+                };
+                match &self.svc.notice {
+                    Some(n) => {
+                        spec.body.push(n.clone());
+                        spec.buttons.push(DialogButton::new("Close", true));
+                        buttons.push(Btn::Close);
+                    }
+                    None => {
+                        spec.body.push("Choose the kinds of files Rusty Wave should open. Everything is ticked to start with.".into());
+                        if !note.is_empty() {
+                            spec.body.push(note);
+                        }
+                        if self.svc.default_checked.len() != MEDIA_TYPES.len() {
+                            self.svc.default_checked = alloc::vec![true; MEDIA_TYPES.len()];
+                        }
+                        for (i, t) in MEDIA_TYPES.iter().enumerate() {
+                            spec.toggles.push(DialogToggle {
+                                label: t.label.into(),
+                                desc: String::new(),
+                                on: self.svc.default_checked[i],
+                            });
+                            toggles.push(Tog::Type(i));
+                        }
+                        let any = self.svc.default_checked.iter().any(|&b| b);
+                        let all = self.svc.default_checked.iter().all(|&b| b);
+                        let mut b = DialogButton::new(if silent { "Set as default" } else { "Continue" }, true);
+                        b.enabled = any;
+                        spec.buttons.push(b);
+                        buttons.push(Btn::SetDefault);
+                        spec.buttons.push(DialogButton::new(if all { "Uncheck all" } else { "Check all" }, false));
+                        buttons.push(Btn::CheckAll);
+                        if offer {
+                            spec.buttons.push(DialogButton::new("No thanks", false));
+                            buttons.push(Btn::Never);
+                        } else {
+                            spec.buttons.push(DialogButton::new("Back", false));
+                            buttons.push(Btn::BackToSettings);
                         }
                     }
                 }
@@ -452,6 +575,19 @@ impl App {
         self.refresh_model(now);
     }
 
+    /// The menu entry and Ctrl+,: the Settings dialog.
+    pub(crate) fn show_settings(&mut self, now: Timestamp) {
+        self.svc.notice = None;
+        self.svc.screen = Some(Screen::Settings);
+        self.refresh_model(now);
+    }
+
+    /// The Theme dialog (see `theme_ui.rs`).
+    fn open_theme(&mut self) {
+        self.svc.screen = None;
+        self.ui.show_toast("Theme is coming up.", self.now);
+    }
+
     /// The menu entry: add the app to the app menu, or take it out.
     pub(crate) fn toggle_integration<H>(&mut self, host: &mut H, now: Timestamp)
     where
@@ -483,6 +619,27 @@ impl App {
     {
         let Some(btn) = self.svc.buttons.get(n as usize).copied() else { return };
         let version = self.svc.cache.offer.clone();
+        // What needs nothing from the host's services (the Settings dialog also opens in a browser).
+        match btn {
+            Btn::Close => {
+                self.close_dialog(host);
+                self.refresh_model(now);
+                return;
+            }
+            Btn::OpenAudio => {
+                self.svc.screen = None;
+                self.ui.open_audio_settings();
+                self.refresh_model(now);
+                return;
+            }
+            Btn::OpenTheme => {
+                self.svc.notice = None;
+                self.open_theme();
+                self.refresh_model(now);
+                return;
+            }
+            _ => {}
+        }
         let Some(svc) = host.app_services() else { return };
         self.svc.notice = None;
         match btn {
@@ -516,12 +673,60 @@ impl App {
                 }
                 Err(e) => self.svc.notice = Some(format!("Couldn't add it: {e}")),
             },
-            Btn::NotNow => self.close_dialog(host),
             Btn::Never => {
-                self.svc.settings.integration = IntegrationChoice::Never;
-                self.save_app_settings(host);
-                self.close_dialog(host);
-                self.ui.show_toast("You can add it later from the right-click menu.", now);
+                // A "no thanks" to either offer is final: it is not asked again, the Settings dialog has the button.
+                match self.svc.screen {
+                    Some(Screen::Default(_)) => {
+                        self.svc.settings.default_player = IntegrationChoice::Never;
+                        self.save_app_settings(host);
+                        self.close_dialog(host);
+                        self.ui.show_toast("You can set it later in Settings.", now);
+                    }
+                    _ => {
+                        self.svc.settings.integration = IntegrationChoice::Never;
+                        self.save_app_settings(host);
+                        self.close_dialog(host);
+                        self.ui.show_toast("You can add it later in Settings.", now);
+                    }
+                }
+            }
+            Btn::OpenAudio | Btn::OpenTheme => {}
+            Btn::OpenDefault => {
+                self.svc.default_checked = alloc::vec![true; MEDIA_TYPES.len()];
+                self.svc.screen = Some(Screen::Default(false));
+            }
+            Btn::BackToSettings => self.svc.screen = Some(Screen::Settings),
+            Btn::ToggleMenu => {
+                self.toggle_integration(host, now);
+            }
+            Btn::OpenUpdates => {
+                self.check_for_updates(host, now);
+            }
+            Btn::CheckAll => {
+                let all = self.svc.default_checked.iter().all(|&b| b);
+                self.svc.default_checked = alloc::vec![!all; MEDIA_TYPES.len()];
+            }
+            Btn::SetDefault => {
+                let ids: Vec<String> = MEDIA_TYPES
+                    .iter()
+                    .zip(self.svc.default_checked.iter())
+                    .filter(|(_, on)| **on)
+                    .map(|(t, _)| t.id.to_string())
+                    .collect();
+                match svc.set_default_player(&ids) {
+                    Ok(DefaultOutcome::Set(n)) => {
+                        self.svc.settings.default_player = IntegrationChoice::Done;
+                        self.save_app_settings(host);
+                        self.close_dialog(host);
+                        self.ui.show_toast(&format!("Rusty Wave now opens {}", plural(n.max(ids.len()), "kind of file", "kinds of files")), now);
+                    }
+                    Ok(DefaultOutcome::UserMustConfirm(text)) => {
+                        self.svc.settings.default_player = IntegrationChoice::Done;
+                        self.save_app_settings(host);
+                        self.svc.notice = Some(text);
+                    }
+                    Err(e) => self.svc.notice = Some(format!("Couldn't set it: {e}")),
+                }
             }
         }
         self.refresh_model(now);
@@ -543,6 +748,11 @@ impl App {
                 self.toggle_integration(host, now);
                 // A failure shows as a toast; the switch follows what the host says next tick.
             }
+            Tog::Type(i) => {
+                if let Some(b) = self.svc.default_checked.get_mut(i) {
+                    *b = !*b;
+                }
+            }
         }
         self.refresh_model(now);
     }
@@ -552,6 +762,24 @@ impl App {
     where
         H: Host<Video = FrameSink>,
     {
+        // Closing a first-run offer without answering is a no: it is not asked again (Settings has the buttons).
+        match self.svc.screen {
+            Some(Screen::Integrate) if self.svc.notice.is_none() => {
+                self.svc.settings.integration = IntegrationChoice::Never;
+                self.save_app_settings(host);
+            }
+            Some(Screen::Default(true)) if self.svc.notice.is_none() => {
+                self.svc.settings.default_player = IntegrationChoice::Never;
+                self.save_app_settings(host);
+            }
+            // The step-by-step dialogs of Settings go back to it; Settings itself closes.
+            Some(Screen::Default(false)) if self.svc.notice.is_none() => {
+                self.svc.screen = Some(Screen::Settings);
+                self.refresh_model(now);
+                return;
+            }
+            _ => {}
+        }
         self.close_dialog(host);
         self.refresh_model(now);
     }

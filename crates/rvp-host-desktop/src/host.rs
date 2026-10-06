@@ -7,7 +7,7 @@ use crate::storage::FileStorage;
 use rvp_core::Timestamp;
 use rvp_host::{
     FrameSink, Host, HostClock, HostError, InputEvent, InputEvents, Library, Listing, NowPlaying,
-    OpenRequest, Rect, Surface,
+    OpenRequest, Rect, StandardFolder, StandardKind, Surface,
 };
 use std::cell::Cell;
 use std::collections::{BTreeMap, VecDeque};
@@ -160,6 +160,37 @@ impl Library for DesktopLibrary {
     fn connected_roots(&self) -> Vec<String> {
         self.roots.iter().filter(|(_, p)| p.is_dir()).map(|(id, _)| id.clone()).collect()
     }
+
+    fn standard_folders(&mut self) -> Vec<StandardFolder> {
+        standard_folders()
+    }
+
+    fn add_path(&mut self, path: &str) -> bool {
+        let dir = PathBuf::from(path);
+        if !dir.is_dir() {
+            return false;
+        }
+        self.add(dir);
+        true
+    }
+}
+
+/// The user's Music and Videos folders as the system names them: the XDG user directories (`user-dirs.dirs`) on Linux, the Known Folders
+/// on Windows, `~/Music` and `~/Movies` on macOS. Only those that exist, and never the home folder itself (a system without a
+/// Videos folder points it there).
+pub fn standard_folders() -> Vec<StandardFolder> {
+    let Some(dirs) = directories::UserDirs::new() else { return Vec::new() };
+    let home = dirs.home_dir().to_path_buf();
+    let mut out = Vec::new();
+    for (kind, dir) in [(StandardKind::Music, dirs.audio_dir()), (StandardKind::Videos, dirs.video_dir())] {
+        let Some(dir) = dir else { continue };
+        if !dir.is_dir() || dir == home.as_path() {
+            continue;
+        }
+        let name = dir.file_name().map_or_else(|| "Folder".to_string(), |n| n.to_string_lossy().into_owned());
+        out.push(StandardFolder { kind, name, path: dir.to_string_lossy().into_owned() });
+    }
+    out
 }
 
 /// Everything the app needs from the desktop.

@@ -13,7 +13,7 @@ const SHOWCASE = path.join(FIXTURES, "showcase/music");
 const VIDEO = path.join(FIXTURES, "av1_opus.webm");
 const GOLDEN_DIR = path.join(__dirname, "golden");
 
-const { snap, waitFor: waitForAt, frames, press, settled } = require("./helpers");
+const { snap, waitFor: waitForAt, frames, press, settled, toFace } = require("./helpers");
 const waitFor = (page, fn, arg, timeout) => waitForAt(page, fn, arg, timeout, 30);
 const center = (r) => [r.x + r.w / 2, r.y + r.h / 2];
 
@@ -38,8 +38,7 @@ async function addFolder(page, dir, tracks) {
 
 async function library(page, dir = LIBRARY, tracks = 201) {
   const errors = await boot(page);
-  await press(page, "b"); // to the Library face
-  await waitFor(page, () => window.rvp.snapshot().lib.mode === "library");
+  await toFace(page, "library");
   await addFolder(page, dir, tracks);
   return errors;
 }
@@ -363,7 +362,7 @@ test.describe("M10", () => {
     await page.evaluate(() => window.rvp.flushStore());
     await page.reload();
     await waitFor(page, () => window.rvp && window.rvp.ready);
-    await press(page, "b");
+    await toFace(page, "library");
     await waitFor(page, () => window.rvp.snapshot().lib.tracks === 201 && window.rvp.snapshot().lib.albums === 20);
     // The covers come back from the store a moment after the albums do: wait until the picture stops changing.
     await settled(page, () => window.rvp.sample(0, 0, 1280, 720, 16).join(","), { n: 5, gap: 3, timeout: 30_000 });
@@ -400,7 +399,7 @@ test.describe("M10", () => {
       }
       window.showDirectoryPicker = async () => music;
     }, names.map((n) => [n, Array.from(fs.readFileSync(path.join(LIBRARY, "Aurora Vale/Daybreak", n)))]));
-    await press(page, "b");
+    await toFace(page, "library");
     await waitFor(page, () => window.rvp.snapshot().lib.mode === "library" && window.rvp.snapshot().lib.add_folder);
     // The add-folder button of the rail (a click is the user gesture the picker needs).
     let s = await snap(page);

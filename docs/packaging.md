@@ -18,7 +18,7 @@ Rusty Wave ships as a native desktop app (Linux and Windows; macOS in beta) and 
 | Signed apt repo | `dist apt-repo --sign` | gpg | `target/dist/apt-repo/` |
 | Checksums, signatures | `dist checksums [--sign]` | gpg for `--sign` | `SHA256SUMS` (+ `.asc` files); `dist verify` checks them |
 | Update manifest | `dist manifest [--base-url U] [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--sign]` | the built files in `target/dist/release` | `rusty-wave-latest.json` (+ `.asc` with `--sign`), for the in-app updater |
-| Publish | `dist publish --sign [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--dry-run]` | the signed, verified deb, rpm and AppImage (and `.zsync`) in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root), then the `latest` aliases and the manifest |
+| Publish | `dist publish --sign [--target ut\|rustybucket] [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--dry-run]` | the signed, verified deb, rpm and AppImage (and `.zsync`) in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root), then the `latest` aliases and the manifest |
 
 `cargo xtask dist check` validates the metadata without building (desktop file, AppStream, man page, that the media types agree between the
 `.desktop` file and the AppStream file, that the Windows installer registers the main extensions). `linux` runs stage to flatpak, `all`
@@ -45,6 +45,14 @@ writes and signs `rusty-wave-<ver>-SHA256SUMS` over exactly those files, builds 
 per file): if any *versioned* file of this version exists in either, it stops before copying anything. Bump `version` in `Cargo.toml` for the next publish.
 `--dry-run` does all checks and copies nothing. Build the files with `dist stage --container`, then `dist deb|rpm|appimage --no-build --sign`, then
 `dist checksums --sign` (move old files out of `target/dist/release`, `linux/stage` and `appimage` first: stale files from an earlier name would be packaged or fail `verify`).
+
+**`--target rustybucket`** (prepared, not in use: the default target stays the `ut-software-dist` bucket until told otherwise) lays the same signed release out for
+Rusty Bucket's release site instead of uploading it: `target/dist/publish-rb/rusty-wave/<version>/` holds the versioned files (every artifact with its `.asc`, and the
+versioned `SHA256SUMS`), `.../latest/` the `latest` aliases and the signed `rusty-wave-latest.json`. The manifest's URLs are `https://software.rustybucket.ai/rusty-wave/<version>/<file>`
+for every file, and only `zsync_url` names the alias (`.../latest/rusty-wave-latest-x86_64.AppImage.zsync`). The AppImage built with `dist appimage --target rustybucket` embeds that
+`latest/` zsync address as its update information, and its `.zsync` carries the absolute versioned AppImage URL (`.../<version>/rusty-wave-<version>-x86_64.AppImage`) with the
+`Length:` and `SHA-1`, so the `latest/` copy of the `.zsync` is byte for byte the versioned one. Uploading is Rusty Bucket's script
+(`../rusty-bucket-aws/infra/scripts/publish-release.sh`); nothing here runs it.
 
 **Stable `latest` aliases.** After every versioned file is uploaded and confirmed by `head-object` (size must match), publish uploads byte copies under stable names
 (the only objects it ever overwrites; `Cache-Control: public, max-age=300`, versioned files get `immutable`), the manifest last, so a half-failed publish never points
@@ -182,6 +190,21 @@ installing; files opened with the installed app or shared to it are opened in th
 decoder the server also needs `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (`cargo xtask serve` sends them);
 without them the page runs the single-threaded build. `tests/e2e/pwa.spec.js` checks the manifest and icons, the precache, playing a local file with the
 network off, and the update flow.
+
+**Content-hashed names.** The build gives the scripts, the style sheet and the wasm modules with their glue names that carry a hash of their content
+(`main.3fa9c1d2.js`, `pkg/rvp_bg.a68f7716.wasm`) and rewrites every reference (`xtask/src/web.rs`, `hash_assets`): a file's hash covers its own bytes and
+those of everything it loads, so a worker and the module that starts it need no ordering and an unchanged file keeps its name between builds. `index.html`,
+`sw.js`, `manifest.webmanifest`, the icons and `build-info.json` keep their names. A cache can therefore keep the hashed files for ever.
+
+**`build-info.json`** (at the root of the page and of the zip, never listing itself):
+`{"schema":1, "name":"rusty-wave-web", "version", "commit" (full sha), "built" (RFC 3339 UTC; `SOURCE_DATE_EPOCH` fixes it), "threads": bool (`pkg-mt/` is there),
+"files": {"<relative path>": {"sha256", "size", "immutable"}}}`. `immutable` is true for the hashed files and false for the rest; a host uses it for `Cache-Control`.
+The zip (`dist pwa`) carries the threaded build (`pkg-mt/`) as well as `pkg/`, so it needs a nightly toolchain with `rust-src` to build.
+
+**Service worker precache.** `sw.js` precaches with `cache: "no-cache"` (revalidate, so a file the browser has just fetched answers 304 and nothing downloads twice)
+and only the wasm build the browser can run: `pkg-mt/` when the site is served cross-origin isolated (the worker asks the server for the page's COOP and COEP
+headers, because its own `crossOriginIsolated` is not the pages'), else `pkg/`. The other build is kept the first time the page asks for it (a browser whose
+threads fail falls back to `pkg/` and still starts offline next time). The page asks for the threaded module with one GET (a HEAD would miss the cache offline).
 
 ## CI
 
