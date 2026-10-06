@@ -189,6 +189,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bucket-v0-mock"
+version = "0.0.2"
+dependencies = [
+ "bucket-v0-sys",
+]
+
+[[package]]
+name = "bucket-v0-sys"
+version = "0.0.2"
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1939,6 +1950,16 @@ dependencies = [
 [[package]]
 name = "rvp-host-rb"
 version = "0.0.2"
+dependencies = [
+ "bucket-v0-mock",
+ "bucket-v0-sys",
+ "rvp-app",
+ "rvp-codec-audio",
+ "rvp-core",
+ "rvp-host",
+ "rvp-par",
+ "rvp-ui",
+]
 
 [[package]]
 name = "rvp-host-web"
@@ -2036,6 +2057,21 @@ dependencies = [
  "rvp-core",
  "rvp-demux",
  "rvp-host",
+ "rvp-ui",
+]
+
+[[package]]
+name = "rvp-wave-bucket"
+version = "0.0.2"
+dependencies = [
+ "bucket-v0-sys",
+ "rvp-codec-audio",
+ "rvp-codec-av1",
+ "rvp-codec-h264",
+ "rvp-codec-vp9",
+ "rvp-core",
+ "rvp-host-rb",
+ "rvp-par",
  "rvp-ui",
 ]
 
@@ -3248,6 +3284,9 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 [[package]]
 name = "xtask"
 version = "0.0.2"
+dependencies = [
+ "bucket-v0-sys",
+]
 
 [[package]]
 name = "zerocopy"

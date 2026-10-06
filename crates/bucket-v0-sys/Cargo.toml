@@ -1,0 +1,20 @@
+[package]
+name = "bucket-v0-sys"
+description = "Raw bindings to Rusty Bucket's App API (`bucket_v0`, draft v0.3): imports, repr(C) structs with layout asserts, constants. Self-contained, no dependencies"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["inspect"]
+# Native targets only: route every import to a `Backend` installed on the thread (a mock host for tests, a simulator).
+# On wasm32 the real imports are always used and this feature does nothing.
+backend = []
+# `inspect`: a small WebAssembly parser (imports and exports) and the check of a module against the documented function set.
+inspect = []
