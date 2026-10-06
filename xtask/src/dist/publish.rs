@@ -5,10 +5,10 @@
 //!
 //! Published (names carry the version, as the files come out of the build): `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-1.x86_64.rpm`,
 //! `rusty-wave-<ver>-x86_64.AppImage` and its `.zsync`, a detached `.asc` for each, `rusty-wave-<ver>-SHA256SUMS` and its `.asc`. The Windows
-//! installer and zip go along only with `--windows`, the macOS dmg only with `--macos` (say so only when they were built and verified in the
-//! same run). Aliases (`rusty-wave-latest-...`, byte copies with copies of the signatures) and `rusty-wave-latest.json` with its `.asc` follow.
+//! installer and zip go along only with `--windows`, the macOS dmg only with `--macos`, the Flatpak bundle with `--flatpak`, the web app zip
+//! with `--web`, the Linux tarball with `--tarball` (`--all` for the lot; say so only when they were built and verified in the same run). Aliases (`rusty-wave-latest-...`, byte copies with copies of the signatures) and `rusty-wave-latest.json` with its `.asc` follow.
 //! The sums file is named by version because the destinations hold every version side by side.
-use super::manifest::{self, Asset, MANIFEST_NAME, ZSYNC_ALIAS};
+use super::manifest::{self, Asset, Extras, MANIFEST_NAME, ZSYNC_ALIAS};
 use super::*;
 
 const LOCAL_DIR: &str = "/home/jj/projects/_software-dist/rusty-wave";
@@ -104,7 +104,7 @@ fn s3_size(key: &str) -> Result<Option<u64>, String> {
 }
 
 impl Ctx {
-    pub(super) fn publish(&self, windows: bool, macos: bool, dry_run: bool) -> Result<(), String> {
+    pub(super) fn publish(&self, x: Extras, dry_run: bool) -> Result<(), String> {
         if self.sign.is_none() {
             return Err("publish needs --sign (it signs the checksum file and the manifest and checks every signature first)".into());
         }
@@ -120,7 +120,7 @@ impl Ctx {
         // 1. Everything in target/dist/release verifies against the committed public key (a throwaway keyring).
         self.verify()?;
         // 2. The files of this version.
-        let assets = manifest::assets(ver, windows, macos);
+        let assets = manifest::assets(ver, x);
         let plan = plan(ver, &assets);
         let out = self.out();
         let sums_name = format!("rusty-wave-{ver}-SHA256SUMS");
@@ -235,9 +235,9 @@ mod tests {
 
     #[test]
     fn plan_uploads_versioned_files_then_aliases() {
-        let p = plan("0.0.3", &manifest::assets("0.0.3", true, true));
-        // 6 installers + zsync = 7 files, each with a signature, plus the sums and their signature.
-        assert_eq!(p.versioned.len(), 7 * 2 + 2);
+        let p = plan("0.0.3", &manifest::assets("0.0.3", Extras::ALL));
+        // 9 files + zsync = 10 files, each with a signature, plus the sums and their signature.
+        assert_eq!(p.versioned.len(), 10 * 2 + 2);
         assert!(p.versioned.iter().all(|f| f.contains("0.0.3")), "{:?}", p.versioned);
         assert!(p.versioned.contains(&"rusty-wave-0.0.3-x86_64.AppImage.zsync.asc".to_string()));
         // Aliases never carry a version and the manifest is the last upload.
@@ -258,11 +258,16 @@ mod tests {
             "rusty-wave-0.0.3-macos-universal.dmg.asc".into(),
             "rusty-wave-latest-macos-universal.dmg.asc".into()
         )));
+        assert!(p.aliases.contains(&(
+            "io.github.idometeor.RustyWave-0.0.3.flatpak".into(),
+            "io.github.idometeor.RustyWave-latest.flatpak".into()
+        )));
+        assert!(p.aliases.contains(&("rusty-wave-web-0.0.3.zip".into(), "rusty-wave-web-latest.zip".into())));
     }
 
     #[test]
     fn plan_without_optional_platforms() {
-        let p = plan("0.0.3", &manifest::assets("0.0.3", false, false));
+        let p = plan("0.0.3", &manifest::assets("0.0.3", Extras::default()));
         assert_eq!(p.versioned.len(), 4 * 2 + 2);
         assert!(!p.versioned.iter().any(|f| f.contains("Setup") || f.contains("dmg") || f.contains("zip")));
     }

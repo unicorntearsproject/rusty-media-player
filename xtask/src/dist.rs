@@ -47,11 +47,11 @@ targets:
   checksums    SHA256SUMS over everything in target/dist/release (and signatures if --sign or RVP_SIGN_CMD is set)
   verify       check every signature in target/dist against packaging/keys/rusty-wave-release.asc in a throwaway keyring
   manifest     rusty-wave-latest.json (the in-app updater's manifest) of what is built in target/dist/release; --base-url U sets where the
-               files will be served (an https:// URL or file:///path, default the bucket); --windows and --macos list those files too
+               files will be served (an https:// URL or file:///path, default the bucket); --windows, --macos, --flatpak, --web, --tarball (or --all) list those files too
   publish      copy the verified deb, rpm and AppImage (with .asc, .zsync and a versioned SHA256SUMS) to /home/jj/projects/_software-dist/rusty-wave/ and
                s3://ut-software-dist/; needs --sign, never overwrites a versioned file (stops if one exists in either place), then
-               overwrites the `latest` aliases and the manifest last; --windows / --macos add the Windows installer and zip / the macOS dmg
-               (only when built and verified in the same run); --dry-run only checks
+               overwrites the `latest` aliases and the manifest last; --windows / --macos / --flatpak / --web / --tarball (or --all) add the Windows installer and zip / the
+               macOS dmg / the Flatpak bundle / the web app zip / the Linux tarball (only when built and verified in the same run); --dry-run only checks
   check        validate the metadata (desktop file, AppStream, man page) without building anything
   linux        stage, tarball, deb, rpm, appimage and flatpak
   all          linux, windows, installer, pwa and checksums
@@ -93,7 +93,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut version = None;
     let (mut container, mut no_build, mut prepare_only) = (false, false, false);
     let (mut want_sign, mut sign_key, mut repo_url) = (false, None, None);
-    let (mut windows, mut macos, mut dry_run) = (false, false, false);
+    let (mut extras, mut dry_run) = (manifest::Extras::default(), false);
     let mut base_url = None;
     let mut it = args[1..].iter();
     while let Some(a) = it.next() {
@@ -102,8 +102,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--container" => container = true,
             "--no-build" => no_build = true,
             "--prepare-only" => prepare_only = true,
-            "--windows" => windows = true,
-            "--macos" => macos = true,
+            "--windows" => extras.windows = true,
+            "--macos" => extras.macos = true,
+            "--flatpak" => extras.flatpak = true,
+            "--web" => extras.web = true,
+            "--tarball" => extras.tarball = true,
+            "--all" => extras = manifest::Extras::ALL,
             "--base-url" => base_url = Some(it.next().ok_or("--base-url needs a value")?.clone()),
             "--dry-run" => dry_run = true,
             "--sign" => want_sign = true,
@@ -139,8 +143,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "apt-repo" => cx.apt_repo(),
         "verify" => cx.verify(),
         "macos" => cx.macos(),
-        "manifest" => cx.manifest(windows, macos),
-        "publish" => cx.publish(windows, macos, dry_run),
+        "manifest" => cx.manifest(extras),
+        "publish" => cx.publish(extras, dry_run),
         "check" => cx.check(),
         "linux" => {
             cx.stage()?;

@@ -25,8 +25,30 @@ pub(super) struct Asset {
     pub zsync: Option<String>,
 }
 
-/// The installers of a release, in manifest order. Windows and macOS files go along only when asked for (built and verified in the same run).
-pub(super) fn assets(ver: &str, windows: bool, macos: bool) -> Vec<Asset> {
+/// The optional files of a release (the deb, rpm and AppImage are always there). Each goes along only when asked for, which says it was built
+/// and verified in the same run.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Extras {
+    /// The Setup.exe and the portable zip (`--windows`).
+    pub windows: bool,
+    /// The macOS dmg (`--macos`).
+    pub macos: bool,
+    /// The Flatpak bundle (`--flatpak`).
+    pub flatpak: bool,
+    /// The web app zip (`--web`).
+    pub web: bool,
+    /// The Linux tarball (`--tarball`).
+    pub tarball: bool,
+}
+
+impl Extras {
+    /// Everything `--all` names.
+    pub(super) const ALL: Extras =
+        Extras { windows: true, macos: true, flatpak: true, web: true, tarball: true };
+}
+
+/// The files of a release, in manifest order.
+pub(super) fn assets(ver: &str, x: Extras) -> Vec<Asset> {
     let mut v = vec![
         Asset {
             key: "linux-appimage",
@@ -50,7 +72,25 @@ pub(super) fn assets(ver: &str, windows: bool, macos: bool) -> Vec<Asset> {
             zsync: None,
         },
     ];
-    if windows {
+    if x.tarball {
+        v.push(Asset {
+            key: "linux-tarball",
+            arch: "x86_64",
+            name: format!("rusty-wave-{ver}-linux-x86_64.tar.gz"),
+            alias: "rusty-wave-latest-linux-x86_64.tar.gz".into(),
+            zsync: None,
+        });
+    }
+    if x.flatpak {
+        v.push(Asset {
+            key: "linux-flatpak",
+            arch: "x86_64",
+            name: format!("io.github.idometeor.RustyWave-{ver}.flatpak"),
+            alias: "io.github.idometeor.RustyWave-latest.flatpak".into(),
+            zsync: None,
+        });
+    }
+    if x.windows {
         v.push(Asset {
             key: "windows-installer",
             arch: "x64",
@@ -66,7 +106,16 @@ pub(super) fn assets(ver: &str, windows: bool, macos: bool) -> Vec<Asset> {
             zsync: None,
         });
     }
-    if macos {
+    if x.web {
+        v.push(Asset {
+            key: "web-pwa",
+            arch: "any",
+            name: format!("rusty-wave-web-{ver}.zip"),
+            alias: "rusty-wave-web-latest.zip".into(),
+            zsync: None,
+        });
+    }
+    if x.macos {
         v.push(Asset {
             key: "macos-dmg",
             arch: "universal",
@@ -215,9 +264,10 @@ impl Ctx {
         Ok(path)
     }
 
-    /// `dist manifest [--base-url U] [--windows] [--macos]`: the manifest of what is built in `target/dist/release`.
-    pub(super) fn manifest(&self, windows: bool, macos: bool) -> Result<(), String> {
-        let list = assets(&self.version, windows, macos);
+    /// `dist manifest [--base-url U] [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all]`: the manifest of what is built in
+    /// `target/dist/release`.
+    pub(super) fn manifest(&self, x: Extras) -> Result<(), String> {
+        let list = assets(&self.version, x);
         let path = self.write_manifest(&self.out(), &list, false, &self.base_url())?;
         print!("{}", fs::read_to_string(&path).map_err(|e| e.to_string())?);
         println!("{}", path.display());
@@ -288,16 +338,28 @@ mod tests {
 
     #[test]
     fn assets_cover_the_aliases_and_optional_platforms() {
-        let base = assets("0.0.3", false, false);
+        let base = assets("0.0.3", Extras::default());
         let keys: Vec<_> = base.iter().map(|a| a.key).collect();
         assert_eq!(keys, ["linux-appimage", "linux-deb", "linux-rpm"]);
         assert_eq!(base[0].alias, "rusty-wave-latest-x86_64.AppImage");
         assert_eq!(base[0].zsync.as_deref(), Some("rusty-wave-0.0.3-x86_64.AppImage.zsync"));
         assert_eq!(base[1].alias, "rusty-wave-latest_amd64.deb");
         assert_eq!(base[2].alias, "rusty-wave-latest-1.x86_64.rpm");
-        let all = assets("0.0.3", true, true);
+        let all = assets("0.0.3", Extras::ALL);
         let keys: Vec<_> = all.iter().map(|a| a.key).collect();
-        assert_eq!(keys[3..], ["windows-installer", "windows-portable", "macos-dmg"]);
+        assert_eq!(
+            keys[3..],
+            [
+                "linux-tarball",
+                "linux-flatpak",
+                "windows-installer",
+                "windows-portable",
+                "web-pwa",
+                "macos-dmg"
+            ]
+        );
+        assert_eq!(all[4].name, "io.github.idometeor.RustyWave-0.0.3.flatpak");
+        assert_eq!(all[7].name, "rusty-wave-web-0.0.3.zip");
         // An alias never carries a version, a versioned name always does.
         assert!(all.iter().all(|a| a.alias.contains("latest") && a.name.contains("0.0.3")));
         // Aliases are distinct, so no two files fight for one alias.

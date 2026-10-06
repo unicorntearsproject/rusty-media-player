@@ -291,6 +291,34 @@ impl Ctx {
                 check(format!("{name}.zsync matches {name}"), Err("missing (run `dist appimage`)".into()));
             }
         }
+        // The files of the other platforms: signed like the rest above, and each has to be what its name says.
+        for f in &names {
+            let name = f.file_name().unwrap().to_string_lossy().into_owned();
+            if name.ends_with(".dmg") {
+                // A UDIF disk image ends with a 512-byte trailer that starts with `koly`.
+                let r = fs::read(f).map_err(|e| e.to_string()).and_then(|b| {
+                    (b.len() > 512 && &b[b.len() - 512..b.len() - 508] == b"koly")
+                        .then_some(())
+                        .ok_or_else(|| "no UDIF `koly` trailer: not a disk image".to_string())
+                });
+                check(format!("{name} is a disk image"), r);
+            } else if name.ends_with(".flatpak") {
+                // A bundle is an OSTree commit with the ref in its header.
+                let want = format!("app/{APP_ID}/x86_64/stable");
+                let r = fs::read(f).map_err(|e| e.to_string()).and_then(|b| {
+                    let w = want.as_bytes();
+                    b.windows(w.len())
+                        .any(|x| x == w)
+                        .then_some(())
+                        .ok_or_else(|| format!("the bundle does not name the ref {want}"))
+                });
+                check(format!("{name} is a bundle of {want}"), r);
+            } else if name.ends_with(".zip") {
+                let script = "import sys,zipfile; bad=zipfile.ZipFile(sys.argv[1]).testzip(); sys.exit(f'corrupt member {bad}' if bad else 0)";
+                let r = capture(Command::new("python3").args(["-c", script]).arg(f));
+                check(format!("{name} is an intact zip"), r.map(|_| ()));
+            }
+        }
         // apt repo: InRelease (clearsigned) and Release.gpg (detached), and the hashes they cover.
         let apt = self.dist().join("apt-repo/dists/stable");
         if apt.join("Release").exists() {

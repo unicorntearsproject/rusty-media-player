@@ -17,8 +17,8 @@ Rusty Wave ships as a native desktop app (Linux and Windows; macOS in beta) and 
 | PWA | `dist pwa` | `cargo xtask web` prerequisites | `rusty-wave-web-<ver>.zip` |
 | Signed apt repo | `dist apt-repo --sign` | gpg | `target/dist/apt-repo/` |
 | Checksums, signatures | `dist checksums [--sign]` | gpg for `--sign` | `SHA256SUMS` (+ `.asc` files); `dist verify` checks them |
-| Update manifest | `dist manifest [--base-url U] [--windows] [--macos] [--sign]` | the built files in `target/dist/release` | `rusty-wave-latest.json` (+ `.asc` with `--sign`), for the in-app updater |
-| Publish | `dist publish --sign [--windows] [--macos] [--dry-run]` | the signed, verified deb, rpm and AppImage (and `.zsync`) in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root), then the `latest` aliases and the manifest |
+| Update manifest | `dist manifest [--base-url U] [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--sign]` | the built files in `target/dist/release` | `rusty-wave-latest.json` (+ `.asc` with `--sign`), for the in-app updater |
+| Publish | `dist publish --sign [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--dry-run]` | the signed, verified deb, rpm and AppImage (and `.zsync`) in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root), then the `latest` aliases and the manifest |
 
 `cargo xtask dist check` validates the metadata without building (desktop file, AppStream, man page, that the media types agree between the
 `.desktop` file and the AppStream file, that the Windows installer registers the main extensions). `linux` runs stage to flatpak, `all`
@@ -57,6 +57,9 @@ per file): if any *versioned* file of this version exists in either, it stops be
 | `rusty-wave-latest_amd64.deb`, `rusty-wave-latest-1.x86_64.rpm` (+ `.asc`) | the deb, the rpm |
 | `rusty-wave-latest-x64-Setup.exe`, `rusty-wave-latest-windows-x64.zip` (+ `.asc`) | with `--windows` |
 | `rusty-wave-latest-macos-universal.dmg` (+ `.asc`) | with `--macos` |
+| `io.github.idometeor.RustyWave-latest.flatpak` (+ `.asc`) | the Flatpak bundle, with `--flatpak` |
+| `rusty-wave-web-latest.zip` (+ `.asc`) | the web app zip, with `--web` |
+| `rusty-wave-latest-linux-x86_64.tar.gz` (+ `.asc`) | the Linux tarball, with `--tarball` |
 | `rusty-wave-latest.json` (+ `.asc`, content type `application/json`) | the update manifest, below |
 
 **AppImage delta updates.** `dist appimage` embeds the update information `zsync|<base>/rusty-wave-latest-x86_64.AppImage.zsync` (appimagetool `-u`; AppImageUpdate
@@ -73,7 +76,7 @@ stable alias:
   "files": { "linux-appimage": { "arch": "x86_64", "name": "rusty-wave-0.0.3-x86_64.AppImage", "url": "<base>/rusty-wave-0.0.3-x86_64.AppImage",
              "size": 123, "sha256": "<hex>", "signature_url": "<base>/rusty-wave-0.0.3-x86_64.AppImage.asc",
              "zsync_url": "<base>/rusty-wave-latest-x86_64.AppImage.zsync" },
-             "linux-deb": { "arch": "amd64", "...": "same keys without zsync_url" }, "linux-rpm": {}, "windows-installer": {}, "windows-portable": {}, "macos-dmg": {} } }
+             "linux-deb": { "arch": "amd64", "...": "same keys without zsync_url" }, "linux-rpm": {}, "linux-tarball": {}, "linux-flatpak": {}, "windows-installer": {}, "windows-portable": {}, "web-pwa": {}, "macos-dmg": {} } }
 ```
 
 `--base-url` (an `https://` URL or `file:///path`) changes `<base>` for `dist manifest` and for the update information `dist appimage` embeds, for local update tests
