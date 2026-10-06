@@ -2030,7 +2030,7 @@ impl Ui {
             Btn::Shuffle => (Icon::Shuffle, model.shuffle),
             Btn::Prev => (Icon::SkipBack, false),
             Btn::Next => (Icon::SkipForward, false),
-            Btn::Repeat => (if model.repeat == 2 { Icon::Repeat1 } else { Icon::Repeat }, model.repeat != 0),
+            Btn::Repeat => (Icon::for_repeat(model.repeat), model.repeat != 0),
             Btn::Mute => (
                 if model.muted || model.volume <= 0.0 {
                     Icon::VolumeX
@@ -2097,18 +2097,13 @@ impl Ui {
             Btn::Play => (if model.state.is_active() { "Pause" } else { "Play" }, "Space"),
             Btn::Prev => ("Previous", "P"),
             Btn::Next => ("Next", "N"),
-            Btn::Shuffle => (if model.shuffle { "Shuffle: on" } else { "Shuffle: off" }, "Z"),
-            Btn::Repeat => (
-                match model.repeat {
-                    1 => "Repeat: all",
-                    2 => "Repeat: one",
-                    _ => "Repeat: off",
-                },
-                "R",
-            ),
+            Btn::Shuffle => (model.shuffle_label(), "Z"),
+            Btn::Repeat => (model.repeat_label(), "R"),
             Btn::Mute => (if model.muted { "Unmute" } else { "Mute" }, "M"),
             Btn::QueueView => ("Queue", "5"),
-            Btn::VizView => ("Visualizer", "V"),
+            Btn::VizView => {
+                (if self.lib.view == View::Visualizer { "Leave visualizer" } else { "Visualizer" }, "V")
+            }
             Btn::ModeSwitch => ("Player", "B"),
             _ => return,
         };

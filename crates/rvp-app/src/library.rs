@@ -634,7 +634,8 @@ impl App {
                 self.lib_save_playlists(host);
                 self.ui.show_toast(&format!("Deleted {name}"), now);
                 if self.ui.lib_state().detail() == Some(rvp_ui::Detail::Playlist(id)) {
-                    self.ui.go_back();
+                    let ctx = Self::lib_ctx(&self.lib, None);
+                    self.ui.go_back(&self.model, &ctx);
                 }
             }
             LibAction::RenamePlaylist(id) => {

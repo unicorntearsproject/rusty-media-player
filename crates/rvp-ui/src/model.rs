@@ -133,6 +133,21 @@ pub struct UiModel {
 }
 
 impl UiModel {
+    /// What the repeat control says: `Repeat: off`, `Repeat: all` or `Repeat: one`. Every control that shows or names the repeat
+    /// mode (the buttons, their tooltips, the menus, the accessibility state) uses this, so they cannot disagree.
+    pub fn repeat_label(&self) -> &'static str {
+        match self.repeat {
+            1 => "Repeat: all",
+            2 => "Repeat: one",
+            _ => "Repeat: off",
+        }
+    }
+
+    /// What the shuffle control says: `Shuffle: on` or `Shuffle: off`.
+    pub fn shuffle_label(&self) -> &'static str {
+        if self.shuffle { "Shuffle: on" } else { "Shuffle: off" }
+    }
+
     /// True once a file is open (or opening).
     pub fn has_media(&self) -> bool {
         !matches!(self.state, MediaState::Idle)

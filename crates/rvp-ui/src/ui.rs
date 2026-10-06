@@ -63,9 +63,9 @@ pub enum Btn {
     Prev,
     /// Next track (library bar).
     Next,
-    /// Shuffle (library bar).
+    /// Shuffle (both bars).
     Shuffle,
-    /// Repeat (library bar).
+    /// Repeat: off, all, one (both bars).
     Repeat,
     /// The queue view (library bar).
     QueueView,
@@ -75,8 +75,12 @@ pub enum Btn {
     ModeSwitch,
 }
 
-/// Tab order of the transport bar.
-const FOCUS_ORDER: [Btn; 10] = [
+/// The player bar shows the shuffle and repeat buttons from this width (logical pixels) up: below it the time readout would
+/// run into them.
+pub(crate) const SHUFFLE_REPEAT_MIN_W: f32 = 800.0;
+
+/// Tab order of the transport bar (buttons the window is too narrow for are skipped).
+const FOCUS_ORDER: [Btn; 12] = [
     Btn::Play,
     Btn::Back,
     Btn::Fwd,
@@ -84,6 +88,8 @@ const FOCUS_ORDER: [Btn; 10] = [
     Btn::Speed,
     Btn::Tracks,
     Btn::Playlist,
+    Btn::Shuffle,
+    Btn::Repeat,
     Btn::Open,
     Btn::ModeSwitch,
     Btn::Fullscreen,
@@ -453,6 +459,13 @@ impl Ui {
         rx -= b + 2.0 * s;
         l.buttons.push((Btn::Playlist, RectF::new(rx - b, cy - b * 0.5, b, b)));
         rx -= b + 2.0 * s;
+        // Shuffle and repeat are the first to go when the window narrows (the keys Z and R and the menus stay).
+        if w >= SHUFFLE_REPEAT_MIN_W * s {
+            l.buttons.push((Btn::Repeat, RectF::new(rx - b, cy - b * 0.5, b, b)));
+            rx -= b + 2.0 * s;
+            l.buttons.push((Btn::Shuffle, RectF::new(rx - b, cy - b * 0.5, b, b)));
+            rx -= b + 2.0 * s;
+        }
         l.buttons.push((Btn::ModeSwitch, RectF::new(rx - b, cy - b * 0.5, b, b)));
         rx -= b + 6.0 * s;
         let pw = 56.0 * s;
@@ -825,7 +838,9 @@ impl Ui {
             }
             Btn::Playlist => self.open_playlist_popup(model),
             Btn::ModeSwitch => out.push(Action::SetMode(crate::lib_ui::Mode::Library)),
-            Btn::Prev | Btn::Next | Btn::Shuffle | Btn::Repeat | Btn::QueueView | Btn::VizView => {}
+            Btn::Shuffle => out.push(Action::ToggleShuffle),
+            Btn::Repeat => out.push(Action::CycleRepeat),
+            Btn::Prev | Btn::Next | Btn::QueueView | Btn::VizView => {}
         }
     }
 
@@ -930,8 +945,12 @@ impl Ui {
     }
 
     fn cycle_focus(&mut self, back: bool, model: &UiModel) {
-        let order: Vec<Btn> =
-            if model.has_media() { FOCUS_ORDER.to_vec() } else { alloc::vec![Btn::Welcome] };
+        let l = self.layout(model);
+        let order: Vec<Btn> = if model.has_media() {
+            FOCUS_ORDER.iter().copied().filter(|b| l.rect_of(*b).is_some()).collect()
+        } else {
+            alloc::vec![Btn::Welcome]
+        };
         let cur = self.focus.and_then(|f| order.iter().position(|b| *b == f));
         let n = order.len();
         // Tabbing past either end leaves the player so keyboard users are not trapped in the canvas.
@@ -1330,6 +1349,107 @@ mod tests {
             ),
             [Action::OpenFile]
         );
+    }
+
+    #[test]
+    fn the_player_bar_has_shuffle_and_repeat_that_act_and_say_their_state() {
+        let mut ui = Ui::default();
+        let mut m = media();
+        let l = ui.layout(&m);
+        for (b, a) in [(Btn::Shuffle, Action::ToggleShuffle), (Btn::Repeat, Action::CycleRepeat)] {
+            let r = l.rect_of(b).expect("shown at the default size");
+            assert_eq!(click(&mut ui, r.cx(), r.cy(), &m, 1_000_000), [a], "{b:?}");
+        }
+        // Tooltips name the state and the key, from the same text as the menus.
+        let tip = |ui: &Ui, b: Btn, m: &UiModel| ui.tooltip_text(Target::Btn(b), m).unwrap();
+        assert_eq!(tip(&ui, Btn::Shuffle, &m), ("Shuffle: off".into(), "Z"));
+        assert_eq!(tip(&ui, Btn::Repeat, &m), ("Repeat: off".into(), "R"));
+        m.shuffle = true;
+        m.repeat = 1;
+        assert_eq!(tip(&ui, Btn::Shuffle, &m), ("Shuffle: on".into(), "Z"));
+        assert_eq!(tip(&ui, Btn::Repeat, &m), ("Repeat: all".into(), "R"));
+        m.repeat = 2;
+        assert_eq!(tip(&ui, Btn::Repeat, &m).0, "Repeat: one");
+        let menu = actions::playlist_menu(&m);
+        let label = |a: Action| menu.iter().find(|i| i.action == Some(a)).unwrap().label.clone();
+        assert_eq!(label(Action::CycleRepeat), m.repeat_label());
+        assert_eq!(label(Action::ToggleShuffle), m.shuffle_label());
+        // The keys are the same actions the buttons send.
+        for (k, a) in [('z', Action::ToggleShuffle), ('r', Action::CycleRepeat)] {
+            let out = ui.handle(
+                &InputEvent::KeyDown { key: Key::Char(k), mods: Modifiers::default(), repeat: false },
+                5_000_000,
+                &m,
+            );
+            assert_eq!(out, [a]);
+        }
+        // Tab reaches them, between the playlist and the open button, and Enter acts.
+        ui.focus = Some(Btn::Playlist);
+        ui.cycle_focus(false, &m);
+        assert_eq!(ui.focus, Some(Btn::Shuffle));
+        ui.cycle_focus(false, &m);
+        assert_eq!(ui.focus, Some(Btn::Repeat));
+        let out = ui.handle(
+            &InputEvent::KeyDown { key: Key::Enter, mods: Modifiers::default(), repeat: false },
+            6_000_000,
+            &m,
+        );
+        assert_eq!(out, [Action::CycleRepeat]);
+    }
+
+    #[test]
+    fn the_repeat_modes_have_three_different_icons() {
+        use crate::icon::Icon;
+        let all: Vec<Icon> = (0..3).map(Icon::for_repeat).collect();
+        assert_eq!(all, [Icon::RepeatOff, Icon::Repeat, Icon::Repeat1]);
+        let mut fb = crate::gfx::FrameBuffer::new(24, 24);
+        let mut cache = crate::icon::IconCache::new();
+        let mut shots = Vec::new();
+        for ic in all {
+            fb.clear(theme::Rgba::new(0, 0, 0, 255));
+            cache.draw(&mut fb, ic, 12.0, 12.0, 24.0, theme::Rgba::new(255, 255, 255, 255), 1.0, false);
+            assert!(fb.pixels.iter().any(|&b| b > 0 && b < 255), "{ic:?} draws");
+            shots.push(fb.pixels.clone());
+        }
+        assert!(shots[0] != shots[1] && shots[1] != shots[2] && shots[0] != shots[2]);
+    }
+
+    #[test]
+    fn shuffle_and_repeat_give_way_when_the_window_narrows_and_nothing_overlaps() {
+        let m = media();
+        for dpr in [1.0f32, 2.0] {
+            for w in (480..=2400).step_by(40) {
+                let mut ui = Ui::default();
+                ui.set_size((w as f32 * dpr) as u32, (720.0 * dpr) as u32, dpr);
+                let l = ui.layout(&m);
+                let shown = l.rect_of(Btn::Shuffle).is_some();
+                assert_eq!(shown, l.rect_of(Btn::Repeat).is_some());
+                assert_eq!(shown, w as f32 >= SHUFFLE_REPEAT_MIN_W, "{w} @ {dpr}");
+                // Every button lies inside the window and none covers another or the time readout.
+                for (i, (b, r)) in l.buttons.iter().enumerate() {
+                    assert!(r.x >= 0.0 && r.right() <= l.w, "{b:?} at {w}");
+                    for (b2, r2) in &l.buttons[i + 1..] {
+                        let apart = r.right() <= r2.x + 0.01 || r2.right() <= r.x + 0.01;
+                        assert!(apart, "{b:?} overlaps {b2:?} at {w} @ {dpr}");
+                    }
+                }
+                if shown {
+                    // Room for "59:59 / 59:59" (13 characters of 13 px mono) before the first button of the right group.
+                    let first_right = l.rect_of(Btn::Speed).unwrap().x; // the right group's leftmost control
+                    assert!(
+                        first_right - l.time_x >= 13.0 * 7.9 * dpr,
+                        "{w} @ {dpr}: {}",
+                        first_right - l.time_x
+                    );
+                }
+            }
+        }
+        // Without them Tab skips them.
+        let mut ui = Ui::default();
+        ui.set_size(640, 360, 1.0);
+        ui.focus = Some(Btn::Playlist);
+        ui.cycle_focus(false, &m);
+        assert_eq!(ui.focus, Some(Btn::Open));
     }
 
     #[test]

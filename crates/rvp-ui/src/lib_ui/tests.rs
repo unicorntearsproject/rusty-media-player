@@ -527,8 +527,220 @@ fn visualizer_keys_step_effects_and_leave() {
         r.key_mod(Key::Right, Modifiers { ctrl: true, ..Default::default() }),
         [Action::SeekBy(5_000)]
     );
+    // Escape goes back to where the visualizer was opened from.
     r.key(Key::Escape);
-    assert_eq!(r.ui.lib_state().view(), View::NowPlaying);
+    assert_eq!(r.ui.lib_state().view(), View::Albums);
+}
+
+impl Rig {
+    /// What the app does for the visualizer's button and key.
+    fn toggle_viz(&mut self) {
+        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None };
+        self.ui.toggle_visualizer(&self.m, &ctx);
+    }
+
+    fn go_back(&mut self) {
+        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None };
+        self.ui.go_back(&self.m, &ctx);
+    }
+
+    /// Click the bar's visualizer button (the bar is drawn first, so the floating bar of the visualizer is up).
+    fn click_viz_button(&mut self) {
+        self.draw();
+        let ctx = LibCtx { lib: &self.lib, now_art: None, scan: None, viz: None, video: None };
+        let g = self.ui.lib_geom(&self.m, &ctx);
+        let (x, y) = center(g.bar_btns.iter().find(|(b, _)| *b == crate::ui::Btn::VizView).unwrap().1);
+        let out = self.click(x, y);
+        // The click itself changes the view; nothing is left for the app to do.
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    /// The place the visualizer would return to (the invariant: it is set exactly while the visualizer is the view).
+    fn viz_return(&self) -> Option<(Mode, View)> {
+        let l = self.ui.lib_state();
+        assert_eq!(l.viz_return.is_some(), l.view() == View::Visualizer, "stale or missing viz_return");
+        l.viz_return.as_ref().map(|v| (v.mode, v.nav.view))
+    }
+}
+
+#[test]
+fn the_visualizer_returns_to_the_place_it_was_opened_from_by_every_way_in_and_out() {
+    // Ways in: the digit key, the bar's button, the toggle (key V and the menus), the view action.
+    // Ways out: Escape, Backspace, the button, the toggle, Back.
+    let ins: [fn(&mut Rig); 4] = [
+        |r| {
+            r.key(Key::Char('7'));
+        },
+        |r| r.click_viz_button(),
+        |r| r.toggle_viz(),
+        |r| r.ui.show_view(View::Visualizer),
+    ];
+    let outs: [fn(&mut Rig); 5] = [
+        |r| {
+            r.key(Key::Escape);
+        },
+        |r| {
+            r.key(Key::Other("Backspace".into()));
+        },
+        |r| r.click_viz_button(),
+        |r| r.toggle_viz(),
+        |r| r.go_back(),
+    ];
+    for (i, enter) in ins.iter().enumerate() {
+        for (o, leave) in outs.iter().enumerate() {
+            let mut r = Rig::new();
+            r.m = playing_model(&r.lib);
+            // From an album opened from the artists list, with a row selected.
+            r.ui.show_view(View::Artists);
+            let artist = r.lib.artists()[1].id;
+            r.ui.open_detail(Detail::Artist(artist));
+            let album = r.lib.albums().iter().find(|a| a.artist_id == artist).unwrap().id;
+            r.ui.open_detail(Detail::Album(album));
+            r.ui.lib.sel = Some(2);
+            enter(&mut r);
+            assert_eq!(r.viz_return(), Some((Mode::Library, View::Artists)), "in {i}");
+            assert_eq!(r.ui.lib_state().detail(), None);
+            leave(&mut r);
+            let l = r.ui.lib_state();
+            assert_eq!(l.mode(), Mode::Library, "in {i} out {o}");
+            assert_eq!((l.view(), l.detail()), (View::Artists, Some(Detail::Album(album))), "in {i} out {o}");
+            assert_eq!(l.selected(), Some(2), "in {i} out {o}");
+            assert_eq!(r.viz_return(), None);
+            // And Back from the album still walks up to the artist, as before.
+            r.go_back();
+            assert_eq!(r.ui.lib_state().detail(), Some(Detail::Artist(artist)), "in {i} out {o}");
+        }
+    }
+}
+
+#[test]
+fn the_visualizer_returns_to_each_kind_of_view_and_to_the_player_face() {
+    for v in [View::Albums, View::Tracks, View::Playlists, View::Queue, View::NowPlaying, View::Search] {
+        let mut r = Rig::new();
+        r.m = playing_model(&r.lib);
+        r.ui.show_view(v);
+        if v == View::Search {
+            r.typed("track");
+        }
+        let q = String::from(r.ui.lib_state().query());
+        r.toggle_viz();
+        assert_eq!(r.ui.lib_state().view(), View::Visualizer);
+        r.toggle_viz();
+        assert_eq!(r.ui.lib_state().view(), v, "{v:?}");
+        assert_eq!(r.ui.lib_state().query(), q);
+        assert_eq!(r.viz_return(), None);
+    }
+    // The scroll position and the selection come back too.
+    let mut r = Rig::new();
+    r.ui.show_view(View::Tracks);
+    r.ents();
+    r.ui.lib.scroll = 300.0;
+    r.ui.lib.sel = Some(9);
+    r.toggle_viz();
+    r.toggle_viz();
+    assert_eq!((r.ui.lib_state().scroll, r.ui.lib_state().selected()), (300.0, Some(9)));
+    // From the Player face: the visualizer opens in the library face and leaves back to the player.
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    r.m.has_video = true;
+    r.ui.set_mode(Mode::Player);
+    r.toggle_viz();
+    assert_eq!((r.ui.mode(), r.ui.lib_state().view()), (Mode::Library, View::Visualizer));
+    assert_eq!(r.viz_return(), Some((Mode::Player, View::Albums)));
+    r.key(Key::Escape);
+    assert_eq!((r.ui.mode(), r.ui.lib_state().view()), (Mode::Player, View::Albums));
+    assert_eq!(r.viz_return(), None);
+}
+
+#[test]
+fn entering_the_visualizer_again_keeps_the_first_place_and_other_exits_leave_no_stale_state() {
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    r.ui.show_view(View::Queue);
+    r.ui.show_view(View::Visualizer);
+    r.ui.show_view(View::Visualizer);
+    r.key(Key::Char('7'));
+    assert_eq!(r.viz_return(), Some((Mode::Library, View::Queue)));
+    r.key(Key::Escape);
+    assert_eq!(r.ui.lib_state().view(), View::Queue, "not the visualizer itself");
+    // Going to another view from the visualizer forgets the remembered one: the next visit remembers the new place.
+    r.ui.show_view(View::Visualizer);
+    r.key(Key::Char('3'));
+    assert_eq!(r.ui.lib_state().view(), View::Tracks);
+    assert_eq!(r.viz_return(), None);
+    r.toggle_viz();
+    r.toggle_viz();
+    assert_eq!(r.ui.lib_state().view(), View::Tracks);
+    // Opening an album from it (or any other detail) forgets it too.
+    r.ui.show_view(View::Visualizer);
+    r.ui.open_detail(Detail::Album(r.lib.albums()[0].id));
+    assert_eq!(r.viz_return(), None);
+    // The player face, B and back: the visualizer stays the library's view and still knows where it came from.
+    r.ui.show_view(View::Albums);
+    r.ui.show_view(View::Visualizer);
+    r.ui.set_mode(Mode::Player);
+    assert_eq!(r.viz_return(), Some((Mode::Library, View::Albums)));
+    r.ui.set_mode(Mode::Library);
+    r.key(Key::Escape);
+    assert_eq!(r.ui.lib_state().view(), View::Albums);
+    // Opened from the player (a second time over a visualizer hidden behind it): it remembers the player, not itself.
+    r.ui.show_view(View::Visualizer);
+    r.ui.set_mode(Mode::Player);
+    r.toggle_viz();
+    assert_eq!(r.viz_return(), Some((Mode::Player, View::Albums)));
+}
+
+#[test]
+fn when_the_place_is_gone_the_visualizer_falls_back_to_the_player_or_the_library_home() {
+    // An album that was removed: the list it was opened from stays.
+    let mut r = Rig::new();
+    r.ui.show_view(View::Albums);
+    r.ui.open_detail(Detail::Album(r.lib.albums()[0].id));
+    r.toggle_viz();
+    r.lib = Library::new();
+    r.key(Key::Escape);
+    assert_eq!((r.ui.lib_state().view(), r.ui.lib_state().detail()), (View::Albums, None));
+    // A playlist that was deleted: the list it was opened from stays, and Back has nothing stale to walk to.
+    let mut r = Rig::new();
+    r.ui.show_view(View::Playlists);
+    let id = r.lib.create_playlist("Mix");
+    r.ui.open_detail(Detail::Playlist(id));
+    r.toggle_viz();
+    r.lib.delete_playlist(id);
+    r.toggle_viz();
+    assert_eq!((r.ui.lib_state().view(), r.ui.lib_state().detail()), (View::Playlists, None));
+    r.go_back(); // nothing stale left to walk back to
+    assert_eq!(r.ui.lib_state().view(), View::Playlists);
+    // The queue was emptied and nothing is loaded: the library's home.
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    r.ui.show_view(View::Queue);
+    r.toggle_viz();
+    r.m = model();
+    r.toggle_viz();
+    assert_eq!((r.ui.mode(), r.ui.lib_state().view()), (Mode::Library, View::Albums));
+    // The queue was emptied while a video is loaded: the player.
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    r.ui.show_view(View::Queue);
+    r.toggle_viz();
+    r.m.playlist = Default::default();
+    r.m.has_video = true;
+    r.toggle_viz();
+    assert_eq!(r.ui.mode(), Mode::Player);
+    // Came from the player, which has nothing loaded any more: the library's home.
+    let mut r = Rig::new();
+    r.m = playing_model(&r.lib);
+    r.ui.set_mode(Mode::Player);
+    r.toggle_viz();
+    r.m = model();
+    r.toggle_viz();
+    assert_eq!((r.ui.mode(), r.ui.lib_state().view()), (Mode::Library, View::Albums));
+    // No remembered place at all (the visualizer was the view from the start): home.
+    let mut r = Rig::new();
+    r.ui.lib.view = View::Visualizer;
+    r.go_back();
+    assert_eq!(r.ui.lib_state().view(), View::Albums);
 }
 
 #[test]

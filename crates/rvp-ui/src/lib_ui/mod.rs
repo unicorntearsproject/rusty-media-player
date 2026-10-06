@@ -279,12 +279,24 @@ pub(crate) struct NavEntry {
     pub sel: Option<usize>,
 }
 
+/// Where the visualizer returns to: the face and the library place the user came from.
+#[derive(Debug, Clone)]
+pub(crate) struct VizReturn {
+    pub mode: Mode,
+    pub nav: NavEntry,
+    pub history: Vec<NavEntry>,
+    pub query: String,
+    pub before_search: Option<(View, Option<Detail>)>,
+}
+
 /// The library mode's share of the UI state.
 pub struct LibUi {
     pub(crate) mode: Mode,
     pub(crate) view: View,
     pub(crate) detail: Option<Detail>,
     pub(crate) history: Vec<NavEntry>,
+    /// Where leaving the visualizer goes. Set while the visualizer is the view (and only then).
+    pub(crate) viz_return: Option<VizReturn>,
     pub(crate) query: String,
     pub(crate) track_sort: TrackSort,
     pub(crate) track_asc: bool,
@@ -328,6 +340,7 @@ impl Default for LibUi {
             view: View::Albums,
             detail: None,
             history: Vec::new(),
+            viz_return: None,
             query: String::new(),
             track_sort: TrackSort::Title,
             track_asc: true,

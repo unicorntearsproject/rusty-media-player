@@ -101,6 +101,14 @@ pub const SHUFFLE: &[&str] = &[
 ];
 pub const REPEAT: &[&str] =
     &["m17 2 4 4-4 4", "M3 11v-1a4 4 0 0 1 4-4h14", "m7 22-4-4 4-4", "M21 13v1a4 4 0 0 1-4 4H3"];
+/// Repeat with a slash through it (repeat off), in the style of Lucide's "-off" icons.
+pub const REPEAT_OFF: &[&str] = &[
+    "m17 2 4 4-4 4",
+    "M3 11v-1a4 4 0 0 1 4-4h14",
+    "m7 22-4-4 4-4",
+    "M21 13v1a4 4 0 0 1-4 4H3",
+    "m2 2 20 20",
+];
 pub const REPEAT_1: &[&str] = &[
     "m17 2 4 4-4 4",
     "M3 11v-1a4 4 0 0 1 4-4h14",

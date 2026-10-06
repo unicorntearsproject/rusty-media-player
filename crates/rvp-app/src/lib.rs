@@ -1054,7 +1054,14 @@ impl App {
             }
             Action::ShowView(v) => self.ui.show_view(v),
             Action::OpenDetail(d) => self.ui.open_detail(d),
-            Action::GoBack => self.ui.go_back(),
+            Action::GoBack => {
+                let ctx = Self::lib_ctx(&self.lib, None);
+                self.ui.go_back(&self.model, &ctx);
+            }
+            Action::ToggleVisualizer => {
+                let ctx = Self::lib_ctx(&self.lib, None);
+                self.ui.toggle_visualizer(&self.model, &ctx);
+            }
             Action::Lib(a) => self.apply_lib(host, a, now),
             Action::ShowAudioSettings => self.ui.open_audio_settings(),
             Action::SetCrossfade(on) => {

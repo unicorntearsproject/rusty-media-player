@@ -56,6 +56,14 @@ impl Ui {
             l.sel.map_or("null".into(), |s| s.to_string()),
             l.scroll
         );
+        j += &match &l.viz_return {
+            Some(r) => format!(
+                "\"viz_return\":{{\"mode\":\"{}\",\"view\":\"{}\"}},",
+                if r.mode == Mode::Player { "player" } else { "library" },
+                view_name(r.nav.view)
+            ),
+            None => "\"viz_return\":null,".into(),
+        };
         j += &match l.detail {
             Some(Detail::Album(id)) => format!("\"detail\":{{\"kind\":\"album\",\"id\":{id}}},"),
             Some(Detail::Artist(id)) => format!("\"detail\":{{\"kind\":\"artist\",\"id\":{id}}},"),

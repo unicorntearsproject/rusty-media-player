@@ -5,7 +5,7 @@ use super::menus;
 use super::rows::{EntKind, RowKind};
 use super::{
     Detail, Enqueue, LibAction, LibCtx, LibDrag, LibHit, Mode, NavEntry, Prompt, PromptKind, Scope,
-    UiCommand, View, Zone, rows_key,
+    UiCommand, View, VizReturn, Zone, rows_key,
 };
 use crate::actions::{Action, MenuItem, shortcut_for};
 use crate::gfx::RectF;
@@ -14,6 +14,11 @@ use crate::ui::{Btn, DOUBLE_CLICK_US, Ui};
 use alloc::string::String;
 use alloc::vec::Vec;
 use rvp_host::{InputEvent, Key, Modifiers, PointerButton};
+
+/// The library's home: the album grid, at the top.
+fn home_nav() -> NavEntry {
+    NavEntry { view: View::Albums, detail: None, scroll: 0.0, sel: None }
+}
 
 /// The views the digit keys go to.
 const DIGITS: [View; 7] = [
@@ -52,6 +57,15 @@ impl Ui {
 
     /// Show a view (switching to the Library face). Opening Search focuses its box.
     pub fn show_view(&mut self, view: View) {
+        if view == View::Visualizer {
+            if self.lib.mode == Mode::Library && self.lib.view == View::Visualizer {
+                // Already there: the way out stays where the user came from, not the visualizer itself.
+                return;
+            }
+            self.lib.viz_return = Some(self.capture_nav());
+        } else {
+            self.lib.viz_return = None;
+        }
         self.set_mode(Mode::Library);
         let prev = (self.lib.view, self.lib.detail);
         if view != View::Search && self.lib.view == View::Search && !self.lib.query.is_empty() {
@@ -71,8 +85,26 @@ impl Ui {
         self.dirty = true;
     }
 
+    /// Where the user is now, to come back to it after the visualizer.
+    fn capture_nav(&self) -> VizReturn {
+        let l = &self.lib;
+        // A visualizer left behind the player face is not a place to return to: use the library's home then.
+        let (nav, history, query, before_search) = if l.view == View::Visualizer {
+            (home_nav(), Vec::new(), String::new(), None)
+        } else {
+            (
+                NavEntry { view: l.view, detail: l.detail, scroll: l.scroll, sel: l.sel },
+                l.history.clone(),
+                l.query.clone(),
+                l.before_search,
+            )
+        };
+        VizReturn { mode: l.mode, nav, history, query, before_search }
+    }
+
     /// Open an album, an artist or a playlist, keeping the way back.
     pub fn open_detail(&mut self, d: Detail) {
+        self.lib.viz_return = None;
         self.set_mode(Mode::Library);
         let entry = NavEntry {
             view: self.lib.view,
@@ -95,8 +127,80 @@ impl Ui {
         self.dirty = true;
     }
 
-    /// One step back: out of an album or artist, or to the view that was open before.
-    pub fn go_back(&mut self) {
+    /// Leave the visualizer for the view it was entered from: the face, view, album, scroll position and selection the user
+    /// came from. When that place is gone (the album was removed, the queue emptied, nothing is loaded any more) it falls
+    /// back to the player if a video is loaded and to the library's home otherwise.
+    pub fn leave_visualizer(&mut self, model: &UiModel, ctx: &LibCtx<'_>) {
+        let ok = |d: Option<Detail>| match d {
+            None => true,
+            Some(Detail::Album(i)) => ctx.lib.album(i).is_some(),
+            Some(Detail::Artist(i)) => ctx.lib.artist(i).is_some(),
+            Some(Detail::Playlist(i)) => ctx.lib.playlist(i).is_some(),
+        };
+        let mut r = self.lib.viz_return.take().unwrap_or_else(|| VizReturn {
+            mode: Mode::Library,
+            nav: home_nav(),
+            history: Vec::new(),
+            query: String::new(),
+            before_search: None,
+        });
+        r.history.retain(|e| ok(e.detail));
+        if !ok(r.nav.detail) {
+            // The album is gone: stay in its list.
+            r.nav = NavEntry { detail: None, scroll: 0.0, sel: None, ..r.nav };
+        }
+        let gone = match (r.mode, r.nav.view) {
+            (Mode::Player, _) => !model.has_media(),
+            (_, View::Queue) => model.playlist.is_empty(),
+            (_, View::NowPlaying) => !model.has_media(),
+            _ => false,
+        };
+        if gone {
+            let mode = if model.has_media() && model.has_video { Mode::Player } else { Mode::Library };
+            r = VizReturn {
+                mode,
+                nav: home_nav(),
+                history: Vec::new(),
+                query: String::new(),
+                before_search: None,
+            };
+        }
+        self.menu.clear();
+        self.lib.view = r.nav.view;
+        self.lib.detail = r.nav.detail;
+        self.lib.scroll = r.nav.scroll;
+        self.lib.sel = r.nav.sel;
+        self.lib.history = r.history;
+        self.lib.query = r.query;
+        self.lib.before_search = r.before_search;
+        self.lib.zone = if r.nav.view == View::Search && self.lib.query.is_empty() {
+            Zone::Search
+        } else {
+            Zone::Content
+        };
+        self.lib.rows = None;
+        self.lib.hover = LibHit::None;
+        self.lib.drag = None;
+        self.set_mode(r.mode);
+        self.dirty = true;
+    }
+
+    /// The visualizer's button and key: open it, or leave it for where the user came from.
+    pub fn toggle_visualizer(&mut self, model: &UiModel, ctx: &LibCtx<'_>) {
+        if self.lib.mode == Mode::Library && self.lib.view == View::Visualizer {
+            self.leave_visualizer(model, ctx);
+        } else {
+            self.show_view(View::Visualizer);
+        }
+    }
+
+    /// One step back: out of an album or artist, or to the view that was open before; out of the visualizer to where it
+    /// was entered from.
+    pub fn go_back(&mut self, model: &UiModel, ctx: &LibCtx<'_>) {
+        if self.lib.view == View::Visualizer {
+            self.leave_visualizer(model, ctx);
+            return;
+        }
         if let Some(e) = self.lib.history.pop() {
             self.lib.view = e.view;
             self.lib.detail = e.detail;
@@ -108,9 +212,6 @@ impl Ui {
             self.lib.sel = None;
         } else if self.lib.view == View::Search {
             self.leave_search();
-        } else if self.lib.view == View::Visualizer {
-            self.show_view(View::NowPlaying);
-            return;
         }
         self.lib.rows = None;
         self.dirty = true;
@@ -626,7 +727,7 @@ impl Ui {
             }
             PointerButton::Back => {
                 self.menu.clear();
-                self.go_back();
+                self.go_back(model, ctx);
             }
             PointerButton::Forward => {
                 self.menu.clear();
@@ -764,7 +865,7 @@ impl Ui {
                     self.open_menu_at(items, x, y, None);
                 }
             }
-            LibHit::Back => self.go_back(),
+            LibHit::Back => self.go_back(model, ctx),
             LibHit::SearchClear => {
                 self.lib.query.clear();
                 self.query_changed();
@@ -782,7 +883,7 @@ impl Ui {
             }
             LibHit::SortCol(c) => self.sort_by_column(c),
             LibHit::Button(id) => self.activate_button(id, model, ctx, out),
-            LibHit::Bar(b) => self.activate_bar(b, out),
+            LibHit::Bar(b) => self.activate_bar(b, model, ctx, out),
             LibHit::BarInfo => self.show_view(View::NowPlaying),
             LibHit::Viz(i) => out.push(match i {
                 0 => Action::Lib(LibAction::VizStep(-1)),
@@ -899,7 +1000,7 @@ impl Ui {
                     7 => {
                         if let Detail::Playlist(p) = d {
                             out.push(Action::Lib(LibAction::DeletePlaylist(p)));
-                            self.go_back();
+                            self.go_back(model, ctx);
                         }
                     }
                     _ => {}
@@ -920,7 +1021,7 @@ impl Ui {
         let _ = model;
     }
 
-    fn activate_bar(&mut self, b: Btn, out: &mut Vec<Action>) {
+    fn activate_bar(&mut self, b: Btn, model: &UiModel, ctx: &LibCtx<'_>, out: &mut Vec<Action>) {
         match b {
             Btn::Play => out.push(Action::PlayPause),
             Btn::Prev => out.push(Action::Prev),
@@ -929,7 +1030,7 @@ impl Ui {
             Btn::Repeat => out.push(Action::CycleRepeat),
             Btn::Mute => out.push(Action::ToggleMute),
             Btn::QueueView => self.show_view(View::Queue),
-            Btn::VizView => self.show_view(View::Visualizer),
+            Btn::VizView => self.toggle_visualizer(model, ctx),
             Btn::ModeSwitch => out.push(Action::SetMode(Mode::Player)),
             _ => {}
         }
@@ -1089,7 +1190,7 @@ impl Ui {
                     || !self.lib.history.is_empty()
                     || view == View::Search
                 {
-                    self.go_back();
+                    self.go_back(model, ctx);
                 } else if self.lib.zone != Zone::Content {
                     self.lib.zone = Zone::Content;
                 } else if model.fullscreen {
@@ -1110,7 +1211,7 @@ impl Ui {
                 return;
             }
             Key::Other(n) if n == "Backspace" => {
-                self.go_back();
+                self.go_back(model, ctx);
                 return;
             }
             Key::Other(n) if n == "Tab" => {
@@ -1129,7 +1230,7 @@ impl Ui {
                 return;
             }
             Zone::Bar => {
-                self.bar_key(key, &g, out);
+                self.bar_key(key, &g, model, ctx, out);
                 return;
             }
             _ => {}
@@ -1357,7 +1458,7 @@ impl Ui {
         }
     }
 
-    fn bar_key(&mut self, key: &Key, g: &Geom, out: &mut Vec<Action>) {
+    fn bar_key(&mut self, key: &Key, g: &Geom, model: &UiModel, ctx: &LibCtx<'_>, out: &mut Vec<Action>) {
         let n = g.bar_btns.len().max(1);
         match key {
             Key::Right | Key::Down => self.lib.bar_focus = (self.lib.bar_focus + 1) % n,
@@ -1367,7 +1468,7 @@ impl Ui {
             Key::Enter | Key::Space => {
                 if let Some((b, _)) = g.bar_btns.get(self.lib.bar_focus) {
                     let b = *b;
-                    self.activate_bar(b, out);
+                    self.activate_bar(b, model, ctx, out);
                 }
             }
             _ => {}

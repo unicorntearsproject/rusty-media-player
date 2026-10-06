@@ -45,6 +45,7 @@ pub enum Icon {
     Shuffle,
     Repeat,
     Repeat1,
+    RepeatOff,
     Library,
     FolderPlus,
     Download,
@@ -68,6 +69,15 @@ pub enum Icon {
 }
 
 impl Icon {
+    /// The repeat button's icon for a mode (0 off, 1 all, 2 one): each state has its own.
+    pub fn for_repeat(mode: u8) -> Icon {
+        match mode {
+            1 => Icon::Repeat,
+            2 => Icon::Repeat1,
+            _ => Icon::RepeatOff,
+        }
+    }
+
     fn paths(self) -> &'static [&'static str] {
         match self {
             Icon::Play => d::PLAY,
@@ -103,6 +113,7 @@ impl Icon {
             Icon::Shuffle => d::SHUFFLE,
             Icon::Repeat => d::REPEAT,
             Icon::Repeat1 => d::REPEAT_1,
+            Icon::RepeatOff => d::REPEAT_OFF,
             Icon::Library => d::LIBRARY,
             Icon::FolderPlus => d::FOLDER_PLUS,
             Icon::Download => d::DOWNLOAD,

@@ -520,6 +520,8 @@ impl Ui {
                     Btn::Playlist => Icon::List,
                     Btn::Open => Icon::FolderOpen,
                     Btn::ModeSwitch => Icon::Music,
+                    Btn::Shuffle => Icon::Shuffle,
+                    Btn::Repeat => Icon::for_repeat(model.repeat),
                     Btn::Fullscreen => {
                         if model.fullscreen {
                             Icon::Minimize
@@ -529,10 +531,30 @@ impl Ui {
                     }
                     _ => Icon::Play,
                 };
-                let col = if hot { t::WHITE } else { t::TEXT_BODY };
+                // Shuffle and repeat light up when they are on; repeat's icon also says which mode.
+                let on = match b {
+                    Btn::Shuffle => model.shuffle,
+                    Btn::Repeat => model.repeat != 0,
+                    _ => false,
+                };
+                let col = if on {
+                    t::CYAN_500
+                } else if hot {
+                    t::WHITE
+                } else {
+                    t::TEXT_BODY
+                };
                 let tint =
                     if b == Btn::Mute && (model.muted || model.volume <= 0.0) { t::TEXT_DIM } else { col };
                 self.icon(fb, icon, rr.cx(), rr.cy(), 20.0, tint, a, false);
+                if on {
+                    fb.fill_rrect(
+                        RectF::new(rr.cx() - 2.0 * s, rr.bottom() - 4.0 * s, 4.0 * s, 4.0 * s),
+                        2.0 * s,
+                        Paint::Solid(t::CYAN_500),
+                        a,
+                    );
+                }
                 if focused {
                     self.focus_ring(fb, rr, 10.0 * s, a);
                 }
@@ -603,7 +625,7 @@ impl Ui {
         self.text(fb, Face::SansMedium, 14.0, r.x + 18.0 * s, r.cy(), &text, t::TEXT_STRONG, a, 0.0);
     }
 
-    fn tooltip_text(&self, target: Target, model: &UiModel) -> Option<(String, &'static str)> {
+    pub(crate) fn tooltip_text(&self, target: Target, model: &UiModel) -> Option<(String, &'static str)> {
         let b = match target {
             Target::Btn(b) => b,
             Target::Volume => {
@@ -625,13 +647,9 @@ impl Ui {
             Btn::Open => ("Open file", "O"),
             Btn::Fullscreen => (if model.fullscreen { "Leave fullscreen" } else { "Fullscreen" }, "F"),
             Btn::ModeSwitch => ("Library", "B"),
-            Btn::Welcome
-            | Btn::Prev
-            | Btn::Next
-            | Btn::Shuffle
-            | Btn::Repeat
-            | Btn::QueueView
-            | Btn::VizView => return None,
+            Btn::Shuffle => (model.shuffle_label(), "Z"),
+            Btn::Repeat => (model.repeat_label(), "R"),
+            Btn::Welcome | Btn::Prev | Btn::Next | Btn::QueueView | Btn::VizView => return None,
         };
         Some((label.into(), key))
     }

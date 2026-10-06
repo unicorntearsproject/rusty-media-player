@@ -96,6 +96,14 @@ impl App {
             m.loop_a.map_or("null".to_string(), |v| v.to_string()),
             m.loop_b.map_or("null".to_string(), |v| v.to_string()),
         );
+        // The accessible state of the two toggles, the same text on every face, tooltip and menu.
+        j += &format!(
+            "\"transport\":{{\"shuffle\":{{\"pressed\":{},\"label\":{}}},\"repeat\":{{\"state\":\"{}\",\"label\":{}}}}},",
+            m.shuffle,
+            esc(m.shuffle_label()),
+            ["off", "all", "one"][m.repeat.min(2) as usize],
+            esc(m.repeat_label()),
+        );
         j += &format!(
             "\"audio_tracks\":{},\"selected_audio\":{},\"subtitle_tracks\":{},\"selected_subtitle\":{},\"subtitle\":{},",
             tracks(&m.audio_tracks),

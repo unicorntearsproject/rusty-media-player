@@ -88,6 +88,8 @@ pub enum Action {
     ToggleMode,
     /// Show a view of the library (this switches to the Library face).
     ShowView(View),
+    /// Open the visualizer, or leave it for the view it was opened from.
+    ToggleVisualizer,
     /// Open an album, an artist or a playlist.
     OpenDetail(Detail),
     /// Go back one step in the library.
@@ -185,7 +187,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::PageDown, Action::ChapterStep(1)),
     sc(ShortKey::PageUp, Action::ChapterStep(-1)),
     sc(ShortKey::Char('b'), Action::ToggleMode),
-    sc(ShortKey::Char('v'), Action::ShowView(View::Visualizer)),
+    sc(ShortKey::Char('v'), Action::ToggleVisualizer),
     sc(ShortKey::Char('u'), Action::ShowAudioSettings),
     // Ctrl+arrows keep seeking and the volume where the plain arrows move around lists in the library.
     Shortcut { key: ShortKey::Left, shift: false, ctrl: true, action: Action::SeekBy(-5_000) },
@@ -477,13 +479,8 @@ pub fn playlist_menu(model: &UiModel) -> Vec<MenuItem> {
     v.push(MenuItem::act("Move current down", Action::MoveItem(id, 1)).enabled(has_cur));
     v.push(MenuItem::act("Remove current", Action::RemoveItem(id)).enabled(has_cur));
     v.push(MenuItem::act("Clear playlist", Action::ClearPlaylist).enabled(n > 0));
-    let repeat = match model.repeat {
-        1 => "Repeat: all",
-        2 => "Repeat: one",
-        _ => "Repeat: off",
-    };
-    v.push(MenuItem::act(repeat, Action::CycleRepeat).sep());
-    v.push(MenuItem::act(if model.shuffle { "Shuffle: on" } else { "Shuffle: off" }, Action::ToggleShuffle));
+    v.push(MenuItem::act(model.repeat_label(), Action::CycleRepeat).sep());
+    v.push(MenuItem::act(model.shuffle_label(), Action::ToggleShuffle));
     v
 }
 
@@ -575,7 +572,7 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         MenuItem::parent("Subtitles", subtitle_menu(model)).enabled(has),
         MenuItem::parent("Chapters", chapter_menu(model)).enabled(!model.chapters.is_empty()),
         MenuItem::act("Library", Action::ToggleMode).sep(),
-        MenuItem::act("Visualizer", Action::ShowView(View::Visualizer)),
+        MenuItem::act("Visualizer", Action::ToggleVisualizer),
         MenuItem::act("Show playlist", Action::ShowPlaylist),
         MenuItem::parent("Playlist", {
             let mut v = alloc::vec![
