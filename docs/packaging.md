@@ -254,3 +254,14 @@ Testing every package by hand: [`release-testing.md`](release-testing.md).
 `e2e --threads` (54 passed each, 6 skipped screenshot specs) all clean. Built the deb, rpm and AppImage from the container binary and signed them; `dist verify` 12 ok. The AppImage ran
 under `xvfb-run` (display variables cleared): state Playing, clock 1.0008, 150 video frames. The Windows exe, zip and Setup.exe were built in the wine image; under Wine in Xvfb the portable exe and
 the silently installed program both played the H.264 fixture at 1.00x (150 frames) and the uninstaller removed the program. Published with `dist publish --sign --windows` (12 files, local folder and S3).
+
+**0.0.3 (2026-10-05; the pause fix, shuffle and repeat on every bar, the visualizer's way back, in-app updates, app-menu integration).** `cargo test --workspace` (624 passed, 5 ignored, under
+`xvfb-run`), clippy `-D warnings`, `cargo xtask check`, `cargo xtask e2e --threads` (55 passed in each of the single-threaded and threaded builds, 6 skipped screenshot specs) clean. Built the
+deb, rpm and AppImage from the container binary, the Windows exe, zip and Setup.exe in the wine image, signed them; `dist verify` 15 ok. `tools/packaging/verify-linux.sh deb|rpm|appimage` (clean Ubuntu 22.04
+and Fedora 44 containers): version 0.0.3, state Playing, clock ratio 1.0002 / 0.9999 / 1.0007, 150 video frames. Windows under Wine 11 on Xvfb: the zip's exe and the silently installed program play the H.264
+fixture at 1.0008 (150 frames), the installer is detected as an installer (no app-menu offer), the uninstaller removes it; the portable exe's `--integration add|status|remove` writes and removes exactly its
+HKCU keys (the Start menu shortcut needs PowerShell, which Wine lacks, so that part is unverified and the add is all-or-nothing); `--update-now` against a local signed manifest downloaded and verified the zip and
+extracted `rusty-wave.exe.new`. Update path (Linux): an updater-capable build of this tree at 0.0.2 (`APPIMAGE` set by the runtime, a path with a space) ran `--update-now` against a local manifest
+(`dist manifest --base-url file://...`), replaced itself with the 0.0.3 AppImage (SHA-256 identical) and then reported "up to date"; a tampered file was refused with the old one untouched. After publishing, the same old build updated from
+the live bucket over HTTPS to the published 0.0.3 AppImage (SHA-256 identical). Published with `dist publish --sign --windows` (14 files and 14 `latest` aliases, local folder and S3). Not verified: macOS (CI only), the real
+Windows registry and Start menu on Windows itself, a real desktop environment picking up the AppImage's menu entry (the `.desktop` file validates with `desktop-file-validate`), the GitHub workflows (the PWA job's binaryen and the rpm job's PATH were fixed from the 2026-10-06 dry run's logs; the PWA failure was reproduced locally with binaryen 105).
