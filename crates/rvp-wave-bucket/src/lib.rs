@@ -6,7 +6,7 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(unused))]
 
 /// The app ID (reverse-DNS, the one the desktop file, AppStream, MPRIS and Flatpak use too).
-pub const APP_ID: &str = "io.github.idometeor.RustyWave";
+pub const APP_ID: &str = "io.github.unicorntearsproject.RustyWave";
 
 #[cfg(all(target_arch = "wasm32", feature = "smoke"))]
 mod smoke;

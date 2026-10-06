@@ -24,7 +24,7 @@ fn value(text: &str, key: &str) -> String {
 #[test]
 fn identity_and_policy() {
     let m = manifest();
-    assert_eq!(value(&m, "id"), "io.github.idometeor.RustyWave");
+    assert_eq!(value(&m, "id"), "io.github.unicorntearsproject.RustyWave");
     assert_eq!(value(&m, "name"), "Rusty Wave");
     assert_eq!(value(&m, "api"), "bucket_v0");
     assert_eq!(value(&m, "api_min"), "0.3");

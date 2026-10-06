@@ -576,7 +576,7 @@ fn an_mp4_with_the_movie_box_first_or_last_keeps_its_chunks() {
         check_mp4_audio(&old, &out, name);
         let out_order: Vec<_> = top_boxes(&out).iter().map(|b| b.0).collect();
         assert_eq!(
-            order.len() + 0,
+            order.len(),
             out_order.len() - out_order.iter().filter(|t| *t == b"free").count()
                 + order.iter().filter(|t| *t == b"free").count(),
             "{name}: boxes {order:?} -> {out_order:?}"

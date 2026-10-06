@@ -8,22 +8,53 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The application id: the file names, the icon name, the window class.
-pub const APP_ID: &str = "io.github.idometeor.RustyWave";
+pub const APP_ID: &str = "io.github.unicorntearsproject.RustyWave";
 /// The marker line that says this desktop file is ours.
 const MARKER: &str = "X-RustyWave-Integrated=true";
 const PATH_KEY: &str = "X-RustyWave-AppImage=";
 
 /// The shared desktop file the packages ship, used as the template (same name, categories and MIME types).
-const TEMPLATE: &str = include_str!("../../../packaging/shared/io.github.idometeor.RustyWave.desktop");
+const TEMPLATE: &str =
+    include_str!("../../../packaging/shared/io.github.unicorntearsproject.RustyWave.desktop");
 
 /// The icon sizes embedded; the desktop scales these for the others.
 pub const ICONS: &[(u32, &[u8])] = &[
-    (16, include_bytes!("../../../packaging/icons/hicolor/16x16/apps/io.github.idometeor.RustyWave.png")),
-    (32, include_bytes!("../../../packaging/icons/hicolor/32x32/apps/io.github.idometeor.RustyWave.png")),
-    (48, include_bytes!("../../../packaging/icons/hicolor/48x48/apps/io.github.idometeor.RustyWave.png")),
-    (64, include_bytes!("../../../packaging/icons/hicolor/64x64/apps/io.github.idometeor.RustyWave.png")),
-    (128, include_bytes!("../../../packaging/icons/hicolor/128x128/apps/io.github.idometeor.RustyWave.png")),
-    (256, include_bytes!("../../../packaging/icons/hicolor/256x256/apps/io.github.idometeor.RustyWave.png")),
+    (
+        16,
+        include_bytes!(
+            "../../../packaging/icons/hicolor/16x16/apps/io.github.unicorntearsproject.RustyWave.png"
+        ),
+    ),
+    (
+        32,
+        include_bytes!(
+            "../../../packaging/icons/hicolor/32x32/apps/io.github.unicorntearsproject.RustyWave.png"
+        ),
+    ),
+    (
+        48,
+        include_bytes!(
+            "../../../packaging/icons/hicolor/48x48/apps/io.github.unicorntearsproject.RustyWave.png"
+        ),
+    ),
+    (
+        64,
+        include_bytes!(
+            "../../../packaging/icons/hicolor/64x64/apps/io.github.unicorntearsproject.RustyWave.png"
+        ),
+    ),
+    (
+        128,
+        include_bytes!(
+            "../../../packaging/icons/hicolor/128x128/apps/io.github.unicorntearsproject.RustyWave.png"
+        ),
+    ),
+    (
+        256,
+        include_bytes!(
+            "../../../packaging/icons/hicolor/256x256/apps/io.github.unicorntearsproject.RustyWave.png"
+        ),
+    ),
 ];
 
 /// Whether the menu entry exists and points here.

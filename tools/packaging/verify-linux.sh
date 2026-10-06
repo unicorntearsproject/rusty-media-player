@@ -34,9 +34,9 @@ smoke() {
   cat <<EOS
 echo "== version"; $1 --version
 echo "== desktop file, AppStream, icon"
-test -f /usr/share/applications/io.github.idometeor.RustyWave.desktop && echo desktop ok
-test -f /usr/share/metainfo/io.github.idometeor.RustyWave.metainfo.xml && echo metainfo ok
-test -f /usr/share/icons/hicolor/256x256/apps/io.github.idometeor.RustyWave.png && echo icon ok
+test -f /usr/share/applications/io.github.unicorntearsproject.RustyWave.desktop && echo desktop ok
+test -f /usr/share/metainfo/io.github.unicorntearsproject.RustyWave.metainfo.xml && echo metainfo ok
+test -f /usr/share/icons/hicolor/256x256/apps/io.github.unicorntearsproject.RustyWave.png && echo icon ok
 echo "== run (virtual display, no sound card)"
 xvfb-run -a $1 --no-audio --no-media-keys --data-dir /out/data --exit-after 6 --screenshot /out/shot.png --screenshot-after 5 --report /out/report.json /fixtures/$fixture
 grep -E '"(state|saw_playing|clock_ratio|video_frames|frames_presented|version)"' /out/report.json

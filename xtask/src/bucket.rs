@@ -33,7 +33,7 @@ bucket-e2e     run the scenarios of xtask/src/bucket_e2e.rs on Rusty Wave.bucket
                ../rust-os/tools/bucket-sim/target/release/bucket-sim, or PATH; skipped when there is none). --only runs the scenarios
                whose name contains NAME; -v prints the app's log. Screenshots go to target/bucket-e2e/<scenario>/";
 
-const APP_ID: &str = "io.github.idometeor.RustyWave";
+const APP_ID: &str = "io.github.unicorntearsproject.RustyWave";
 const MODULE_CRATE: &str = "rvp-wave-bucket";
 const WASM_NAME: &str = "rvp_wave_bucket.wasm";
 

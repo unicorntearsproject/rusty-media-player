@@ -13,7 +13,7 @@ mod manifest;
 mod publish;
 mod sign;
 
-const APP_ID: &str = "io.github.idometeor.RustyWave";
+const APP_ID: &str = "io.github.unicorntearsproject.RustyWave";
 const PKG: &str = "rusty-wave";
 /// The image the Linux binary is built in (Ubuntu 22.04: glibc 2.35, so it runs on that and anything newer).
 const LINUX_IMAGE: &str = "localhost/rvp-build-linux:1";
@@ -794,7 +794,7 @@ impl Ctx {
         write(
             &stage.join("README.txt"),
             format!(
-                "Rusty Wave {}\r\n\r\nPlays video and music. Run rusty-wave.exe, or use Open with on a media file.\r\nrusty-wave --help lists the options.\r\nSettings and the library index are kept in %APPDATA%\\rusty-wave\\data.\r\nhttps://github.com/iDoMeteor/rusty-video-player\r\n",
+                "Rusty Wave {}\r\n\r\nPlays video and music. Run rusty-wave.exe, or use Open with on a media file.\r\nrusty-wave --help lists the options.\r\nSettings and the library index are kept in %APPDATA%\\rusty-wave\\data.\r\nhttps://github.com/unicorntearsproject/rusty-video-player\r\n",
                 self.version
             )
             .as_bytes(),

@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// The application id, used for the ProgId `<id>.Media`.
-pub const APP_ID: &str = "io.github.idometeor.RustyWave";
+pub const APP_ID: &str = "io.github.unicorntearsproject.RustyWave";
 /// The file types Rusty Wave registers for (kept equal to the installer's list by a test).
 pub const EXTENSIONS: &[&str] = &[
     ".mp4", ".m4v", ".mkv", ".webm", ".mka", ".mp3", ".flac", ".ogg", ".oga", ".opus", ".wav", ".m4a",
@@ -356,20 +356,23 @@ mod tests {
         add_associations(&mut r, &exe()).unwrap();
         assert_eq!(associations_status(&r, &exe()), Status::Current);
         assert_eq!(
-            r.get_string("Software\\Classes\\io.github.idometeor.RustyWave.Media\\shell\\open\\command", "")
-                .unwrap(),
+            r.get_string(
+                "Software\\Classes\\io.github.unicorntearsproject.RustyWave.Media\\shell\\open\\command",
+                ""
+            )
+            .unwrap(),
             "\"C:\\Users\\u\\Apps\\rusty-wave.exe\" \"%1\""
         );
         assert_eq!(r.get_string("Software\\RegisteredApplications", "RustyWave").unwrap(), CAPS_KEY);
         for ext in EXTENSIONS {
             assert_eq!(
                 r.get_string(&format!("{CAPS_KEY}\\FileAssociations"), ext).unwrap(),
-                "io.github.idometeor.RustyWave.Media"
+                "io.github.unicorntearsproject.RustyWave.Media"
             );
             assert!(
                 r.get_string(
                     &format!("Software\\Classes\\{ext}\\OpenWithProgids"),
-                    "io.github.idometeor.RustyWave.Media"
+                    "io.github.unicorntearsproject.RustyWave.Media"
                 )
                 .is_some()
             );

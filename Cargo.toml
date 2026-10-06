@@ -35,7 +35,7 @@ version = "0.0.4"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/iDoMeteor/rusty-video-player"
+repository = "https://github.com/unicorntearsproject/rusty-video-player"
 publish = false
 
 [workspace.lints.rust]

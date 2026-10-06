@@ -63,8 +63,8 @@ recommends = "libwayland-client0, libx11-6, libxcursor1, libxi6, libxrandr2, xdg
 suggests = "pipewire-alsa | pulseaudio"
 assets = [
     ["../../target/dist/linux/stage/usr/bin/rusty-wave", "usr/bin/", "755"],
-    ["../../target/dist/linux/stage/usr/share/applications/io.github.idometeor.RustyWave.desktop", "usr/share/applications/", "644"],
-    ["../../target/dist/linux/stage/usr/share/metainfo/io.github.idometeor.RustyWave.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["../../target/dist/linux/stage/usr/share/applications/io.github.unicorntearsproject.RustyWave.desktop", "usr/share/applications/", "644"],
+    ["../../target/dist/linux/stage/usr/share/metainfo/io.github.unicorntearsproject.RustyWave.metainfo.xml", "usr/share/metainfo/", "644"],
     ["../../target/dist/linux/stage/usr/share/icons/hicolor/**/*", "usr/share/icons/hicolor/", "644"],
     ["../../target/dist/linux/stage/usr/share/man/man1/rusty-wave.1.gz", "usr/share/man/man1/", "644"],
     ["../../target/dist/linux/stage/usr/share/doc/rusty-wave/README.md", "usr/share/doc/rusty-wave/", "644"],
@@ -77,11 +77,11 @@ assets = [
 name = "rusty-wave"
 summary = "Video and music player with a library, a queue and a visualizer"
 license = "MIT OR Apache-2.0"
-url = "https://github.com/iDoMeteor/rusty-video-player"
+url = "https://github.com/unicorntearsproject/rusty-video-player"
 assets = [
     { source = "target/dist/linux/stage/usr/bin/rusty-wave", dest = "/usr/bin/rusty-wave", mode = "0755" },
-    { source = "target/dist/linux/stage/usr/share/applications/io.github.idometeor.RustyWave.desktop", dest = "/usr/share/applications/io.github.idometeor.RustyWave.desktop", mode = "0644" },
-    { source = "target/dist/linux/stage/usr/share/metainfo/io.github.idometeor.RustyWave.metainfo.xml", dest = "/usr/share/metainfo/io.github.idometeor.RustyWave.metainfo.xml", mode = "0644" },
+    { source = "target/dist/linux/stage/usr/share/applications/io.github.unicorntearsproject.RustyWave.desktop", dest = "/usr/share/applications/io.github.unicorntearsproject.RustyWave.desktop", mode = "0644" },
+    { source = "target/dist/linux/stage/usr/share/metainfo/io.github.unicorntearsproject.RustyWave.metainfo.xml", dest = "/usr/share/metainfo/io.github.unicorntearsproject.RustyWave.metainfo.xml", mode = "0644" },
     { source = "target/dist/linux/stage/usr/share/icons/hicolor/*/apps/*", dest = "/usr/share/icons/hicolor/", mode = "0644" },
     { source = "target/dist/linux/stage/usr/share/man/man1/rusty-wave.1.gz", dest = "/usr/share/man/man1/rusty-wave.1.gz", mode = "0644", doc = true },
     { source = "target/dist/linux/stage/usr/share/doc/rusty-wave/README.md", dest = "/usr/share/doc/rusty-wave/README.md", mode = "0644", doc = true },

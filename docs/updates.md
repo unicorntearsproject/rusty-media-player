@@ -55,15 +55,15 @@ A compromised mirror can withhold updates but cannot make a program install code
 
 AppImage: the first time one runs (no entry yet, not asked to stop) a dialog offers **Add to the app menu** / Not now / Don't ask again. "Not now" asks again next
 run; "Don't ask again" is remembered; a removal on purpose is also remembered. Adding writes
-`~/.local/share/applications/io.github.idometeor.RustyWave.desktop` (made from the packages' desktop file: `Exec` is the AppImage path quoted per the Desktop Entry
-spec, `StartupWMClass` and the window's app id / WM_CLASS are `io.github.idometeor.RustyWave`, the same MIME types) and the icons under
+`~/.local/share/applications/io.github.unicorntearsproject.RustyWave.desktop` (made from the packages' desktop file: `Exec` is the AppImage path quoted per the Desktop Entry
+spec, `StartupWMClass` and the window's app id / WM_CLASS are `io.github.unicorntearsproject.RustyWave`, the same MIME types) and the icons under
 `~/.local/share/icons/hicolor/<size>x<size>/apps/` (16 to 256 px), then runs `update-desktop-database` and `gtk-update-icon-cache` if they are installed. The file carries
 `X-RustyWave-Integrated=true` and the AppImage's path; **only files with that marker are ever changed or removed**, and a desktop file of the same name that
 lacks it (a package's) is left alone. If the AppImage is moved, the next start rewrites the entry's path silently (the "repair").
 `XDG_DATA_HOME` is honoured.
 
 Portable Windows: "Add to the app menu" writes a per-user Start menu shortcut (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Rusty Wave.lnk`, made with PowerShell's
-`WScript.Shell`) and the per-user (HKCU) registrations the installer makes under HKLM/HKCU: the program under `Applications\rusty-wave.exe`, the `io.github.idometeor.RustyWave.Media`
+`WScript.Shell`) and the per-user (HKCU) registrations the installer makes under HKLM/HKCU: the program under `Applications\rusty-wave.exe`, the `io.github.unicorntearsproject.RustyWave.Media`
 ProgId, `Software\RustyWave\Capabilities` + `RegisteredApplications`, and `OpenWithProgids` / `SupportedTypes` for the 17 extensions. The default program is not forced
 (Windows reserves that for the user); Rusty Wave appears under "Open with" and Default apps. Removing deletes exactly those keys and the shortcut. The Setup.exe installer
 does all of this itself and never shows the offer.

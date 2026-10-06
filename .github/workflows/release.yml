@@ -197,8 +197,8 @@ jobs:
           sed -i "s#/home/runner/work/[^/]*/[^/]*#$GITHUB_WORKSPACE#g" target/dist/flatpak/*.yml
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: io.github.idometeor.RustyWave-${{ needs.version.outputs.version }}.flatpak
-          manifest-path: target/dist/flatpak/io.github.idometeor.RustyWave.yml
+          bundle: io.github.unicorntearsproject.RustyWave-${{ needs.version.outputs.version }}.flatpak
+          manifest-path: target/dist/flatpak/io.github.unicorntearsproject.RustyWave.yml
           cache-key: flatpak-builder-${{ github.sha }}
           arch: x86_64
           branch: stable
@@ -413,7 +413,7 @@ jobs:
             gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign dist/SHA256SUMS
           fi
       # Pinned to a commit of the shared infrastructure repository (never a branch).
-      - uses: iDoMeteor/rba-infra/.github/actions/publish-release@e0efb3b1df5384ef537ae93ff7a64126b1de3396
+      - uses: unicorntearsproject/rba-infra/.github/actions/publish-release@102c06c3d8b441cba481116c59e244475573d37e
         with:
           tag: ${{ github.ref_name }}
           release-dir: dist

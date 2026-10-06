@@ -1,5 +1,5 @@
 {
-  "id": "io.github.idometeor.RustyWave",
+  "id": "io.github.unicorntearsproject.RustyWave",
   "name": "Rusty Wave",
   "short_name": "Rusty Wave",
   "description": "Play video and music: a library, a queue, subtitles and a visualizer. Works offline.",

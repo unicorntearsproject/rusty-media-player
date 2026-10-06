@@ -292,8 +292,8 @@ mod tests {
             "rusty-wave-latest-macos-universal.dmg.asc".into()
         )));
         assert!(p.aliases.contains(&(
-            "io.github.idometeor.RustyWave-0.0.3.flatpak".into(),
-            "io.github.idometeor.RustyWave-latest.flatpak".into()
+            "io.github.unicorntearsproject.RustyWave-0.0.3.flatpak".into(),
+            "io.github.unicorntearsproject.RustyWave-latest.flatpak".into()
         )));
         assert!(p.aliases.contains(&("rusty-wave-web-0.0.3.zip".into(), "rusty-wave-web-latest.zip".into())));
     }

@@ -1049,7 +1049,7 @@ v0.2, 13 deltas in v0.3, all folded in), so the adapter has no workarounds left 
 - **Builds and package.** `cargo xtask bucket` builds `app.wasm` (baseline, no SIMD), `app.threads.wasm` (SIMD128, atomics, shared
   memory, nightly + `rust-src`; `--simd` adds `app.simd.wasm`), checks every module's imports against the documented set, and packs
   `target/bucket/Rusty Wave.bucket` (ZIP: `manifest.toml`, modules, icons, `CHECKSUMS`, `SIGNATURE` from `RVP_BUCKET_SIGN_CMD`), then
-  runs the modules in Node. The manifest is `packaging/bucket/manifest.toml.in` (app ID `io.github.idometeor.RustyWave`, class `media`,
+  runs the modules in Node. The manifest is `packaging/bucket/manifest.toml.in` (app ID `io.github.unicorntearsproject.RustyWave`, class `media`,
   `[[builds]]`, file types, `restart = "on-trap"`).
 - **Tests** (all native and headless, no Simulator): `bucket-v0-sys` (layout asserts, function table equal to the documented set, the
   parser and the drift checker), `bucket-v0-mock`, `rvp-host-rb/tests` (lifecycle and events, files with `-BUSY`/`IO_READY`, audio clock and

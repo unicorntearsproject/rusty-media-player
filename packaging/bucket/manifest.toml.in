@@ -3,7 +3,7 @@
 # modules and the icon.
 
 [app]
-id = "io.github.idometeor.RustyWave"   # the same ID as the desktop file, AppStream, MPRIS and Flatpak; never changes
+id = "io.github.unicorntearsproject.RustyWave"   # the same ID as the desktop file, AppStream, MPRIS and Flatpak; never changes
 name = "Rusty Wave"
 version = "@VERSION@"
 api = "bucket_v0"

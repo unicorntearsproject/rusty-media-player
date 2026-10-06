@@ -21,7 +21,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{CursorIcon, Fullscreen, Icon, Window, WindowId};
 
 /// The application id: the desktop file, the icon, the Wayland app id, the MPRIS name and the Flatpak id.
-pub const APP_ID: &str = "io.github.idometeor.RustyWave";
+pub const APP_ID: &str = "io.github.unicorntearsproject.RustyWave";
 /// What the window's title bar says when nothing plays.
 pub const APP_NAME: &str = "Rusty Wave";
 
@@ -573,8 +573,9 @@ impl ApplicationHandler for Handler {
 
 /// The window icon from the embedded PNG.
 fn window_icon() -> Option<Icon> {
-    static ICON: &[u8] =
-        include_bytes!("../../../packaging/icons/hicolor/256x256/apps/io.github.idometeor.RustyWave.png");
+    static ICON: &[u8] = include_bytes!(
+        "../../../packaging/icons/hicolor/256x256/apps/io.github.unicorntearsproject.RustyWave.png"
+    );
     let img = rvp_library::art::decode(ICON, 256)?;
     Icon::from_rgba(img.rgba, img.w, img.h).ok()
 }

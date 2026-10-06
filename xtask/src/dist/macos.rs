@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(want.len(), 17, "{want:?}");
         check_document_types(&template(), &want).unwrap();
         let p = template();
-        assert_eq!(plist_strings(&p, "CFBundleIdentifier"), ["io.github.idometeor.RustyWave"]);
+        assert_eq!(plist_strings(&p, "CFBundleIdentifier"), ["io.github.unicorntearsproject.RustyWave"]);
         assert_eq!(plist_strings(&p, "LSMinimumSystemVersion"), ["11.0"]);
         assert_eq!(plist_strings(&p, "CFBundleExecutable"), ["rusty-wave"]);
     }

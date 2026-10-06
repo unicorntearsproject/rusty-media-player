@@ -65,7 +65,7 @@ Do this once per package type on each machine, with real speakers or headphones.
   changes. Play MP3, FLAC, Opus, Vorbis, AAC/M4A and WAV.
 - [ ] **Media keys and the shell integration**:
   - Linux: the hardware play/pause, next, previous keys act on the player; the desktop's media widget (GNOME top bar, KDE panel) shows title, artist and cover
-    and its buttons work; `playerctl -l` lists `io.github.idometeor.RustyWave`, `playerctl -p io.github.idometeor.RustyWave status|metadata|play-pause|next`.
+    and its buttons work; `playerctl -l` lists `io.github.unicorntearsproject.RustyWave`, `playerctl -p io.github.unicorntearsproject.RustyWave status|metadata|play-pause|next`.
   - Windows: the hardware keys, the volume flyout (Win + the volume keys) and the lock screen show title, artist and cover; Bluetooth headset buttons work;
     the keys do not also control another player at the same time.
   - With another player (a browser tab playing) open: the keys go to the most recently active one, as with other apps.
@@ -78,7 +78,7 @@ Do this once per package type on each machine, with real speakers or headphones.
   scales redraws crisply; full screen on the second monitor; no blur from the compositor (Wayland) or Windows' bitmap scaling.
 - [ ] **Resources**: idle CPU near zero when paused; 1080p30 playback below roughly one core on a modern machine; memory settles after a long library scan; the window can be resized
   while playing without freezing.
-- [ ] **Data lives where documented**: `~/.local/share/rusty-wave/` (Flatpak `~/.var/app/io.github.idometeor.RustyWave/data/rusty-wave/`, Windows `%APPDATA%\rusty-wave\data`); `rusty-wave --data-dir DIR` redirects it.
+- [ ] **Data lives where documented**: `~/.local/share/rusty-wave/` (Flatpak `~/.var/app/io.github.unicorntearsproject.RustyWave/data/rusty-wave/`, Windows `%APPDATA%\rusty-wave\data`); `rusty-wave --data-dir DIR` redirects it.
 - [ ] **Uninstall is clean** (the package's own steps below), and the user data is left unless you chose to remove it.
 
 ## 3. Linux packages
@@ -166,28 +166,28 @@ or add the remote by hand with the key:
 flatpak remote-add --user --if-not-exists --gpg-import=rusty-wave-release.gpg rusty-wave-test http://<dev-machine>:8000/repo     # rusty-wave-release.gpg from packaging/keys
 # on the dev machine the remote already exists (disabled): flatpak remote-modify --user --enable rusty-wave-test
 flatpak remotes --user -d | grep rusty-wave-test        # the options column must NOT say no-gpg-verify
-flatpak install --user rusty-wave-test io.github.idometeor.RustyWave
-flatpak info --user io.github.idometeor.RustyWave       # Origin rusty-wave-test, Branch stable, Commit ...
-flatpak run io.github.idometeor.RustyWave ~/Videos/some.mp4
+flatpak install --user rusty-wave-test io.github.unicorntearsproject.RustyWave
+flatpak info --user io.github.unicorntearsproject.RustyWave       # Origin rusty-wave-test, Branch stable, Commit ...
+flatpak run io.github.unicorntearsproject.RustyWave ~/Videos/some.mp4
 ```
 
 - [ ] Wrong-key test: `flatpak remote-add --user --gpg-import=<some other public key> rvp-bad http://<dev-machine>:8000/repo` then `flatpak install --user rvp-bad ...` fails with
   "Can't check signature: public key not found". Remove it: `flatpak remote-delete --user rvp-bad`.
 
-b) From the `.flatpakref` (installs the app and adds the remote named `rusty-wave`): `flatpak install --user --from io.github.idometeor.RustyWave.flatpakref`
+b) From the `.flatpakref` (installs the app and adds the remote named `rusty-wave`): `flatpak install --user --from io.github.unicorntearsproject.RustyWave.flatpakref`
 (its `Url=` must be reachable, as above). GNOME Software opens `.flatpakref` files directly.
 
-c) From the single-file bundle (works offline except for the runtime): `flatpak install --user --bundle io.github.idometeor.RustyWave-0.0.2.flatpak`.
+c) From the single-file bundle (works offline except for the runtime): `flatpak install --user --bundle io.github.unicorntearsproject.RustyWave-0.0.2.flatpak`.
 
 - [ ] All three routes install; the app appears in the menu with its icon; `flatpak run` starts it.
-- [ ] Sandbox: `flatpak info --show-permissions io.github.idometeor.RustyWave` lists Wayland, fallback X11, PulseAudio, `xdg-music:ro`, `xdg-videos:ro`, the MPRIS names, and no network, no home, no GPU.
+- [ ] Sandbox: `flatpak info --show-permissions io.github.unicorntearsproject.RustyWave` lists Wayland, fallback X11, PulseAudio, `xdg-music:ro`, `xdg-videos:ro`, the MPRIS names, and no network, no home, no GPU.
 - [ ] Opening a file from `~/Downloads` or another folder: through the file chooser (portal) and by dragging a file from the file manager onto the window.
   A folder outside Music and Videos can be added through the chooser.
 - [ ] Media keys, the shell's media widget and `playerctl` see the player from the host (MPRIS inside the sandbox): `playerctl -l`.
 - [ ] Audio through PipeWire/PulseAudio; works on a PulseAudio-only and on a PipeWire system.
 - [ ] Section 2 checks pass (file associations come from the exported desktop file: "Open with" in the host file manager).
 - [ ] Update path: install the bundle, rebuild with a bumped version and a new repo, `flatpak update --user` picks it up (only if you serve the repo).
-- [ ] Uninstall: `flatpak uninstall --user io.github.idometeor.RustyWave` (`--delete-data` also removes `~/.var/app/io.github.idometeor.RustyWave`),
+- [ ] Uninstall: `flatpak uninstall --user io.github.unicorntearsproject.RustyWave` (`--delete-data` also removes `~/.var/app/io.github.unicorntearsproject.RustyWave`),
   `flatpak remote-delete --user rusty-wave-test` (and `rusty-wave`, `rustywave-origin` if they were added), `flatpak uninstall --user --unused`.
 
 ### 3.5 Tarball
@@ -259,7 +259,7 @@ signature of the checksums is the only proof). Take a snapshot or use a throwawa
 **Uninstall**:
 
 - [ ] Settings > Apps > Rusty Wave > Uninstall (or `"%LOCALAPPDATA%\Programs\Rusty Wave\unins000.exe" /VERYSILENT`): asks whether to delete settings and the library index; answer both ways on two runs.
-- [ ] Gone afterwards: the install folder, Start menu and desktop shortcuts, `HKCU\Software\Classes\io.github.idometeor.RustyWave.Media`, the `RegisteredApplications` value, the `OpenWithProgids` values, the PATH entry.
+- [ ] Gone afterwards: the install folder, Start menu and desktop shortcuts, `HKCU\Software\Classes\io.github.unicorntearsproject.RustyWave.Media`, the `RegisteredApplications` value, the `OpenWithProgids` values, the PATH entry.
   "Open with" no longer lists it. `%APPDATA%\rusty-wave\data` is gone only if you chose to delete it.
 
 **Portable zip**: unzip to a folder (and to a USB stick), run `rusty-wave.exe`: SmartScreen prompt as above (unblock via file Properties > Unblock to compare), plays, settings go to `%APPDATA%\rusty-wave\data`

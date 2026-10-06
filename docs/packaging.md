@@ -10,7 +10,7 @@ Rusty Wave ships as a native desktop app (Linux and Windows; macOS in beta) and 
 | .deb | `dist deb` | `cargo install cargo-deb` | `rusty-wave_<ver>_amd64.deb` |
 | .rpm | `dist rpm` | `cargo install cargo-generate-rpm`, rpm tools | `rusty-wave-<ver>-1.x86_64.rpm` |
 | AppImage | `dist appimage` | `appimagetool` (downloaded to `~/.local/bin` on first use), `zsyncmake` (`apt install zsync`, `dnf install zsync`) | `rusty-wave-<ver>-x86_64.AppImage` and `rusty-wave-<ver>-x86_64.AppImage.zsync` |
-| Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.idometeor.RustyWave-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `<staging>/flatpak/repo`, staging being `/mnt/scratch/rvp-scratch/staging` or `$RVP_STAGING_DIR`) |
+| Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.unicorntearsproject.RustyWave-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `<staging>/flatpak/repo`, staging being `/mnt/scratch/rvp-scratch/staging` or `$RVP_STAGING_DIR`) |
 | Windows exe + zip | `dist windows` | MSVC or GNU toolchain; on Linux the wine image (podman) | `rusty-wave-<ver>-windows-x64.zip` |
 | Windows installer | `dist installer` | Inno Setup 6 (`ISCC.exe`); on Linux wine in the image | `rusty-wave-<ver>-x64-Setup.exe` |
 | macOS app + dmg (beta) | `dist macos` (macOS only) | Xcode command line tools, both Apple Rust targets; optionally `create-dmg` | `rusty-wave-<ver>-macos-universal.dmg` |
@@ -26,7 +26,7 @@ everything. `--version V` stamps another version (a dry run such as `0.0.0-ci1`)
 
 ## App id, names, paths
 
-- App id `io.github.idometeor.RustyWave` (desktop file, icon, AppStream, Flatpak, Wayland app id, X11 class, MPRIS name, Windows
+- App id `io.github.unicorntearsproject.RustyWave` (desktop file, icon, AppStream, Flatpak, Wayland app id, X11 class, MPRIS name, Windows
   AppUserModelID). Binary `rusty-wave`; packages `rusty-wave`.
 - Until 2026-10-05 the app was called Rusty Video Player (binary `rvp`, id `io.github.idometeor.RustyVideoPlayer`); nothing shipped under that name,
   so there is no migration.
@@ -65,7 +65,7 @@ for every file, and only `zsync_url` names the alias (`.../latest/rusty-wave-lat
 | `rusty-wave-latest_amd64.deb`, `rusty-wave-latest-1.x86_64.rpm` (+ `.asc`) | the deb, the rpm |
 | `rusty-wave-latest-x64-Setup.exe`, `rusty-wave-latest-windows-x64.zip` (+ `.asc`) | with `--windows` |
 | `rusty-wave-latest-macos-universal.dmg` (+ `.asc`) | with `--macos` |
-| `io.github.idometeor.RustyWave-latest.flatpak` (+ `.asc`) | the Flatpak bundle, with `--flatpak` |
+| `io.github.unicorntearsproject.RustyWave-latest.flatpak` (+ `.asc`) | the Flatpak bundle, with `--flatpak` |
 | `rusty-wave-web-latest.zip` (+ `.asc`) | the web app zip, with `--web` |
 | `rusty-wave-latest-linux-x86_64.tar.gz` (+ `.asc`) | the Linux tarball, with `--tarball` |
 | `rusty-wave-latest.json` (+ `.asc`, content type `application/json`) | the update manifest, below |
@@ -102,7 +102,7 @@ token needs no `workflow` scope). If the gate lets a run through anyway, `gh run
 
 ## Shared metadata (`packaging/shared`, `packaging/icons`)
 
-- `io.github.idometeor.RustyWave.desktop`: `Exec=rusty-wave %U`, categories, `MimeType=` for every format we play (all of them are in
+- `io.github.unicorntearsproject.RustyWave.desktop`: `Exec=rusty-wave %U`, categories, `MimeType=` for every format we play (all of them are in
   shared-mime-info, so no MIME package is shipped). Keep in step with `<provides><mediatype>` in the metainfo (checked by `dist check`) and the
   extension list in `packaging/windows/rusty-wave.iss`.
 - `...metainfo.xml.in`: AppStream (screenshots are `docs/screenshots/desktop/*.png` by raw GitHub URL, so they show once the repository is public or the
@@ -134,10 +134,10 @@ exist (CI does it in a Fedora container from the staged binary).
 **AppImage.** The staged tree plus `AppRun`; no libraries are bundled (the ones above must exist on the host, as on any desktop). Run with
 `--appimage-extract-and-run` where FUSE is missing.
 
-**Flatpak.** `packaging/flatpak/io.github.idometeor.RustyWave.yml`: runtime `org.freedesktop.Platform//25.08`, `rust-stable` extension, the crates
+**Flatpak.** `packaging/flatpak/io.github.unicorntearsproject.RustyWave.yml`: runtime `org.freedesktop.Platform//25.08`, `rust-stable` extension, the crates
 vendored offline from `cargo-sources.json` (regenerate with `cargo xtask dist flatpak-sources` after any `Cargo.lock` change; the generator is
 `tools/flatpak-cargo-generator.py`, MIT). Permissions: Wayland, fallback X11, PulseAudio (PipeWire's socket), `xdg-music:ro`, `xdg-videos:ro`, and the
-MPRIS names `org.mpris.MediaPlayer2.io.github.idometeor.RustyWave[.*]`; no GPU, no network, no home access (other places come through the file
+MPRIS names `org.mpris.MediaPlayer2.io.github.unicorntearsproject.RustyWave[.*]`; no GPU, no network, no home access (other places come through the file
 chooser portal). The manifest builds a release tag; `dist flatpak` rewrites the source between the `APP-SOURCE` markers to a tarball of the working
 tree. For Flathub, copy the manifest and `cargo-sources.json` to the Flathub repository with the tag and a commit.
 
@@ -162,7 +162,7 @@ joins them with `lipo -create`, and assembles `Rusty Wave.app`: `Contents/MacOS/
 and the licences. The dmg holds the app and a link to `/Applications` (`create-dmg` if installed, else `hdiutil create`) and is named `rusty-wave-<ver>-macos-universal.dmg`; `dist publish --macos` publishes it
 (with `.asc`, in `SHA256SUMS`, as the manifest's `macos-dmg` entry and as `rusty-wave-latest-macos-universal.dmg`).
 
-**Info.plist**: bundle id `io.github.idometeor.RustyWave`, name "Rusty Wave", `LSMinimumSystemVersion` 11.0, `NSHighResolutionCapable`, category `public.app-category.video`, the version stamped
+**Info.plist**: bundle id `io.github.unicorntearsproject.RustyWave`, name "Rusty Wave", `LSMinimumSystemVersion` 11.0, `NSHighResolutionCapable`, category `public.app-category.video`, the version stamped
 (`CFBundleShortVersionString` is the numeric part, so `0.0.0-ci1` becomes `0.0.0`). Document types (mp4 m4v mkv webm mka mp3 flac ogg oga opus wav m4a m4b aac m3u m3u8 pls) use system UTIs where they exist
 (`public.mpeg-4`, `public.mp3`, `com.apple.m4v-video`, `com.apple.m4a-audio`, `public.aac-audio`, `com.microsoft.waveform-audio`, `public.m3u-playlist`, `public.pls-playlist`) and imported declarations with the usual
 shared ids for the rest (`org.matroska.mkv`, `org.matroska.mka`, `org.webmproject.webm`, `org.xiph.flac`, `org.xiph.ogg-audio`, `org.xiph.opus`), at rank *Alternate* (listed under Open With, never
@@ -223,7 +223,7 @@ threads fail falls back to `pkg/` and still starts offline next time). The page 
 Nothing runs on a push or a pull request, and nothing on a schedule (`dist check` fails if a workflow has a `schedule:` trigger). CI only runs on changes: the first job of
 both workflows, `gate` (`tools/ci/gate.sh`, needs `actions: read`), skips every other job when the same workflow already succeeded on this commit (manual runs) or, for a tag
 run, when that tag's release already has assets; a skipped workflow is green. The `force` input of a manual run overrides the gate. A manual run is a dry run: it builds and tests every format under the version you type and keeps the files as
-workflow artifacts. A tag run's last job (`publish`) gathers the files, writes `SHA256SUMS` (signed when a key is configured) and hands them to the shared `publish-release` action of `iDoMeteor/rba-infra` (pinned to a commit), which publishes them to Rusty Bucket's release site with the job's OIDC token (`id-token: write`, `contents: read`, no `environment:`) and dispatches the web player's update with `RBA_WAVE_DISPATCH_TOKEN`. Jobs: gate, Linux (metadata check, Xvfb smoke tests with
+workflow artifacts. A tag run's last job (`publish`) gathers the files, writes `SHA256SUMS` (signed when a key is configured) and hands them to the shared `publish-release` action of `unicorntearsproject/rba-infra` (pinned to a commit), which publishes them to Rusty Bucket's release site with the job's OIDC token (`id-token: write`, `contents: read`, no `environment:`) and dispatches the web player's update with `RBA_WAVE_DISPATCH_TOKEN`. Jobs: gate, Linux (metadata check, Xvfb smoke tests with
 `playerctl`, deb, AppImage, tarball), rpm (Fedora container, install test), Flatpak (flatpak-builder action), Windows (exe, zip, installer, silent install
 test), macOS (universal app and dmg on `macos-14`, Developer ID signing and notarization only when the Apple secrets exist, mount and `--version` smoke test), PWA (build and Playwright), publish.
 
@@ -322,3 +322,11 @@ newer than the betas before it:
 | The updater (`rvp_update::Version`) | SemVer order: `rc1 < rc2 < 1.0.0`, `beta1 < rc1` (identifiers compare as text, so name candidates `rc1` .. `rc9`, or `rc.1`, `rc.10` with a dot) |
 
 `cargo xtask dist check --version 1.0.0-rc1` validates the metadata under that spelling (the rpm and deb spellings and the AppStream version are unit-tested in `xtask`).
+
+## The app id and the account (1.0.0-rc1)
+
+The GitHub account `iDoMeteor` is now **`unicorntearsproject`** (same id); every repository link, the AppStream, Flatpak and Cargo metadata, `copyright`, the man page and the installer's URL follow it.
+For the same reason the **app id changed** at 1.0.0-rc1: `io.github.idometeor.RustyWave` is now **`io.github.unicorntearsproject.RustyWave`**. It is the Flatpak id and bundle name
+(`io.github.unicorntearsproject.RustyWave-1.0.0-rc1.flatpak`), the `.desktop` file name and `StartupWMClass`, the winit app id, the AppStream id and file, the icon names, the MIME and `xdg-mime`
+registration, the MPRIS bus name, the Windows and macOS identifiers, the self-integration `.desktop` path, and the Rusty Bucket manifest's `id`. Nobody had installed a release under the old id, so there is no
+migration; a machine that ran a development build keeps a stale `~/.local/share/applications/io.github.idometeor.RustyWave.desktop` and icons that `Remove from the app menu` (of the new id) will not touch.

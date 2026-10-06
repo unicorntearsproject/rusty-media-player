@@ -13,10 +13,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// The bundle id of the macOS app.
-pub const MACOS_BUNDLE_ID: &str = "io.github.idometeor.RustyWave";
+pub const MACOS_BUNDLE_ID: &str = "io.github.unicorntearsproject.RustyWave";
 
-/// The desktop entry id of the app (`io.github.idometeor.RustyWave.desktop`).
-pub const DESKTOP_ID: &str = "io.github.idometeor.RustyWave.desktop";
+/// The desktop entry id of the app (`io.github.unicorntearsproject.RustyWave.desktop`).
+pub const DESKTOP_ID: &str = "io.github.unicorntearsproject.RustyWave.desktop";
 
 /// `mimeapps.list` with `desktop_id` made the default for each of `mimes`: its `[Default Applications]` line becomes
 /// `mime=desktop_id;` followed by whatever else was there (without a repeat). Everything else in the file is kept as it was, including

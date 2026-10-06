@@ -1780,8 +1780,7 @@ fn the_player_bar_the_dialogs_and_the_audio_panel_have_tooltips_for_every_contro
     }
     assert!(ui.play_tip_text(Target::Seek, &m).is_some() && ui.play_tip_text(Target::Volume, &m).is_some());
     // A dialog's switches and buttons: hover each (after the delay) and a tooltip comes.
-    let mut spec = crate::dialog::DialogSpec::default();
-    spec.title = "Settings".into();
+    let mut spec = crate::dialog::DialogSpec { title: "Settings".into(), ..Default::default() };
     spec.toggles.push(crate::dialog::DialogToggle {
         label: "Show tooltips".into(),
         desc: "Notes on controls.".into(),

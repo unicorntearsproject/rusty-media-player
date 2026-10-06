@@ -28,7 +28,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_ID = "io.github.idometeor.RustyWave"
+APP_ID = "io.github.unicorntearsproject.RustyWave"
 MASTER = ROOT / "assets/brand/rusty-wave-icon-master.png"
 FONTS = ROOT / "crates/rvp-ui/assets/fonts"
 

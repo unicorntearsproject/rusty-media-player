@@ -355,6 +355,38 @@ pub fn decode_thumb(bytes: &[u8]) -> Option<Thumb> {
     (w > 0 && h > 0).then_some(Thumb { w, h, rgb })
 }
 
+const FAVORITES_MAGIC: &[u8; 4] = b"RVPF";
+
+impl Library {
+    /// The favorites as bytes, and mark them saved.
+    pub fn save_favorites(&mut self) -> Vec<u8> {
+        self.favorites_dirty = false;
+        let mut w = W(Vec::new());
+        w.0.extend_from_slice(FAVORITES_MAGIC);
+        w.u8(VERSION);
+        w.u32(self.favorites_set().len() as u32);
+        for k in self.favorites_set() {
+            w.str(k);
+        }
+        w.0
+    }
+
+    /// Put the favorites saved by [`Library::save_favorites`] into this library.
+    pub fn load_favorites(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let mut r = R(bytes);
+        if r.take(4)? != FAVORITES_MAGIC || r.u8()? != VERSION {
+            return Err("not a favorites file".to_string());
+        }
+        let n = r.count(2)?;
+        let mut set = alloc::collections::BTreeSet::new();
+        for _ in 0..n {
+            set.insert(r.str()?);
+        }
+        self.replace_favorites(set);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,37 +463,5 @@ mod tests {
         let t = Thumb { w: 2, h: 1, rgb: vec![1, 2, 3, 4, 5, 6] };
         assert_eq!(decode_thumb(&encode_thumb(&t)), Some(t));
         assert_eq!(art_key(255), "library/art/00000000000000ff");
-    }
-}
-
-const FAVORITES_MAGIC: &[u8; 4] = b"RVPF";
-
-impl Library {
-    /// The favorites as bytes, and mark them saved.
-    pub fn save_favorites(&mut self) -> Vec<u8> {
-        self.favorites_dirty = false;
-        let mut w = W(Vec::new());
-        w.0.extend_from_slice(FAVORITES_MAGIC);
-        w.u8(VERSION);
-        w.u32(self.favorites_set().len() as u32);
-        for k in self.favorites_set() {
-            w.str(k);
-        }
-        w.0
-    }
-
-    /// Put the favorites saved by [`Library::save_favorites`] into this library.
-    pub fn load_favorites(&mut self, bytes: &[u8]) -> Result<(), String> {
-        let mut r = R(bytes);
-        if r.take(4)? != FAVORITES_MAGIC || r.u8()? != VERSION {
-            return Err("not a favorites file".to_string());
-        }
-        let n = r.count(2)?;
-        let mut set = alloc::collections::BTreeSet::new();
-        for _ in 0..n {
-            set.insert(r.str()?);
-        }
-        self.replace_favorites(set);
-        Ok(())
     }
 }

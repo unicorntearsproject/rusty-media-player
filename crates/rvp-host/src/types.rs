@@ -97,7 +97,8 @@ pub fn mimes_of(types: &[&MediaType]) -> Vec<String> {
 mod tests {
     use super::*;
 
-    const DESKTOP: &str = include_str!("../../../packaging/shared/io.github.idometeor.RustyWave.desktop");
+    const DESKTOP: &str =
+        include_str!("../../../packaging/shared/io.github.unicorntearsproject.RustyWave.desktop");
     const ISS: &str = include_str!("../../../packaging/windows/rusty-wave.iss");
 
     #[test]

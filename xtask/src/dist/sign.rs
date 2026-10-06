@@ -124,7 +124,7 @@ impl Ctx {
         sh(&mut c)?;
         let url = self.repo_url.clone().unwrap_or_else(|| format!("file://{}", repo.display()));
         let gpg_b64 = capture(Command::new("base64").arg("-w0").arg(&pubkey))?.trim().to_string();
-        let home_page = "https://github.com/iDoMeteor/rusty-video-player";
+        let home_page = "https://github.com/unicorntearsproject/rusty-video-player";
         write(
             &self.out().join(format!("{APP_ID}.flatpakrepo")),
             format!(

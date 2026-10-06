@@ -283,7 +283,7 @@ within the first release; **nice** = polish.
     copied with `event_text`, and that `event_text` for a bad handle returns `-NOT_FOUND`.
 
 23. **[should] Manifest: app ID, memory, optional AUDIO_OUT, file types.** Draft: bucket-format.md, manifest example. (a) The example
-    ID is `com.unicorntears.rustywave`; our published ID is `io.github.idometeor.RustyWave` (desktop file, AppStream,
+    ID is `com.unicorntears.rustywave`; our published ID is `io.github.unicorntearsproject.RustyWave` (desktop file, AppStream,
     MPRIS name, Flatpak, icons). The ID "never changes": pick one now. We prefer to keep ours for every host; if RB needs a
     reverse-DNS under its own domain, say so and we will map it in `rvp-host-rb` only (the manifest is RB's file). (b) `AUDIO_OUT`
     should be **optional**, not required: the app plays video without a device (our desktop host has a silent mode driven by the

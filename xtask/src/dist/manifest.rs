@@ -88,8 +88,8 @@ pub(super) fn assets(ver: &str, x: Extras) -> Vec<Asset> {
         v.push(Asset {
             key: "linux-flatpak",
             arch: "x86_64",
-            name: format!("io.github.idometeor.RustyWave-{ver}.flatpak"),
-            alias: "io.github.idometeor.RustyWave-latest.flatpak".into(),
+            name: format!("io.github.unicorntearsproject.RustyWave-{ver}.flatpak"),
+            alias: "io.github.unicorntearsproject.RustyWave-latest.flatpak".into(),
             zsync: None,
         });
     }
@@ -413,7 +413,7 @@ mod tests {
                 "macos-dmg"
             ]
         );
-        assert_eq!(all[4].name, "io.github.idometeor.RustyWave-0.0.3.flatpak");
+        assert_eq!(all[4].name, "io.github.unicorntearsproject.RustyWave-0.0.3.flatpak");
         assert_eq!(all[7].name, "rusty-wave-web-0.0.3.zip");
         // An alias never carries a version, a versioned name always does.
         assert!(all.iter().all(|a| a.alias.contains("latest") && a.name.contains("0.0.3")));
