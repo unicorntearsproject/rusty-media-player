@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// Where the latest release is described.
-pub const MANIFEST_URL: &str = "https://ut-software-dist.s3.amazonaws.com/rusty-wave-latest.json";
+pub const MANIFEST_URL: &str = "https://software.rustybucket.ai/rusty-wave/latest/rusty-wave-latest.json";
 const MAX_MANIFEST: u64 = 256 * 1024;
 const MAX_SIGNATURE: u64 = 64 * 1024;
 

@@ -18,7 +18,7 @@ Rusty Wave ships as a native desktop app (Linux and Windows; macOS in beta) and 
 | Signed apt repo | `dist apt-repo --sign` | gpg | `target/dist/apt-repo/` |
 | Checksums, signatures | `dist checksums [--sign]` | gpg for `--sign` | `SHA256SUMS` (+ `.asc` files); `dist verify` checks them |
 | Update manifest | `dist manifest [--base-url U] [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--sign]` | the built files in `target/dist/release` | `rusty-wave-latest.json` (+ `.asc` with `--sign`), for the in-app updater |
-| Publish | `dist publish --sign [--target ut\|rustybucket] [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--dry-run]` | the signed, verified deb, rpm and AppImage (and `.zsync`) in `target/dist/release` | copies them, their `.asc`, `rusty-wave-<ver>-SHA256SUMS` and `.asc` to `/home/jj/projects/_software-dist/rusty-wave/` and `s3://ut-software-dist/` (bucket root), then the `latest` aliases and the manifest |
+| Publish | `dist publish --sign [--target rustybucket] [--windows] [--macos] [--flatpak] [--web] [--tarball] [--all] [--dry-run]` | the signed, verified deb, rpm and AppImage (and `.zsync`) in `target/dist/release` | `target/dist/publish-rb/rusty-wave/{<ver>,latest,release}`: the files, their `.asc`, `rusty-wave-<ver>-SHA256SUMS`, the aliases and the manifest, checked against Rusty Bucket's contract (nothing is uploaded) |
 
 `cargo xtask dist check` validates the metadata without building (desktop file, AppStream, man page, that the media types agree between the
 `.desktop` file and the AppStream file, that the Windows installer registers the main extensions). `linux` runs stage to flatpak, `all`
@@ -35,19 +35,19 @@ everything. `--version V` stamps another version (a dry run such as `0.0.0-ci1`)
 
 ## Publishing builds
 
-Per the project's distribution rule, each verified build goes to `/home/jj/projects/_software-dist/rusty-wave/` and to the root of `s3://ut-software-dist/`.
-The bucket (us-east-1) is publicly readable through its bucket policy, so a file is served at `https://ut-software-dist.s3.amazonaws.com/<key>` (the
-constant `DIST_BASE_URL` in `xtask/src/dist/manifest.rs`; the AppImage's update information and the manifest start with it).
+Releases are published on Rusty Bucket's release site, `https://software.rustybucket.ai/rusty-wave/` (`<version>/` for every version, `latest/` for the aliases and the
+signed manifest); the in-app updater reads `.../latest/rusty-wave-latest.json` and the AppImage's update information names `.../latest/rusty-wave-latest-x86_64.AppImage.zsync`
+(the constants `MANIFEST_URL` in `crates/rvp-update/src/updater.rs` and `RB_BASE_URL` in `xtask/src/dist/manifest.rs`). Uploading is Rusty Bucket's publisher, run by the CI
+`publish` job (below); every verified build is also copied to `/home/jj/projects/_software-dist/rusty-wave/` for local testing.
 
-`cargo xtask dist publish --sign` first runs `dist verify`, takes `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-<release>.x86_64.rpm`, `rusty-wave-<ver>-x86_64.AppImage`
-and its `.zsync` (plus `-x64-Setup.exe` and `-windows-x64.zip` with `--windows`, `-macos-universal.dmg` with `--macos`, only when they were built and verified in the same run),
-writes and signs `rusty-wave-<ver>-SHA256SUMS` over exactly those files, builds and signs the manifest, and checks both destinations (`ls` and `aws s3api head-object`
-per file): if any *versioned* file of this version exists in either, it stops before copying anything. Bump `version` in `Cargo.toml` for the next publish.
-`--dry-run` does all checks and copies nothing. Build the files with `dist stage --container`, then `dist deb|rpm|appimage --no-build --sign`, then
+`cargo xtask dist publish --sign` first runs `dist verify` (detached signatures; the rpm and AppImage need no embedded one), takes `rusty-wave_<deb version>_amd64.deb`,
+`rusty-wave-<ver>-<release>.x86_64.rpm`, `rusty-wave-<ver>-x86_64.AppImage` and its `.zsync` (plus `-x64-Setup.exe` and `-windows-x64.zip` with `--windows`, `-macos-universal.dmg`
+with `--macos`, the Flatpak, the web zip and the tarball with their flags, only when they were built and verified in the same run), writes and signs
+`rusty-wave-<ver>-SHA256SUMS` over exactly those files, builds and signs the manifest, and lays everything out under `target/dist/publish-rb/rusty-wave/`. Nothing is uploaded.
+Build the files with `dist stage --container`, then `dist deb|rpm|appimage --no-build --sign`, then
 `dist checksums --sign` (move old files out of `target/dist/release`, `linux/stage` and `appimage` first: stale files from an earlier name would be packaged or fail `verify`).
 
-**`--target rustybucket`** (what the CI `publish` job runs; the local default target stays the `ut-software-dist` bucket) lays the same signed release out for
-Rusty Bucket's release site instead of uploading it: `target/dist/publish-rb/rusty-wave/<version>/` holds the versioned files (every artifact with its `.asc`, and the
+**The layout** (what the CI `publish` job runs; `--target rustybucket` is accepted and is the only target) is: `target/dist/publish-rb/rusty-wave/<version>/` holds the versioned files (every artifact with its `.asc`, and the
 versioned `SHA256SUMS`), `.../latest/` the `latest` aliases and the signed `rusty-wave-latest.json`. The manifest's URLs are `https://software.rustybucket.ai/rusty-wave/<version>/<file>`
 for every file, and only `zsync_url` names the alias (`.../latest/rusty-wave-latest-x86_64.AppImage.zsync`). The AppImage built with `dist appimage --target rustybucket` embeds that
 `latest/` zsync address as its update information, and its `.zsync` carries the absolute versioned AppImage URL (`.../<version>/rusty-wave-<version>-x86_64.AppImage`) with the

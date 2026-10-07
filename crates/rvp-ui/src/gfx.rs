@@ -618,7 +618,10 @@ struct Col {
     i1: u32,
     w: u32,
     /// `(256 - w) | w << 16`: both weights in one lane for the dot product.
-    #[cfg_attr(not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64")),
+        allow(dead_code)
+    )]
     wp: u32,
 }
 

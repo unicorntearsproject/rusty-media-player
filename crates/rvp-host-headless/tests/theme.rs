@@ -248,3 +248,58 @@ fn a_link_that_cannot_be_read_says_to_paste_the_css_and_changes_nothing() {
     assert!(r2.body().contains("cannot fetch links"), "{}", r2.body());
     tk::reset();
 }
+
+/// A design system's `styles.css` is often nothing but `@import` lines.
+const IMPORT_ONLY: &str = "@import url('https://design.example/system/tokens/colors.css');\n@import url('https://design.example/system/tokens/type.css');\n";
+
+#[test]
+fn css_that_only_imports_says_so_and_offers_to_fetch_the_files() {
+    let _t = one_at_a_time();
+    let mut r = Rig::new();
+    let mut net = ScriptedNet::default();
+    net.pages.insert(
+        "https://design.example/system/tokens/colors.css".into(),
+        Ok(":root{--background:#0b1220;--foreground:#eef2ff;--primary:#2255ff}".into()),
+    );
+    net.pages
+        .insert("https://design.example/system/tokens/type.css".into(), Ok(":root{--radius:2px}".into()));
+    r.host.net = Some(net);
+    r.open_theme();
+    r.paste(IMPORT_ONLY);
+    r.press("Preview");
+    let body = r.body();
+    assert!(body.contains("only imports 2 style sheets"), "{body}");
+    assert!(body.contains("no design tokens of its own"), "{body}");
+    assert!(body.contains("Press Preview again to fetch the 2 imported files"), "{body}");
+    assert!(body.contains("https://design.example/system/tokens/colors.css"), "{body}");
+    // Nothing was fetched or changed yet.
+    assert!(r.host.net.as_ref().unwrap().requests.is_empty());
+    assert_eq!(tk::get(), rvp_ui::tk::Colors::DEFAULT);
+    // Taking the offer fetches the imports and previews them.
+    r.press("Preview");
+    r.run(300);
+    assert_eq!(r.host.net.as_ref().unwrap().requests.len(), 2);
+    assert!(r.body().contains("Previewing design.example"), "{}", r.body());
+    assert_eq!(tk::ink_900(), rvp_ui::theming::color::parse_color("#0b1220").unwrap());
+    tk::reset();
+}
+
+#[test]
+fn imports_that_cannot_be_fetched_are_named_and_the_paste_is_the_way_out() {
+    let _t = one_at_a_time();
+    // Relative imports (no address to fetch from) and a host with no network get the same plain advice.
+    let mut r = Rig::new();
+    r.open_theme();
+    r.paste("@import url('tokens/colors.css');");
+    r.press("Preview");
+    assert!(r.body().contains("only imports 1 style sheet (@import)"), "{}", r.body());
+    assert!(r.body().contains("the CSS of the imported files"), "{}", r.body());
+    assert!(!r.body().contains("Press Preview again"), "{}", r.body());
+    let mut r2 = Rig::new();
+    r2.open_theme();
+    r2.paste(IMPORT_ONLY);
+    r2.press("Preview");
+    assert!(r2.body().contains("only imports 2 style sheets"), "{}", r2.body());
+    assert!(!r2.body().contains("Press Preview again"), "{}", r2.body());
+    tk::reset();
+}

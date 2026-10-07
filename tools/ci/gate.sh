@@ -5,7 +5,7 @@
 #
 # Writes `run=true` or `run=false` to $GITHUB_OUTPUT. The other jobs `need: gate` and run only when `needs.gate.outputs.run == 'true'`; a
 # skipped workflow is still green. Skips when
-#   - a tag run: the release for that tag already has assets, or `dist publish` already put that version's files on the distribution bucket
+#   - a tag run: the release for that tag already has assets, or the release site already serves that version's files
 #     (`rusty-wave-<version>-SHA256SUMS` is served): a real release is not built twice, and a tag pushed after a local publish never
 #     rebuilds. A manual dry run on the same commit does not count;
 #   - any other run: a successful run of the same workflow already exists for this commit (other than this one).
@@ -35,10 +35,11 @@ if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
   if [[ "$total" -gt 0 ]]; then
     decide false "the release for ${GITHUB_REF_NAME} already has ${total} assets"
   fi
-  # The files may already be published from the maintainer's machine (the release is then created by hand on this tag).
-  base="${DIST_BASE_URL:-https://ut-software-dist.s3.amazonaws.com}"
+  # The files may already be published on Rusty Bucket's release site: a version is published once, so a tag pushed after that never rebuilds.
+  base="${DIST_BASE_URL:-https://software.rustybucket.ai/rusty-wave}"
   ver="${GITHUB_REF_NAME#v}"
-  code=$(curl -s -o /dev/null -I -w '%{http_code}' --max-time 20 "${base}/rusty-wave-${ver}-SHA256SUMS" || true)
+  url="${base}/${ver}/rusty-wave-${ver}-SHA256SUMS"
+  code=$(curl -s -o /dev/null -I -w '%{http_code}' --max-time 20 "$url" || true)
   if [[ "$code" == "200" ]]; then
     decide false "${ver} is already published at ${base} (rusty-wave-${ver}-SHA256SUMS)"
   fi

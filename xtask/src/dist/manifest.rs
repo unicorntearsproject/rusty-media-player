@@ -6,12 +6,8 @@
 //! `.zsync` and whose internal URL points at the versioned AppImage, so the alias can never mismatch the file it describes.
 use super::*;
 
-/// Where the distribution bucket (`ut-software-dist`, us-east-1, publicly readable by its bucket policy) is served from. The AppImage embeds
-/// `zsync|<base>/rusty-wave-latest-x86_64.AppImage.zsync` and the manifest's URLs start with it. `--base-url` replaces it for local tests
-/// (any URL or `file://` path); `publish` always uses this one.
-pub(super) const DIST_BASE_URL: &str = "https://ut-software-dist.s3.amazonaws.com";
-
-/// Where Rusty Bucket's release site serves the app (`--target rustybucket`): `<base>/<version>/<file>` and `<base>/latest/<alias>`.
+/// Where Rusty Bucket's release site serves the app: `<base>/<version>/<file>` and `<base>/latest/<alias>`. `--base-url` replaces it for local tests
+/// (any URL or `file://` path).
 pub(super) const RB_BASE_URL: &str = "https://software.rustybucket.ai/rusty-wave";
 
 pub(super) const MANIFEST_NAME: &str = "rusty-wave-latest.json";
@@ -244,19 +240,20 @@ pub(super) fn check_zsync(header: &str, url: &str, size: u64, sha1: &str) -> Res
 }
 
 impl Ctx {
-    /// The base URL of the published files (`--base-url`, else the bucket).
-    pub(super) fn base_url(&self) -> String {
-        self.base_url.clone().unwrap_or_else(|| DIST_BASE_URL.to_string()).trim_end_matches('/').to_string()
-    }
-
-    /// Where the versioned files of this release are served from: the bucket, or `<site>/<version>` on Rusty Bucket's.
+    /// Where the versioned files of this release are served from: `<site>/<version>`, or `--base-url` (local tests).
     pub(super) fn versioned_base(&self) -> String {
-        if self.rustybucket { format!("{RB_BASE_URL}/{}", self.version) } else { self.base_url() }
+        match &self.base_url {
+            Some(b) => b.trim_end_matches('/').to_string(),
+            None => format!("{RB_BASE_URL}/{}", self.version),
+        }
     }
 
-    /// Where the `latest` aliases are served from: the bucket, or `<site>/latest`.
+    /// Where the `latest` aliases are served from: `<site>/latest`, or `--base-url` (local tests).
     pub(super) fn latest_base(&self) -> String {
-        if self.rustybucket { format!("{RB_BASE_URL}/latest") } else { self.base_url() }
+        match &self.base_url {
+            Some(b) => b.trim_end_matches('/').to_string(),
+            None => format!("{RB_BASE_URL}/latest"),
+        }
     }
 
     /// The update information embedded in the AppImage.

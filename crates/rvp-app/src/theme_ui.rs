@@ -44,6 +44,9 @@ pub(crate) struct ThemeUi {
     link: String,
     /// More sheets were found than are fetched.
     capped: bool,
+    /// Pasted CSS that only imports other sheets: the text, and the absolute https addresses offered for fetching (pressing *Preview* again
+    /// with the same text takes the offer).
+    offer: Option<(String, Vec<String>)>,
 }
 
 impl ThemeUi {
@@ -76,6 +79,7 @@ impl ThemeUi {
         self.jobs.clear();
         self.sheets.clear();
         self.capped = false;
+        self.offer = None;
     }
 
     pub(crate) fn has_candidate(&self) -> bool {
@@ -380,10 +384,58 @@ impl App {
             let ticket = net.fetch_text(&text);
             self.themeui.jobs.push(Job { ticket, url: text, depth: 0 });
             self.themeui.status = alloc::vec!["Fetching\u{2026}".into()];
+        } else if let Some(urls) = self.themeui.offer.take().filter(|(t, _)| *t == text).map(|(_, u)| u) {
+            // The offer was taken: fetch the files the pasted CSS imports; it is read last, so what it says itself wins.
+            let Some(net) = host.net() else { return };
+            self.themeui.link = urls.first().cloned().unwrap_or_default();
+            self.themeui.sheets.push((0, text));
+            for u in urls.into_iter().take(MAX_SHEETS - 1) {
+                let ticket = net.fetch_text(&u);
+                self.themeui.jobs.push(Job { ticket, url: u, depth: 1 });
+            }
+            self.themeui.status = alloc::vec!["Fetching the imported files\u{2026}".into()];
         } else {
             let t = text.clone();
             self.theme_make(&[&t], "Pasted theme");
+            if self.themeui.candidate.is_none() {
+                self.theme_explain_imports(host, &t);
+            }
         }
+    }
+
+    /// Pasted CSS that gave no theme but imports other sheets (a design system's `styles.css` is often only `@import` lines): say so, and
+    /// offer to fetch the imports that are absolute https addresses.
+    fn theme_explain_imports<H: Host<Video = FrameSink>>(&mut self, host: &mut H, text: &str) {
+        let imports = rvp_ui::theming::css::Sheet::parse(text).imports;
+        if imports.is_empty() {
+            return;
+        }
+        let https: Vec<String> =
+            imports.iter().filter(|i| i.trim().starts_with("https://")).fold(Vec::new(), |mut v, i| {
+                if !v.contains(i) {
+                    v.push(i.trim().to_string());
+                }
+                v
+            });
+        let n = imports.len();
+        let mut status = alloc::vec![alloc::format!(
+            "That CSS only imports {} style sheet{} (@import) and has no design tokens of its own, so there is nothing to read yet.",
+            n,
+            if n == 1 { "" } else { "s" }
+        )];
+        if !https.is_empty() && host.net().is_some() {
+            status.push(alloc::format!(
+                "Press Preview again to fetch the {} imported file{} from the web: {}.",
+                https.len(),
+                if https.len() == 1 { "" } else { "s" },
+                https.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+            ));
+            status.push("Or paste the link to the design system, or the CSS of the imported files.".into());
+            self.themeui.offer = Some((text.trim().to_string(), https));
+        } else {
+            status.push("Paste the link to the design system, or the CSS of the imported files (copy their text from the browser).".into());
+        }
+        self.themeui.status = status;
     }
 
     /// *Apply* was pressed: keep the preview.

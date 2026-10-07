@@ -94,7 +94,8 @@ pub(super) fn check_files(dir: &Path, version: &str) -> Result<Vec<String>, Stri
     if let Ok(z) = fs::read(dir.join(&zsync)) {
         let header: String = String::from_utf8_lossy(&z).split("\n\n").next().unwrap_or("").to_string();
         let want_url = format!("{RB_BASE_URL}/{version}/{appimage}");
-        let get = |k: &str| header.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix(": ")).map(str::to_string);
+        let get =
+            |k: &str| header.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix(": ")).map(str::to_string);
         if get("URL").as_deref() != Some(want_url.as_str()) {
             bad.push(format!("{zsync}: URL is {:?}, expected {want_url:?}", get("URL")));
         }
@@ -112,10 +113,9 @@ fn check_manifest(dir: &Path, version: &str, assets: &[manifest::Asset]) -> Vec<
     let Ok(text) = fs::read_to_string(dir.join(MANIFEST_NAME)) else { return vec![] };
     let mut bad = Vec::new();
     let vdir = format!("{RB_BASE_URL}/{version}");
-    for (what, want) in [
-        ("schema", "\"schema\": 1,".to_string()),
-        ("version", format!("\"version\": \"{version}\",")),
-    ] {
+    for (what, want) in
+        [("schema", "\"schema\": 1,".to_string()), ("version", format!("\"version\": \"{version}\","))]
+    {
         if !text.contains(&want) {
             bad.push(format!("{MANIFEST_NAME}: {what} is not {want}"));
         }
@@ -208,7 +208,12 @@ impl Ctx {
             }
         }
         if bad.is_empty() {
-            println!("rustybucket release dir ok: {} ({} files, {} signatures)", dir.display(), names.len() * 2, names.len());
+            println!(
+                "rustybucket release dir ok: {} ({} files, {} signatures)",
+                dir.display(),
+                names.len() * 2,
+                names.len()
+            );
             Ok(())
         } else {
             Err(format!("the release directory does not meet the contract:\n  {}", bad.join("\n  ")))
@@ -224,7 +229,9 @@ mod tests {
     fn a_subkey_signature_counts_for_its_primary_key() {
         let primary = "E13FF843723D54068E45A3FF54BF2FA407093CEE";
         let sub = "2FD1848657B706A3576877E071DB2DB049A19B84";
-        let by_sub = format!("[GNUPG:] GOODSIG 71DB2DB049A19B84 x\n[GNUPG:] VALIDSIG {sub} 2026-10-07 1 0 4 0 22 10 00 {primary}\n");
+        let by_sub = format!(
+            "[GNUPG:] GOODSIG 71DB2DB049A19B84 x\n[GNUPG:] VALIDSIG {sub} 2026-10-07 1 0 4 0 22 10 00 {primary}\n"
+        );
         let by_primary = format!("[GNUPG:] VALIDSIG {primary} 2026-10-05 1 0 4 0 22 10 00 {primary}\n");
         assert!(valid_sig_by(&by_sub, primary));
         assert!(valid_sig_by(&by_primary, primary));
@@ -249,7 +256,12 @@ mod tests {
             fs::write(dir.join(&a.name), &body).unwrap();
             files.push(a.name.clone());
             if let Some(z) = &a.zsync {
-                let header = format!("zsync: 0.6.2\nFilename: {}\nURL: {RB_BASE_URL}/{v}/{}\nLength: {}\n\nbinary", a.name, a.name, body.len());
+                let header = format!(
+                    "zsync: 0.6.2\nFilename: {}\nURL: {RB_BASE_URL}/{v}/{}\nLength: {}\n\nbinary",
+                    a.name,
+                    a.name,
+                    body.len()
+                );
                 fs::write(dir.join(z), header).unwrap();
                 files.push(z.clone());
             }

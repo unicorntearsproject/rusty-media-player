@@ -49,11 +49,11 @@ targets:
   verify       check every signature in target/dist against packaging/keys/rusty-wave-release.asc in a throwaway keyring;
                with --target rustybucket: check the directory `publish --target rustybucket` staged against Rusty Bucket's input contract
   manifest     rusty-wave-latest.json (the in-app updater's manifest) of what is built in target/dist/release; --base-url U sets where the
-               files will be served (an https:// URL or file:///path, default the bucket); --windows, --macos, --flatpak, --web, --tarball (or --all) list those files too
-  publish      copy the verified deb, rpm and AppImage (with .asc, .zsync and a versioned SHA256SUMS) to /home/jj/projects/_software-dist/rusty-wave/ and
-               s3://ut-software-dist/; needs --sign, never overwrites a versioned file (stops if one exists in either place), then
-               overwrites the `latest` aliases and the manifest last; --windows / --macos / --flatpak / --web / --tarball (or --all) add the Windows installer and zip / the
-               macOS dmg / the Flatpak bundle / the web app zip / the Linux tarball (only when built and verified in the same run); --dry-run only checks
+               files will be served (an https:// URL or file:///path, default Rusty Bucket's release site); --windows, --macos, --flatpak, --web, --tarball (or --all) list those files too
+  publish      lay the verified release out for Rusty Bucket's release site (software.rustybucket.ai) in target/dist/publish-rb/rusty-wave: <version>/ (the versioned
+               files), latest/ (aliases and the signed manifest) and release/ (the directory their publisher takes), and check it against their input
+               contract; needs --sign, uploads nothing; --windows / --macos / --flatpak / --web / --tarball (or --all) add the Windows installer and zip / the macOS
+               dmg / the Flatpak bundle / the web app zip / the Linux tarball (only when built and verified in the same run); --dry-run only checks
   check        validate the metadata (desktop file, AppStream, man page) without building anything
   linux        stage, tarball, deb, rpm, appimage and flatpak
   all          linux, windows, installer, pwa and checksums
@@ -65,7 +65,7 @@ targets:
               and a detached .asc next to every artifact and SHA256SUMS. The key is RVP_GPG_KEY (a fingerprint) or the one in
               packaging/keys/rusty-wave-release.asc; its secret half must be in your gpg keyring.
 --sign-key K  like --sign with the key K
---base-url U  where the published files are served from (the AppImage's update information, the manifest); default the bucket
+--base-url U  where the published files are served from (the AppImage's update information, the manifest); default Rusty Bucket's release site
 --repo-url U  the URL the Flatpak repo will be served from, written into the .flatpakrepo and .flatpakref (default file://<local repo>)
 
 Outputs go to target/dist/release. Other signing hooks: RVP_SIGN_CMD (run once per Linux artifact with {} replaced by its path),
@@ -82,7 +82,7 @@ struct Ctx {
     sign: Option<String>,
     repo_url: Option<String>,
     base_url: Option<String>,
-    /// `--target rustybucket`: lay the release out for Rusty Bucket's release site (`<v>/` and `latest/`) instead of the bucket.
+    /// `--target rustybucket` (the only target): with `verify`, check the staged release directory against Rusty Bucket's contract.
     rustybucket: bool,
 }
 
@@ -115,9 +115,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--base-url" => base_url = Some(it.next().ok_or("--base-url needs a value")?.clone()),
             "--target" => {
                 rustybucket = match it.next().ok_or("--target needs a value")?.as_str() {
-                    "ut" | "bucket" => false,
                     "rustybucket" => true,
-                    other => return Err(format!("unknown --target `{other}` (ut or rustybucket)")),
+                    other => {
+                        return Err(format!(
+                            "unknown --target `{other}`: rustybucket is the only target (the old bucket was dropped)"
+                        ));
+                    }
                 }
             }
             "--dry-run" => dry_run = true,
@@ -1111,16 +1114,22 @@ impl Ctx {
 /// dependency without `cargo xtask dist flatpak-sources` breaks only the CI Flatpak job, so `dist check` catches it first.
 fn flatpak_sources_cover_lockfile(root: &Path) -> Result<(), String> {
     let lock = fs::read_to_string(root.join("Cargo.lock")).map_err(|e| e.to_string())?;
-    let sources = fs::read_to_string(root.join("packaging/flatpak/cargo-sources.json")).map_err(|e| e.to_string())?;
+    let sources =
+        fs::read_to_string(root.join("packaging/flatpak/cargo-sources.json")).map_err(|e| e.to_string())?;
     let mut missing = Vec::new();
     for block in lock.split("[[package]]").skip(1) {
         let field = |k: &str| {
-            block.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix(" = \"")?.strip_suffix('"')).map(str::to_string)
+            block
+                .lines()
+                .find_map(|l| l.strip_prefix(k)?.strip_prefix(" = \"")?.strip_suffix('"'))
+                .map(str::to_string)
         };
-        let (Some(name), Some(version), Some(source)) = (field("name"), field("version"), field("source")) else {
+        let (Some(name), Some(version), Some(source)) = (field("name"), field("version"), field("source"))
+        else {
             continue;
         };
-        if source.starts_with("registry+") && !sources.contains(&format!("\"cargo/vendor/{name}-{version}\"")) {
+        if source.starts_with("registry+") && !sources.contains(&format!("\"cargo/vendor/{name}-{version}\""))
+        {
             missing.push(format!("{name} {version}"));
         }
     }

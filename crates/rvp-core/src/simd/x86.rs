@@ -69,9 +69,7 @@ pub fn store4(s: &mut [u8], v: v128) {
 #[inline(always)]
 pub fn load8_hi(v: v128, s: &[u8]) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_unpacklo_epi64(v, load8(s))
-    }
+    unsafe { a::_mm_unpacklo_epi64(v, load8(s)) }
 }
 
 // ---- splat ---------------------------------------------------------------------------------------------------------------------------
@@ -79,44 +77,32 @@ pub fn load8_hi(v: v128, s: &[u8]) -> v128 {
 #[inline(always)]
 pub fn u8x16_splat(x: u8) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_set1_epi8(x as i8)
-    }
+    unsafe { a::_mm_set1_epi8(x as i8) }
 }
 #[inline(always)]
 pub fn i8x16_splat(x: i8) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_set1_epi8(x)
-    }
+    unsafe { a::_mm_set1_epi8(x) }
 }
 #[inline(always)]
 pub fn u16x8_splat(x: u16) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_set1_epi16(x as i16)
-    }
+    unsafe { a::_mm_set1_epi16(x as i16) }
 }
 #[inline(always)]
 pub fn i16x8_splat(x: i16) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_set1_epi16(x)
-    }
+    unsafe { a::_mm_set1_epi16(x) }
 }
 #[inline(always)]
 pub fn u32x4_splat(x: u32) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_set1_epi32(x as i32)
-    }
+    unsafe { a::_mm_set1_epi32(x as i32) }
 }
 #[inline(always)]
 pub fn i32x4_splat(x: i32) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_set1_epi32(x)
-    }
+    unsafe { a::_mm_set1_epi32(x) }
 }
 
 // ---- bits ------------------------------------------------------------------------------------------------------------------------------
@@ -124,24 +110,18 @@ pub fn i32x4_splat(x: i32) -> v128 {
 #[inline(always)]
 pub fn v128_and(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_and_si128(x, y)
-    }
+    unsafe { a::_mm_and_si128(x, y) }
 }
 #[inline(always)]
 pub fn v128_or(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_or_si128(x, y)
-    }
+    unsafe { a::_mm_or_si128(x, y) }
 }
 /// `(v1 & c) | (v2 & !c)`, bit by bit.
 #[inline(always)]
 pub fn v128_bitselect(v1: v128, v2: v128, c: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_or_si128(a::_mm_and_si128(v1, c), a::_mm_andnot_si128(c, v2))
-    }
+    unsafe { a::_mm_or_si128(a::_mm_and_si128(v1, c), a::_mm_andnot_si128(c, v2)) }
 }
 
 // ---- 16-bit lanes ------------------------------------------------------------------------------------------------------------------------
@@ -149,62 +129,46 @@ pub fn v128_bitselect(v1: v128, v2: v128, c: v128) -> v128 {
 #[inline(always)]
 pub fn i16x8_add(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_add_epi16(x, y)
-    }
+    unsafe { a::_mm_add_epi16(x, y) }
 }
 #[inline(always)]
 pub fn i16x8_sub(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_sub_epi16(x, y)
-    }
+    unsafe { a::_mm_sub_epi16(x, y) }
 }
 /// The low 16 bits of each product.
 #[inline(always)]
 pub fn i16x8_mul(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_mullo_epi16(x, y)
-    }
+    unsafe { a::_mm_mullo_epi16(x, y) }
 }
 /// Shift left by `n` bits (taken modulo 16).
 #[inline(always)]
 pub fn i16x8_shl(x: v128, n: u32) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_sll_epi16(x, a::_mm_cvtsi32_si128((n & 15) as i32))
-    }
+    unsafe { a::_mm_sll_epi16(x, a::_mm_cvtsi32_si128((n & 15) as i32)) }
 }
 /// Arithmetic shift right (the sign is copied in).
 #[inline(always)]
 pub fn i16x8_shr(x: v128, n: u32) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_sra_epi16(x, a::_mm_cvtsi32_si128((n & 15) as i32))
-    }
+    unsafe { a::_mm_sra_epi16(x, a::_mm_cvtsi32_si128((n & 15) as i32)) }
 }
 /// Logical shift right (zeros come in).
 #[inline(always)]
 pub fn u16x8_shr(x: v128, n: u32) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_srl_epi16(x, a::_mm_cvtsi32_si128((n & 15) as i32))
-    }
+    unsafe { a::_mm_srl_epi16(x, a::_mm_cvtsi32_si128((n & 15) as i32)) }
 }
 #[inline(always)]
 pub fn i16x8_min(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_min_epi16(x, y)
-    }
+    unsafe { a::_mm_min_epi16(x, y) }
 }
 #[inline(always)]
 pub fn i16x8_max(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_max_epi16(x, y)
-    }
+    unsafe { a::_mm_max_epi16(x, y) }
 }
 
 // ---- 32-bit lanes ------------------------------------------------------------------------------------------------------------------------
@@ -212,16 +176,12 @@ pub fn i16x8_max(x: v128, y: v128) -> v128 {
 #[inline(always)]
 pub fn i32x4_add(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_add_epi32(x, y)
-    }
+    unsafe { a::_mm_add_epi32(x, y) }
 }
 #[inline(always)]
 pub fn i32x4_sub(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_sub_epi32(x, y)
-    }
+    unsafe { a::_mm_sub_epi32(x, y) }
 }
 /// The low 32 bits of each product (SSE2 has no such multiply: the even and odd lanes go through `pmuludq`, whose low halves are the same
 /// for signed and unsigned operands).
@@ -239,24 +199,18 @@ pub fn i32x4_mul(x: v128, y: v128) -> v128 {
 #[inline(always)]
 pub fn i32x4_shr(x: v128, n: u32) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_sra_epi32(x, a::_mm_cvtsi32_si128((n & 31) as i32))
-    }
+    unsafe { a::_mm_sra_epi32(x, a::_mm_cvtsi32_si128((n & 31) as i32)) }
 }
 #[inline(always)]
 pub fn u32x4_shr(x: v128, n: u32) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_srl_epi32(x, a::_mm_cvtsi32_si128((n & 31) as i32))
-    }
+    unsafe { a::_mm_srl_epi32(x, a::_mm_cvtsi32_si128((n & 31) as i32)) }
 }
 /// `x[2i] * y[2i] + x[2i+1] * y[2i+1]` as 32-bit lanes, from signed 16-bit inputs.
 #[inline(always)]
 pub fn i32x4_dot_i16x8(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_madd_epi16(x, y)
-    }
+    unsafe { a::_mm_madd_epi16(x, y) }
 }
 
 // ---- 8-bit lanes -----------------------------------------------------------------------------------------------------------------------
@@ -264,31 +218,23 @@ pub fn i32x4_dot_i16x8(x: v128, y: v128) -> v128 {
 #[inline(always)]
 pub fn u8x16_add(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_add_epi8(x, y)
-    }
+    unsafe { a::_mm_add_epi8(x, y) }
 }
 #[inline(always)]
 pub fn u8x16_sub(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_sub_epi8(x, y)
-    }
+    unsafe { a::_mm_sub_epi8(x, y) }
 }
 #[inline(always)]
 pub fn u8x16_sub_sat(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_subs_epu8(x, y)
-    }
+    unsafe { a::_mm_subs_epu8(x, y) }
 }
 /// `(x + y + 1) >> 1` per byte.
 #[inline(always)]
 pub fn u8x16_avgr(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_avg_epu8(x, y)
-    }
+    unsafe { a::_mm_avg_epu8(x, y) }
 }
 /// 0xFF in the bytes where `x < y` (unsigned), else 0.
 #[inline(always)]
@@ -313,17 +259,13 @@ pub fn u8x16_shr(x: v128, n: u32) -> v128 {
 #[inline(always)]
 pub fn u8x16_narrow_i16x8(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_packus_epi16(x, y)
-    }
+    unsafe { a::_mm_packus_epi16(x, y) }
 }
 /// The signed 32-bit lanes of `x` then `y` as signed 16-bit lanes, saturated.
 #[inline(always)]
 pub fn i16x8_narrow_i32x4(x: v128, y: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_packs_epi32(x, y)
-    }
+    unsafe { a::_mm_packs_epi32(x, y) }
 }
 
 // ---- widening ------------------------------------------------------------------------------------------------------------------------
@@ -331,44 +273,32 @@ pub fn i16x8_narrow_i32x4(x: v128, y: v128) -> v128 {
 #[inline(always)]
 pub fn u16x8_extend_low_u8x16(x: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_unpacklo_epi8(x, a::_mm_setzero_si128())
-    }
+    unsafe { a::_mm_unpacklo_epi8(x, a::_mm_setzero_si128()) }
 }
 #[inline(always)]
 pub fn u16x8_extend_high_u8x16(x: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_unpackhi_epi8(x, a::_mm_setzero_si128())
-    }
+    unsafe { a::_mm_unpackhi_epi8(x, a::_mm_setzero_si128()) }
 }
 #[inline(always)]
 pub fn u32x4_extend_low_u16x8(x: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_unpacklo_epi16(x, a::_mm_setzero_si128())
-    }
+    unsafe { a::_mm_unpacklo_epi16(x, a::_mm_setzero_si128()) }
 }
 #[inline(always)]
 pub fn u32x4_extend_high_u16x8(x: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_unpackhi_epi16(x, a::_mm_setzero_si128())
-    }
+    unsafe { a::_mm_unpackhi_epi16(x, a::_mm_setzero_si128()) }
 }
 #[inline(always)]
 pub fn i32x4_extend_low_i16x8(x: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_srai_epi32::<16>(a::_mm_unpacklo_epi16(x, x))
-    }
+    unsafe { a::_mm_srai_epi32::<16>(a::_mm_unpacklo_epi16(x, x)) }
 }
 #[inline(always)]
 pub fn i32x4_extend_high_i16x8(x: v128) -> v128 {
     // SAFETY: SSE2 is part of the x86_64 baseline, so these intrinsics are always available; no pointers are involved.
-    unsafe {
-        a::_mm_srai_epi32::<16>(a::_mm_unpackhi_epi16(x, x))
-    }
+    unsafe { a::_mm_srai_epi32::<16>(a::_mm_unpackhi_epi16(x, x)) }
 }
 
 // ---- shuffles --------------------------------------------------------------------------------------------------------------------------
@@ -487,7 +417,10 @@ pub fn i8x16_shuffle<
 /// Pick 32-bit lanes of `x` (0..4) and `y` (4..8): `I0..I3`. The two patterns the kernels use (a duplicate of the low or the high half) are
 /// single instructions; others go through memory.
 #[inline(always)]
-pub fn i32x4_shuffle<const I0: usize, const I1: usize, const I2: usize, const I3: usize>(x: v128, y: v128) -> v128 {
+pub fn i32x4_shuffle<const I0: usize, const I1: usize, const I2: usize, const I3: usize>(
+    x: v128,
+    y: v128,
+) -> v128 {
     if I0 == 0 && I1 == 0 && I2 == 1 && I3 == 1 {
         return unsafe { a::_mm_unpacklo_epi32(x, x) };
     }
@@ -580,7 +513,10 @@ mod tests {
             assert_eq!(bytes(v128_and(vx, vy)), b(&|p, q| p & q));
             assert_eq!(bytes(v128_or(vx, vy)), b(&|p, q| p | q));
             let m = &s[(i * 5 + 1) % s.len()];
-            assert_eq!(bytes(v128_bitselect(vx, vy, load(m))), core::array::from_fn(|k| (x[k] & m[k]) | (y[k] & !m[k])));
+            assert_eq!(
+                bytes(v128_bitselect(vx, vy, load(m))),
+                core::array::from_fn(|k| (x[k] & m[k]) | (y[k] & !m[k]))
+            );
             // 16-bit lanes.
             let (hx, hy) = (h(vx), h(vy));
             let hh = |f: &dyn Fn(i16, i16) -> i16| -> [i16; 8] { core::array::from_fn(|k| f(hx[k], hy[k])) };
@@ -592,7 +528,11 @@ mod tests {
             for n in [0u32, 1, 3, 7, 8, 15] {
                 assert_eq!(h(i16x8_shl(vx, n)), core::array::from_fn(|k| hx[k].wrapping_shl(n)), "shl {n}");
                 assert_eq!(h(i16x8_shr(vx, n)), core::array::from_fn(|k| hx[k] >> n), "shr {n}");
-                assert_eq!(h(u16x8_shr(vx, n)), core::array::from_fn(|k| ((hx[k] as u16) >> n) as i16), "ushr {n}");
+                assert_eq!(
+                    h(u16x8_shr(vx, n)),
+                    core::array::from_fn(|k| ((hx[k] as u16) >> n) as i16),
+                    "ushr {n}"
+                );
             }
             // 32-bit lanes.
             let (wx, wy) = (w(vx), w(vy));
@@ -602,11 +542,16 @@ mod tests {
             assert_eq!(w(i32x4_mul(vx, vy)), ww(&|p, q| p.wrapping_mul(q)));
             for n in [0u32, 1, 5, 16, 31] {
                 assert_eq!(w(i32x4_shr(vx, n)), core::array::from_fn(|k| wx[k] >> n), "i32 shr {n}");
-                assert_eq!(w(u32x4_shr(vx, n)), core::array::from_fn(|k| ((wx[k] as u32) >> n) as i32), "u32 shr {n}");
+                assert_eq!(
+                    w(u32x4_shr(vx, n)),
+                    core::array::from_fn(|k| ((wx[k] as u32) >> n) as i32),
+                    "u32 shr {n}"
+                );
             }
             assert_eq!(
                 w(i32x4_dot_i16x8(vx, vy)),
-                core::array::from_fn(|k| (hx[2 * k] as i32 * hy[2 * k] as i32).wrapping_add(hx[2 * k + 1] as i32 * hy[2 * k + 1] as i32))
+                core::array::from_fn(|k| (hx[2 * k] as i32 * hy[2 * k] as i32)
+                    .wrapping_add(hx[2 * k + 1] as i32 * hy[2 * k + 1] as i32))
             );
             // Narrowing.
             assert_eq!(
@@ -676,7 +621,10 @@ mod tests {
             [31, 0, 17, 3, 5, 9, 30, 2, 1, 1, 16, 16, 15, 14, 13, 12],
         );
         let (vx, vy) = (load(&x), load(&y));
-        assert_eq!(bytes(i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0>(vx, vy))[..8], x[8..]);
+        assert_eq!(
+            bytes(i8x16_shuffle::<8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0>(vx, vy))[..8],
+            x[8..]
+        );
         let xw = w(vx);
         assert_eq!(w(i32x4_shuffle::<0, 0, 1, 1>(vx, vx)), [xw[0], xw[0], xw[1], xw[1]]);
         assert_eq!(w(i32x4_shuffle::<2, 2, 3, 3>(vx, vx)), [xw[2], xw[2], xw[3], xw[3]]);
