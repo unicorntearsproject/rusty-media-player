@@ -375,6 +375,24 @@ CH
 
 # ---------------------------------------------------------------------------------------------------------
 # M9: one minute of 1080p30 per codec for the real-time tests in the browser (video plus a sine on AAC/Opus).
+# The HEVC speed streams (rc9): 1080p30 Main and Main 10, 20 s, a typical bitrate, B-frames, CTU 64.
+gen_perf_hevc() {
+  local d="$out/perf"
+  mkdir -p "$d"
+  local version=1
+  [[ "$(cat "$d/.done-hevc" 2>/dev/null)" == "$version" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return
+  local a=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=20")
+  local vin=(-f lavfi -i "testsrc2=size=1920x1080:rate=30")
+  local vf="noise=alls=2:allf=t,format=yuv420p"
+  local x="crf=24:bframes=3:ref=3:keyint=60:pools=4:frame-threads=2:no-info=1"
+  ff "${a[@]}" "${vin[@]}" -vf "$vf" -frames:v 600 -map 1:v -map 0:a -c:v libx265 -preset fast -x265-params "$x" -tag:v hvc1 \
+     -c:a aac -b:a 96k -shortest -movflags +faststart "$d/hevc_1080p30.mp4"
+  ff "${a[@]}" "${vin[@]}" -vf "noise=alls=2:allf=t,format=yuv420p10le" -frames:v 600 -map 1:v -map 0:a -c:v libx265 -preset fast \
+     -x265-params "$x" -profile:v main10 -tag:v hvc1 -c:a aac -b:a 96k -shortest -movflags +faststart "$d/hevc10_1080p30.mp4"
+  echo "$version" > "$d/.done-hevc"
+  echo "hevc perf fixtures in $d"
+}
+
 gen_perf() {
   local d="$out/perf"
   mkdir -p "$d"
@@ -677,5 +695,6 @@ if [[ "$fixture_set" == all || "$fixture_set" == library ]]; then gen_library; f
 if [[ "$fixture_set" == all || "$fixture_set" == levels ]]; then gen_levels; fi
 if [[ "$fixture_set" == all || "$fixture_set" == hevc ]]; then gen_hevc; fi
 if [[ "$fixture_set" == hevcconf ]]; then gen_hevcconf; fi
-if [[ "$fixture_set" == perf ]]; then gen_perf; fi
+if [[ "$fixture_set" == perf ]]; then gen_perf; gen_perf_hevc; fi
+if [[ "$fixture_set" == perfhevc ]]; then gen_perf_hevc; fi
 echo "fixtures in $out"
