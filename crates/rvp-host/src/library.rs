@@ -65,6 +65,11 @@ pub trait Library {
     fn standard_folders(&mut self) -> Vec<StandardFolder> {
         Vec::new()
     }
+    /// A sentence for the person when `standard_folders` left one out on purpose (the system names the home folder as the Videos folder: a
+    /// library of the whole home would crawl everything), or `None`.
+    fn standard_folders_note(&self) -> Option<String> {
+        None
+    }
     /// Add the folder at `path` to the library without asking: the host walks it and hands the result back through
     /// [`Library::take_listing`] like any other folder. `false` when the host cannot.
     fn add_path(&mut self, _path: &str) -> bool {
@@ -83,6 +88,8 @@ pub struct ScriptedLibrary {
     pub standard: Vec<StandardFolder>,
     /// The paths `add_path` was asked for.
     pub added: Vec<String>,
+    /// What `standard_folders_note` returns.
+    pub note: Option<String>,
 }
 
 impl Library for ScriptedLibrary {
@@ -101,5 +108,9 @@ impl Library for ScriptedLibrary {
     fn add_path(&mut self, path: &str) -> bool {
         self.added.push(path.into());
         true
+    }
+
+    fn standard_folders_note(&self) -> Option<String> {
+        self.note.clone()
     }
 }

@@ -124,12 +124,21 @@ pub struct DesktopLibrary {
     ready: VecDeque<Listing>,
     /// The set of folders changed since it was last saved (the window saves it: it is what is read back at the next start).
     roots_dirty: bool,
+    /// What `standard_folders` left out on purpose.
+    folders_note: Option<String>,
 }
 
 impl DesktopLibrary {
     fn new() -> Self {
         let (tx, rx) = channel();
-        Self { tx, rx, roots: BTreeMap::new(), ready: VecDeque::new(), roots_dirty: false }
+        Self {
+            tx,
+            rx,
+            roots: BTreeMap::new(),
+            ready: VecDeque::new(),
+            roots_dirty: false,
+            folders_note: None,
+        }
     }
 
     /// Walk `dir` (on a thread) and remember it as a library folder.
@@ -179,7 +188,13 @@ impl Library for DesktopLibrary {
     }
 
     fn standard_folders(&mut self) -> Vec<StandardFolder> {
-        standard_folders()
+        let (folders, note) = standard_folders_checked();
+        self.folders_note = note;
+        folders
+    }
+
+    fn standard_folders_note(&self) -> Option<String> {
+        self.folders_note.clone()
     }
 
     fn add_path(&mut self, path: &str) -> bool {
@@ -192,22 +207,72 @@ impl Library for DesktopLibrary {
     }
 }
 
+/// Whether a folder is too broad to be a library: the home folder itself, anything above it (`/`, `/home`) or a system folder. A system that
+/// names the home folder as its Videos folder (a setting some distributions make when the user has none) would otherwise have the first
+/// run walk the whole home: repositories, build output, caches.
+pub fn too_broad(dir: &std::path::Path, home: &std::path::Path) -> bool {
+    let canon = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let (d, h) = (canon(dir), canon(home));
+    d == h
+        || h.starts_with(&d)
+        || d.parent().is_none()
+        || [
+            "/usr", "/etc", "/var", "/opt", "/bin", "/lib", "/sbin", "/boot", "/sys", "/proc", "/dev",
+            "/run", "/tmp",
+        ]
+        .iter()
+        .any(|sys| d == std::path::Path::new(sys))
+}
+
 /// The user's Music and Videos folders as the system names them: the XDG user directories (`user-dirs.dirs`) on Linux, the Known Folders
-/// on Windows, `~/Music` and `~/Movies` on macOS. Only those that exist, and never the home folder itself (a system without a
-/// Videos folder points it there).
-pub fn standard_folders() -> Vec<StandardFolder> {
-    let Some(dirs) = directories::UserDirs::new() else { return Vec::new() };
-    let home = dirs.home_dir().to_path_buf();
+/// on Windows, `~/Music` and `~/Movies` on macOS. Only those that exist, and never one that is too broad (see [`too_broad`]): then
+/// `~/Videos` (or `~/Movies`) stands in when it exists, and the second value says what was left out.
+pub fn standard_folders_checked() -> (Vec<StandardFolder>, Option<String>) {
+    let Some(dirs) = directories::UserDirs::new() else { return (Vec::new(), None) };
+    pick_standard_folders(dirs.home_dir(), dirs.audio_dir(), dirs.video_dir())
+}
+
+/// [`standard_folders_checked`] for the given home, Music and Videos folders (the system's answers), so it can be tried with any of them.
+pub fn pick_standard_folders(
+    home: &std::path::Path,
+    audio: Option<&std::path::Path>,
+    video: Option<&std::path::Path>,
+) -> (Vec<StandardFolder>, Option<String>) {
     let mut out = Vec::new();
-    for (kind, dir) in [(StandardKind::Music, dirs.audio_dir()), (StandardKind::Videos, dirs.video_dir())] {
+    let mut note = None;
+    for (kind, dir, fallbacks, what) in [
+        (StandardKind::Music, audio, &["Music"][..], "Music"),
+        (StandardKind::Videos, video, &["Videos", "Movies"][..], "Videos"),
+    ] {
         let Some(dir) = dir else { continue };
-        if !dir.is_dir() || dir == home.as_path() {
+        let mut chosen = dir.to_path_buf();
+        if too_broad(&chosen, home) {
+            // The home folder (or something above it) named as the folder: use the usual place if there is one, else leave it out.
+            match fallbacks.iter().map(|f| home.join(f)).find(|p| p.is_dir() && !too_broad(p, home)) {
+                Some(p) => chosen = p,
+                None => {
+                    if dir.is_dir() {
+                        note = Some(format!(
+                            "Your {what} folder is set to your home folder \u{2014} add a folder instead."
+                        ));
+                    }
+                    continue;
+                }
+            }
+        }
+        if !chosen.is_dir() {
             continue;
         }
-        let name = dir.file_name().map_or_else(|| "Folder".to_string(), |n| n.to_string_lossy().into_owned());
-        out.push(StandardFolder { kind, name, path: dir.to_string_lossy().into_owned() });
+        let name =
+            chosen.file_name().map_or_else(|| "Folder".to_string(), |n| n.to_string_lossy().into_owned());
+        out.push(StandardFolder { kind, name, path: chosen.to_string_lossy().into_owned() });
     }
-    out
+    (out, note)
+}
+
+/// The user's Music and Videos folders (see [`standard_folders_checked`]).
+pub fn standard_folders() -> Vec<StandardFolder> {
+    standard_folders_checked().0
 }
 
 /// Everything the app needs from the desktop.
@@ -305,5 +370,52 @@ impl Host for DesktopHost {
     }
     fn stable_ids(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod standard_folder_tests {
+    use super::*;
+
+    fn home(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("rvp-std-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_videos_folder_that_is_the_home_folder_is_not_added() {
+        let h = home("h1");
+        std::fs::create_dir_all(h.join("Music")).unwrap();
+        std::fs::create_dir_all(h.join("repos/big")).unwrap();
+        // `XDG_VIDEOS_DIR="$HOME/"`: Videos is the home folder itself. There is no ~/Videos to stand in: it is left out, with a note.
+        let (found, note) = pick_standard_folders(&h, Some(&h.join("Music")), Some(&h));
+        assert_eq!(found.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Music"]);
+        assert!(
+            note.as_deref().is_some_and(|n| n.contains("Videos folder is set to your home folder")),
+            "{note:?}"
+        );
+        // With a ~/Videos the usual place stands in.
+        std::fs::create_dir_all(h.join("Videos")).unwrap();
+        let (found, note) = pick_standard_folders(&h, Some(&h.join("Music")), Some(&h));
+        assert_eq!(found.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Music", "Videos"]);
+        assert!(note.is_none());
+        // Trailing slash or not, and the root and the folder above home, are just as broad.
+        assert!(too_broad(&PathBuf::from(format!("{}/", h.display())), &h));
+        assert!(too_broad(std::path::Path::new("/"), &h));
+        assert!(too_broad(h.parent().unwrap(), &h));
+        assert!(!too_broad(&h.join("Videos"), &h));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_music_folder_is_valid() {
+        let h = home("h2");
+        let real = home("h2-real-music");
+        std::os::unix::fs::symlink(&real, h.join("Music")).unwrap();
+        let (found, note) = pick_standard_folders(&h, Some(&h.join("Music")), None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "Music");
+        assert!(note.is_none());
     }
 }

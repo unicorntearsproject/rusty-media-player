@@ -28,6 +28,8 @@ pub struct Setup {
     face_fallback: bool,
     /// The kept value should be written.
     dirty: bool,
+    /// Why a standard folder was left out of the first run (the system names the home folder as it); shown once, not kept.
+    folders_note: Option<String>,
 }
 
 impl Setup {
@@ -57,6 +59,11 @@ impl Setup {
             }
         }
         Some(s)
+    }
+
+    /// Why a standard folder was left out of the first run, if one was.
+    pub fn folders_note(&self) -> Option<&str> {
+        self.folders_note.as_deref()
     }
 
     /// True on the first run (until the next one).
@@ -102,6 +109,11 @@ impl App {
                 if let Some(l) = host.library() {
                     for f in l.standard_folders() {
                         l.add_path(&f.path);
+                    }
+                    self.setup.folders_note = l.standard_folders_note();
+                    if let Some(note) = self.setup.folders_note.clone() {
+                        let now = rvp_host::HostClock::now_us(host.clock());
+                        self.ui.show_toast(&note, now);
                     }
                 }
             }

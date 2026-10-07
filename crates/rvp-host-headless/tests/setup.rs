@@ -118,3 +118,29 @@ fn later_runs_open_on_the_last_face_and_an_empty_player_falls_back_to_the_librar
     r.restart();
     assert_eq!(r.app.ui().mode(), Mode::Library);
 }
+
+#[test]
+fn a_standard_folder_left_out_on_purpose_is_said_once_in_words() {
+    let mut host = UiHost::new();
+    let note = "Your Videos folder is set to your home folder \u{2014} add a folder instead.";
+    host.library = Some(ScriptedLibrary {
+        standard: standard()[..1].to_vec(),
+        note: Some(note.into()),
+        ..ScriptedLibrary::default()
+    });
+    let mut app = new_app();
+    let clock = host.virtual_clock();
+    let end = clock.now_us() + 300_000;
+    while clock.now_us() < end {
+        app.tick(&mut host);
+        clock.advance(16_000);
+    }
+    assert_eq!(app.setup().folders_note(), Some(note));
+    assert_eq!(
+        host.library.as_ref().unwrap().added,
+        ["/home/u/Music"],
+        "only the folder that was fine is added"
+    );
+    // The toast is on screen (it is part of the model).
+    assert!(app.ui().toast_text().is_some_and(|t| t.contains("home folder")), "{:?}", app.ui().toast_text());
+}
