@@ -5,6 +5,7 @@
 - Be efficient: minimal reporting, no superfluous output. Ask the user only when genuinely blocked.
 - Never use `rm -rf` or other recursive deletes (user rule). All caches, scratch and build output go on `/mnt/scratch` (user rule, 2026-10-06; the root drive fills up): scratch in `/mnt/scratch/rvp-scratch/`, cargo target dir on /mnt/scratch. Not `/tmp` (tmpfs quota), not `~/.cache`. Overwrite in place.
 - Never run artificial CPU load generators (`yes`, busy loops, stress) on this machine (user rule).
+- Temporary GPG homes (user rule): any temporary GNUPGHOME must be followed by `GNUPGHOME=$dir gpgconf --kill all` when done (use a trap so it also runs on failure). Never leave secret key material in scratch; shred copies when done.
 - Run all tests headless (user rule): Playwright headless, desktop/Wine under `xvfb-run -a` with DISPLAY/WAYLAND_DISPLAY overridden. Never open windows or steal focus on the user's session.
 - Tests: thorough but proportionate (user rule). Cover edge cases and error paths, sized to realistic use with a few times headroom, never absurd scales. Keep the everyday gate (`cargo test`, e2e) fast and deterministic. Fuzz, stress and long benchmarks are occasional or nightly jobs, run on this shared host only with the user's OK (Rusty Bucket CI shares it). See ../rust-os/docs/testing/testing-guide.md.
 - Bugs (user rule): fix Rusty Wave bugs immediately when found. If the fix would change the end-user experience, ask the user first.
