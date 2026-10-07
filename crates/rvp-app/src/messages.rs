@@ -54,7 +54,7 @@ pub fn no_picture(warning: &str) -> String {
     let tail = " The sound plays on.";
     if let Some((platform, why)) = platform_reason(detail) {
         return format!(
-            "No picture: this video is {name}, and {platform} can't decode it here ({why}). Convert it to H.264 or AV1 to watch it here.{tail}"
+            "No picture: this video is {name}, and {platform} can't decode it here: {why}. Convert it to H.264 or AV1 to watch it here.{tail}"
         );
     }
     let d = detail.to_lowercase();
@@ -131,7 +131,7 @@ fn unsupported(m: &str) -> String {
             let name = codec_name(c);
             return match platform_reason(m) {
                 Some((p, why)) => format!(
-                    "This video is {name}, and {p} can't decode it here ({why}). Convert it to H.264, VP9 or AV1, or try the desktop app."
+                    "This video is {name}, and {p} can't decode it here: {why}. Convert it to H.264, VP9 or AV1, or try the desktop app."
                 ),
                 None => format!(
                     "This video is {name}, which Rusty Wave can't decode here. Convert it to H.264, VP9 or AV1 in an MP4, MKV or WebM file."
