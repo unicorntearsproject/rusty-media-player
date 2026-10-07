@@ -292,6 +292,10 @@ pub enum LibHit {
     SortCol(u8),
     /// The back button.
     Back,
+    /// The menu button of a phone-width header (opens the rail as a drawer).
+    DrawerBtn,
+    /// The dimmed content beside the open drawer (a tap closes it).
+    Scrim,
     /// A row or card (index into the entities).
     Ent(usize),
     /// The play button on a row or card.
@@ -373,6 +377,8 @@ pub(crate) struct VizReturn {
 
 /// The library mode's share of the UI state.
 pub struct LibUi {
+    /// On a phone-width window: the rail is open as a drawer over the content.
+    pub(crate) drawer: bool,
     pub(crate) mode: Mode,
     /// The Player face has nothing loaded: it is drawn inside the same frame as the library (rail and bar), with the open-a-video card
     /// in the body (set by the application every frame).
@@ -438,6 +444,7 @@ impl Default for LibUi {
             view: View::Albums,
             detail: None,
             history: Vec::new(),
+            drawer: false,
             viz_return: None,
             query: String::new(),
             track_sort: TrackSort::Title,
@@ -531,6 +538,8 @@ pub(crate) struct Metrics {
     pub w: f32,
     pub h: f32,
     pub compact: bool,
+    /// A phone-width window (under 600 px): no rail beside the content, a drawer instead, and bigger touch targets.
+    pub phone: bool,
     pub rail: RectF,
     pub bar: RectF,
     pub header: RectF,
@@ -540,25 +549,55 @@ pub(crate) struct Metrics {
 }
 
 impl Metrics {
-    pub(crate) fn new(w: f32, h: f32, s: f32, view: View, detail: Option<Detail>) -> Self {
-        let compact = w < 860.0 * s;
-        let rail_w = if compact { 76.0 * s } else { 236.0 * s };
+    pub(crate) fn new(w: f32, h: f32, s: f32, view: View, detail: Option<Detail>, drawer: bool) -> Self {
+        let phone = w < 600.0 * s;
+        let compact = !phone && w < 860.0 * s;
+        let rail_w = if phone {
+            (300.0 * s).min(w * 0.86)
+        } else if compact {
+            76.0 * s
+        } else {
+            236.0 * s
+        };
         let full = view == View::Visualizer;
-        let bar_h = 96.0 * s;
+        let bar_h = if phone { 152.0 * s } else { 96.0 * s };
         // The visualizer fills the window; its controls float over the bottom.
         let below = if full { 0.0 } else { bar_h };
-        let rail =
-            if full { RectF::new(0.0, 0.0, 0.0, 0.0) } else { RectF::new(0.0, 0.0, rail_w, h - below) };
+        let rail = if full || (phone && !drawer) {
+            RectF::new(0.0, 0.0, 0.0, 0.0)
+        } else if phone {
+            RectF::new(0.0, 0.0, rail_w, h)
+        } else {
+            RectF::new(0.0, 0.0, rail_w, h - below)
+        };
         let bar = RectF::new(0.0, h - bar_h, w, bar_h);
-        let cx = if full { 0.0 } else { rail_w };
+        let cx = if full || phone { 0.0 } else { rail_w };
         let content = RectF::new(cx, 0.0, w - cx, h - below);
-        let header_h = if full { 0.0 } else { 92.0 * s };
+        let header_h = if full {
+            0.0
+        } else if phone {
+            68.0 * s
+        } else {
+            92.0 * s
+        };
         let header = RectF::new(content.x, 0.0, content.w, header_h);
         let table_head = (view == View::Tracks && detail.is_none())
             .then(|| RectF::new(content.x, header_h, content.w, 34.0 * s));
         let body_top = header_h + table_head.map_or(0.0, |t| t.h);
         let body = RectF::new(content.x, body_top, content.w, (content.h - body_top).max(0.0));
-        Self { s, w, h, compact, rail, bar, header, table_head, body, pad: 28.0 * s }
+        Self {
+            s,
+            w,
+            h,
+            compact,
+            phone,
+            rail,
+            bar,
+            header,
+            table_head,
+            body,
+            pad: if phone { 16.0 * s } else { 28.0 * s },
+        }
     }
 
     /// Cards per grid row in the body.

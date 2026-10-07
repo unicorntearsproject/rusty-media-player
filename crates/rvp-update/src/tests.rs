@@ -501,7 +501,7 @@ fn the_service_reports_failures_in_words_and_a_second_check_after_a_fix_works() 
     std::fs::write(r.dir.join("latest.json"), b"{}").unwrap();
     u.check();
     let State::Failed(msg) = wait_for(&u, "a failure", |s| matches!(s, State::Failed(_))) else { panic!() };
-    assert!(msg.starts_with("Could not check for updates"), "{msg}");
+    assert!(msg.starts_with("Couldn't check for updates"), "{msg}");
     std::fs::write(r.dir.join("latest.json"), manifest).unwrap();
     u.check();
     wait_for(&u, "an offer", |s| matches!(s, State::Available(_)));

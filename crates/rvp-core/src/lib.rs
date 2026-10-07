@@ -16,6 +16,7 @@ pub mod error;
 pub mod loudness;
 pub mod media;
 pub mod par;
+pub mod platform;
 pub mod resample;
 pub mod ring;
 pub mod settings;
@@ -32,6 +33,7 @@ pub use media::{
     Art, AudioBuffer, AudioCodec, AudioInfo, AudioParams, Chapter, ColorMatrix, ColorRange, LoudnessTags,
     Metadata, Packet, PixelFormat, StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
 };
+pub use platform::{FallbackVideo, PlatformSupport, PlatformVideo, open_video};
 pub use resample::Resampler;
 pub use ring::RingBuffer;
 pub use settings::{AudioSettings, LevelMode};

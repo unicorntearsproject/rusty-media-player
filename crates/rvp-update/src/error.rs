@@ -36,10 +36,10 @@ impl fmt::Display for UpdateError {
         match self {
             UpdateError::Io(e) => write!(f, "{e}"),
             UpdateError::Insecure(u) => write!(f, "refusing to fetch {u}: only https:// is allowed"),
-            UpdateError::Http(c) => write!(f, "the server answered {c}"),
-            UpdateError::TooLarge => f.write_str("the download is larger than expected"),
+            UpdateError::Http(c) => write!(f, "the update server answered {c}; try again in a little while"),
+            UpdateError::TooLarge => f.write_str("the download is larger than expected, so it was stopped; try again later"),
             UpdateError::Cancelled => f.write_str("cancelled"),
-            UpdateError::BadManifest(e) => write!(f, "the update information is not valid: {e}"),
+            UpdateError::BadManifest(e) => write!(f, "the update information is not valid ({e}); try again later"),
             UpdateError::UnsupportedSchema(s) => {
                 write!(
                     f,
@@ -47,15 +47,17 @@ impl fmt::Display for UpdateError {
                 )
             }
             UpdateError::UntrustedKey => {
-                f.write_str("the update is signed by a key this version does not trust")
+                f.write_str(
+                    "the update is signed by a key this version does not trust; download Rusty Wave again from its site to be safe",
+                )
             }
             UpdateError::Corrupt(e) => write!(f, "the download is damaged ({e}); nothing was changed"),
             UpdateError::Signature(e) => write!(f, "{e}; nothing was changed"),
             UpdateError::NotWritable(p) => {
-                write!(f, "Rusty Wave cannot replace itself in {p} (no permission)")
+                write!(f, "Rusty Wave cannot replace itself in {p} (no permission); run the installer again, or move the app somewhere you can write")
             }
             UpdateError::NotSelfUpdatable => {
-                f.write_str("this installation is updated through its package manager")
+                f.write_str("this installation is updated through its package manager (your software centre or apt, dnf or flatpak)")
             }
         }
     }

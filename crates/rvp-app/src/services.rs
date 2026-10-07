@@ -787,7 +787,10 @@ impl App {
                 self.ui
                     .show_toast(if on { "Added to the app menu" } else { "Removed from the app menu" }, now);
             }
-            Err(e) => self.ui.show_toast(&format!("Couldn't change the app menu: {e}"), now),
+            Err(e) => self.ui.show_toast(
+                &format!("Couldn't change the app menu ({e}). Try again from Settings; if it keeps failing, your desktop may not allow apps to add menu entries."),
+                now,
+            ),
         }
     }
 

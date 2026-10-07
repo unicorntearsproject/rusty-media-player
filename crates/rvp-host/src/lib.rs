@@ -16,6 +16,7 @@ pub mod library;
 pub mod media;
 pub mod mock;
 pub mod net;
+pub mod platform;
 pub mod services;
 pub mod types;
 pub mod writer;
@@ -29,6 +30,7 @@ pub use media::{
     TransportCommand, VIZ_BANDS, VisualizerTap, VizBlock, VizSummary,
 };
 pub use net::{MAX_FETCH_BYTES, Net, ScriptedNet};
+pub use platform::{ScriptedPlatform, WithPlatform};
 pub use services::{
     AppServices, DefaultOutcome, DefaultPlayer, Integration, ScriptedServices, UpdateHow, UpdateState,
 };

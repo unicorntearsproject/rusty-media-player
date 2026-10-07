@@ -44,8 +44,7 @@ impl Rig {
     /// A rig with a long video playing, on the Player face.
     fn new() -> Self {
         let mut host = UiHost::new();
-        let app =
-            App::new(Rc::new(DefaultCodecs { stall: None, clock: None }), UiConfig { reduce_motion: true });
+        let app = App::new(Rc::new(DefaultCodecs::default()), UiConfig { reduce_motion: true });
         let src = FileSource::open(&fixture("av1_opus_60s.webm")).unwrap();
         let mut app = app;
         app.open(&mut host, src);

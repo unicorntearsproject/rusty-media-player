@@ -430,6 +430,10 @@ impl Ui {
             }
             return LibHit::None;
         }
+        // A phone's drawer: the rail, and a tap anywhere else closes it.
+        if g.m.phone && g.m.rail.w > 0.0 && !g.m.rail.contains(x, y) {
+            return LibHit::Scrim;
+        }
         // The rail.
         if g.m.rail.contains(x, y) {
             for (i, r) in g.mode.iter().enumerate() {
@@ -460,6 +464,9 @@ impl Ui {
         }
         // The header.
         if y < g.m.header.bottom() {
+            if g.menu_btn.is_some_and(|r| r.contains(x, y)) {
+                return LibHit::DrawerBtn;
+            }
             if g.back.is_some_and(|r| r.contains(x, y)) {
                 return LibHit::Back;
             }
@@ -933,11 +940,28 @@ impl Ui {
             LibHit::TagField(_) | LibHit::TagButton(_) => self.tagform_click(hit),
             LibHit::PromptOk => self.confirm_prompt(),
             LibHit::PromptCancel => self.lib.prompt = None,
-            LibHit::Rail(v) => self.show_view(v),
-            LibHit::ModeSwitch(m) => out.push(Action::SetMode(m)),
-            LibHit::AddFolder => out.push(Action::Lib(LibAction::AddFolder)),
-            LibHit::Settings => out.push(Action::ShowSettings),
-            LibHit::About => self.show_view(View::About),
+            LibHit::DrawerBtn => self.lib.drawer = !self.lib.drawer,
+            LibHit::Scrim => self.lib.drawer = false,
+            LibHit::Rail(v) => {
+                self.lib.drawer = false;
+                self.show_view(v)
+            }
+            LibHit::ModeSwitch(m) => {
+                self.lib.drawer = false;
+                out.push(Action::SetMode(m))
+            }
+            LibHit::AddFolder => {
+                self.lib.drawer = false;
+                out.push(Action::Lib(LibAction::AddFolder))
+            }
+            LibHit::Settings => {
+                self.lib.drawer = false;
+                out.push(Action::ShowSettings)
+            }
+            LibHit::About => {
+                self.lib.drawer = false;
+                self.show_view(View::About)
+            }
             LibHit::Folder(i) => {
                 if let Some(r) = ctx.lib.roots().get(i) {
                     let _ = r;
@@ -1316,6 +1340,7 @@ impl Ui {
         }
         // Keys that mean the same everywhere in the library.
         match key {
+            Key::Escape if self.lib.drawer => self.lib.drawer = false,
             Key::Escape => {
                 if view == View::Visualizer
                     || self.lib.detail.is_some()

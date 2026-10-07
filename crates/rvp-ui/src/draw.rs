@@ -191,9 +191,24 @@ impl Ui {
         self.text(fb, Face::SansMedium, 18.0, cx - w * 0.5, cy + 86.0 * s, &name, t::text_body(), 1.0, 0.0);
     }
 
+    /// The lines of the error card and its rectangle: as wide as it likes up to 440, never wider than the window less a margin (a phone is
+    /// 360 wide), as tall as its lines.
+    pub(crate) fn error_layout(&mut self, model: &UiModel, l: &Layout) -> (Vec<String>, RectF) {
+        let s = l.s;
+        let msg = model.error.clone().unwrap_or_else(|| {
+            "Rusty Wave couldn't play this file, and the player didn't say why. Try opening it again, or pick another file.".into()
+        });
+        let cw = (440.0 * s).min(l.w - 32.0 * s).max(200.0 * s);
+        let lines = self.wrap(Face::Sans, 14.0, &msg, cw - 48.0 * s, 8);
+        let ch = (118.0 + 22.0 * lines.len() as f32 + 40.0) * s;
+        let card =
+            RectF::new(l.w * 0.5 - cw * 0.5, (l.h * 0.5 - ch * 0.5).max(8.0 * s), cw, ch.min(l.h - 16.0 * s));
+        (lines, card)
+    }
+
     fn draw_error(&mut self, fb: &mut FrameBuffer, l: &Layout, model: &UiModel) {
         let s = l.s;
-        let card = RectF::new(l.w * 0.5 - 220.0 * s, l.h * 0.5 - 90.0 * s, 440.0 * s, 180.0 * s);
+        let (lines, card) = self.error_layout(model, l);
         fb.shadow_rrect(card, 20.0 * s, 16.0 * s, 48.0 * s, Rgba::new(5, 2, 15, 166), 1.0);
         fb.fill_rrect(card, 20.0 * s, Paint::Solid(fade(t::ink_800(), 0.96)), 1.0);
         fb.stroke_rrect(card, 20.0 * s, 1.0 * s, fade(t::danger(), 0.6), 1.0);
@@ -209,8 +224,6 @@ impl Ui {
             1.0,
             -0.2,
         );
-        let msg = model.error.clone().unwrap_or_else(|| "Something went sideways.".into());
-        let lines = self.wrap(Face::Sans, 14.0, &msg, card.w - 48.0 * s, 3);
         for (i, ln) in lines.iter().enumerate() {
             self.text(
                 fb,
@@ -462,10 +475,10 @@ impl Ui {
             model.position_us
         });
         let mut x = l.time_x;
-        x = self.text(fb, Face::Mono, 13.0, x, l.row_cy, &cur, t::cyan_500(), a, 0.0);
+        x = self.text(fb, Face::Mono, 13.0, x, l.time_y, &cur, t::cyan_500(), a, 0.0);
         if let Some(d) = model.duration_us {
-            x = self.text(fb, Face::Mono, 13.0, x, l.row_cy, " / ", t::text_dim(), a, 0.0);
-            self.text(fb, Face::Mono, 13.0, x, l.row_cy, &format_time(d), t::text_muted(), a, 0.0);
+            x = self.text(fb, Face::Mono, 13.0, x, l.time_y, " / ", t::text_dim(), a, 0.0);
+            self.text(fb, Face::Mono, 13.0, x, l.time_y, &format_time(d), t::text_muted(), a, 0.0);
         }
     }
 
@@ -617,18 +630,45 @@ impl Ui {
         }
     }
 
+    /// The lines of a toast and its rectangle: wrapped inside the window (a phone is 360 wide), at most five lines, growing upwards from
+    /// where a one-line toast sits so that it never covers the bar below it.
+    pub(crate) fn toast_layout(&mut self, text: &str, l: &Layout) -> (Vec<String>, RectF) {
+        let s = l.s;
+        let max_w = (l.w - 32.0 * s - 36.0 * s).min(560.0 * s).max(120.0 * s);
+        let lines = self.wrap(Face::SansMedium, 14.0, text, max_w, 5);
+        let widest =
+            lines.iter().map(|ln| self.text_w(Face::SansMedium, 14.0, ln, 0.0)).fold(0.0f32, f32::max);
+        let h = if lines.len() <= 1 { 36.0 * s } else { (16.0 + 20.0 * lines.len() as f32) * s };
+        let base = if l.toast_y > 0.0 { l.toast_y } else { 64.0 * s };
+        let y = (base + 36.0 * s - h).max(8.0 * s);
+        (lines, RectF::new(l.w * 0.5 - widest * 0.5 - 18.0 * s, y, widest + 36.0 * s, h))
+    }
+
     pub(crate) fn draw_toast(&mut self, fb: &mut FrameBuffer, l: &Layout) {
         let Some((text, until)) = self.toast.clone() else { return };
         let s = l.s;
         let left = until - self.now;
         let a = if self.config.reduce_motion { 1.0 } else { (left as f32 / 300_000.0).clamp(0.0, 1.0) };
-        let tw = self.text_w(Face::SansMedium, 14.0, &text, 0.0);
-        let y = if l.toast_y > 0.0 { l.toast_y } else { 64.0 * s };
-        let r = RectF::new(l.w * 0.5 - tw * 0.5 - 18.0 * s, y, tw + 36.0 * s, 36.0 * s);
-        fb.shadow_rrect(r, r.h * 0.5, 6.0 * s, 20.0 * s, Rgba::new(5, 2, 15, 160), a);
-        fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::ink_800(), 0.94)), a);
-        fb.stroke_rrect(r, r.h * 0.5, 1.0 * s, t::ink_500(), a);
-        self.text(fb, Face::SansMedium, 14.0, r.x + 18.0 * s, r.cy(), &text, t::text_strong(), a, 0.0);
+        let (lines, r) = self.toast_layout(&text, l);
+        let rad = if lines.len() <= 1 { r.h * 0.5 } else { 18.0 * s };
+        fb.shadow_rrect(r, rad, 6.0 * s, 20.0 * s, Rgba::new(5, 2, 15, 160), a);
+        fb.fill_rrect(r, rad, Paint::Solid(fade(t::ink_800(), 0.94)), a);
+        fb.stroke_rrect(r, rad, 1.0 * s, t::ink_500(), a);
+        let step = 20.0 * s;
+        let top = r.cy() - step * (lines.len() as f32 - 1.0) * 0.5;
+        for (i, ln) in lines.iter().enumerate() {
+            self.text(
+                fb,
+                Face::SansMedium,
+                14.0,
+                r.x + 18.0 * s,
+                top + i as f32 * step,
+                ln,
+                t::text_strong(),
+                a,
+                0.0,
+            );
+        }
     }
 
     fn draw_tooltip(&mut self, fb: &mut FrameBuffer, l: &Layout, model: &UiModel) {

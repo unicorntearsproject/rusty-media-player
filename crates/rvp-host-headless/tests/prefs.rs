@@ -9,7 +9,7 @@ use rvp_viz::{EFFECTS, Effect};
 use std::rc::Rc;
 
 fn new_app(reduce_motion: bool) -> App {
-    App::new(Rc::new(DefaultCodecs { stall: None, clock: None }), UiConfig { reduce_motion })
+    App::new(Rc::new(DefaultCodecs::default()), UiConfig { reduce_motion })
 }
 
 struct Rig {

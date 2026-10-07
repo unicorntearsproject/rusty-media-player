@@ -13,6 +13,7 @@ extern crate std;
 
 mod history;
 mod library;
+pub mod messages;
 mod restore;
 mod services;
 mod setup;
@@ -32,7 +33,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use library::{LibState, RESUME_MIN_AUDIO_US, is_playlist_name};
 use rvp_core::settings::SETTINGS_KEY;
-use rvp_core::{AudioSettings, CodecFactory, Error, LevelMode, LoudnessTags, Timestamp};
+use rvp_core::{AudioSettings, CodecFactory, LevelMode, LoudnessTags, Timestamp};
 use rvp_host::{
     FrameSink, Host, InputEvent, NowPlayingMeta, OpenRequest, PlayState, Playback, Rect, Storage,
     TransportCommand,
@@ -461,7 +462,9 @@ impl App {
                         self.ui.show_toast("Open a video first, then add its subtitles.", now);
                     }
                 }
-                Err(e) => self.ui.show_toast(&format!("Couldn't open that: {e}"), now),
+                Err(e) => {
+                    self.ui.show_toast(&messages::couldnt_open("", &rvp_core::Error::Host(e.0.clone())), now)
+                }
             }
         }
         self.refresh_model(now);
@@ -476,7 +479,7 @@ impl App {
         let now = host.clock().now_us();
         let Some(item) = self.playlist.get(id).cloned() else { return };
         if item.source.is_empty() {
-            self.ui.show_toast("That file can't be opened again; pick it once more.", now);
+            self.ui.show_toast(&messages::cannot_reopen(), now);
             return;
         }
         match rvp_core::task::block_on(host.open(OpenRequest::Id(item.source.clone()))) {
@@ -486,7 +489,10 @@ impl App {
                 self.start(host, src, id, true);
             }
             Err(e) => {
-                self.ui.show_toast(&format!("Couldn't open {}: {e}", item.name), now);
+                self.ui.show_toast(
+                    &messages::couldnt_open(&item.name, &rvp_core::Error::Host(e.0.clone())),
+                    now,
+                );
             }
         }
     }
@@ -773,7 +779,7 @@ impl App {
         }
         for (tag, error) in failed {
             let name = self.playlist.get(tag).map(|i| i.name.clone()).unwrap_or_default();
-            self.ui.show_toast(&format!("Skipped {name}: {}", friendly_error(&error)), now);
+            self.ui.show_toast(&format!("Skipped {name}. {}", friendly_error(&error)), now);
             self.playlist.remove(tag);
             self.queued = None;
         }
@@ -808,7 +814,13 @@ impl App {
                         }
                         Err(e) => {
                             let name = self.playlist.get(next).map(|i| i.name.clone()).unwrap_or_default();
-                            self.ui.show_toast(&format!("Skipped {name}: {e}"), now);
+                            self.ui.show_toast(
+                                &format!(
+                                    "Skipped {name}. {}",
+                                    messages::friendly_error(&rvp_core::Error::Host(e.0.clone()))
+                                ),
+                                now,
+                            );
                             self.playlist.remove(next);
                         }
                     }
@@ -854,7 +866,9 @@ impl App {
             // Hosts resolve their own ids without waiting on anything external.
             match rvp_core::task::block_on(host.open(OpenRequest::Id(id.clone()))) {
                 Ok(src) => self.open(host, src),
-                Err(e) => self.ui.show_toast(&format!("Couldn't open that: {e}"), now),
+                Err(e) => {
+                    self.ui.show_toast(&messages::couldnt_open("", &rvp_core::Error::Host(e.0.clone())), now)
+                }
             }
         }
         let actions = if self.ui.lib_chrome() {
@@ -1423,15 +1437,9 @@ impl App {
             if warnings.len() > self.warnings_seen {
                 for w in &warnings[self.warnings_seen..] {
                     if w.starts_with("video disabled") {
-                        self.ui.show_toast(
-                            "No picture: that video codec isn't on the guest list yet. Audio plays on.",
-                            now,
-                        );
+                        self.ui.show_toast(&messages::no_picture(w), now);
                     } else if w.starts_with("audio disabled") {
-                        self.ui.show_toast(
-                            "No sound: that audio codec isn't on the guest list. Video plays on.",
-                            now,
-                        );
+                        self.ui.show_toast(&messages::no_sound(w), now);
                     }
                 }
                 self.warnings_seen = warnings.len();
@@ -1555,31 +1563,16 @@ fn is_subtitle_name(name: &str) -> bool {
     n.ends_with(".srt") || n.ends_with(".vtt") || n.ends_with(".ass") || n.ends_with(".ssa")
 }
 
-/// An error in the app's voice.
-pub fn friendly_error(e: &Error) -> String {
-    match e {
-        Error::Unsupported(m) => {
-            let mut c = m.chars();
-            let cap: String =
-                c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
-            format!("{cap} isn't on the guest list.")
-        }
-        Error::Truncated => "This file ends too early. Is the download complete?".into(),
-        Error::Invalid(m) => format!("This file looks damaged ({m})."),
-        Error::Host(m) => format!("Couldn't read the file ({m})."),
-    }
-}
+pub use messages::friendly_error;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rvp_core::Error;
 
     #[test]
     fn errors_speak_the_brand_voice() {
-        assert_eq!(
-            friendly_error(&Error::Unsupported("video codec `hevc`".into())),
-            "Video codec `hevc` isn't on the guest list."
-        );
+        assert!(friendly_error(&Error::Unsupported("video codec `hevc`".into())).contains("HEVC (H.265)"));
         assert!(friendly_error(&Error::Truncated).contains("ends too early"));
     }
 

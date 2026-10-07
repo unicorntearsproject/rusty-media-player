@@ -978,7 +978,9 @@ impl App {
                     out.borrow_mut().push((name, r));
                 });
             }
-            Err(e) => self.ui.show_toast(&format!("Couldn't open that: {e}"), now),
+            Err(e) => self
+                .ui
+                .show_toast(&crate::messages::couldnt_open("", &rvp_core::Error::Host(e.0.clone())), now),
         }
     }
 
@@ -1014,9 +1016,7 @@ impl App {
                     self.ui.show_view(View::Playlists);
                     self.ui.open_detail(rvp_ui::Detail::Playlist(id));
                 }
-                Err(e) => {
-                    self.ui.show_toast(&format!("Couldn't read {name}: {}", crate::friendly_error(&e)), now)
-                }
+                Err(e) => self.ui.show_toast(&crate::messages::couldnt_open(&name, &e), now),
             }
         }
     }

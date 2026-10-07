@@ -252,7 +252,8 @@ impl Ui {
     ) -> Option<(String, String)> {
         let lib = ctx.lib;
         match hit {
-            LibHit::None | LibHit::Menu(..) => None,
+            LibHit::None | LibHit::Menu(..) | LibHit::Scrim => None,
+            LibHit::DrawerBtn => tip("Open the menu: the views, folders and settings.", ""),
             LibHit::Rail(v) => view_text(v),
             LibHit::ModeSwitch(Mode::Library) => tip("Show the library.", "B"),
             LibHit::ModeSwitch(Mode::Player) => tip("Show the player: the picture and its controls.", "B"),
@@ -431,7 +432,8 @@ impl Ui {
         let (w, h) = (g.m.w, g.m.h);
         let ent = |ui: &Ui, i: usize| ui.lib.visible.iter().find(|(e, _)| *e == i).map(|(_, r)| *r);
         match hit {
-            LibHit::None | LibHit::Menu(..) => None,
+            LibHit::None | LibHit::Menu(..) | LibHit::Scrim => None,
+            LibHit::DrawerBtn => g.menu_btn,
             LibHit::Rail(v) => g.nav.iter().find(|(x, _)| *x == v).map(|x| x.1),
             LibHit::ModeSwitch(m) => Some(g.mode[if m == Mode::Library { 0 } else { 1 }]),
             LibHit::AddFolder => Some(g.add_folder),

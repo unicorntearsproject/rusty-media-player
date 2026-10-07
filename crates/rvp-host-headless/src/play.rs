@@ -16,6 +16,8 @@ pub struct DefaultCodecs {
     pub stall: Option<(usize, Timestamp)>,
     /// The virtual clock the stall advances.
     pub clock: Option<Rc<VirtualClock>>,
+    /// A platform decoder service for the codecs ours does not decode (HEVC), as a host such as a browser would offer.
+    pub platform: Option<Rc<dyn rvp_core::PlatformVideo>>,
 }
 
 /// Wraps a decoder and advances the virtual clock inside one `send_packet`, as a slow decode would.
@@ -55,12 +57,16 @@ impl CodecFactory for DefaultCodecs {
     }
 
     fn video(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
-        let dec = match info.codec.as_str() {
-            "av1" => rvp_codec_av1::av1_decoder(info)?,
-            "h264" => rvp_codec_h264::h264_decoder(info)?,
-            "vp9" => rvp_codec_vp9::vp9_decoder(info)?,
-            other => return Err(Error::Unsupported(format!("video codec `{other}`"))),
+        let ours = match info.codec.as_str() {
+            "av1" => rvp_codec_av1::av1_decoder(info),
+            "h264" => rvp_codec_h264::h264_decoder(info),
+            "vp9" => rvp_codec_vp9::vp9_decoder(info),
+            other => Err(Error::Unsupported(format!("video codec `{other}`"))),
         };
+        let mut dec = rvp_core::open_video(ours, self.platform.as_ref(), info)?;
+        if info.codec == "h264" && self.platform.is_some() {
+            dec = Box::new(rvp_core::FallbackVideo::new(dec, self.platform.clone(), info.clone()));
+        }
         match (self.stall, &self.clock) {
             (Some((at, us)), Some(clock)) => {
                 Ok(Box::new(StallDecoder { inner: dec, clock: clock.clone(), count: 0, at, us }))
@@ -148,7 +154,7 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         host.tap = Some(rvp_host::RecordingTap::default());
     }
     let clock = host.virtual_clock();
-    let codecs = DefaultCodecs { stall: opts.video_stall, clock: Some(clock.clone()) };
+    let codecs = DefaultCodecs { stall: opts.video_stall, clock: Some(clock.clone()), platform: None };
     let mut session = Session::new(FileSource::open(path)?, Rc::new(codecs));
     session.enable_audio_trace();
     session.enable_video_trace();

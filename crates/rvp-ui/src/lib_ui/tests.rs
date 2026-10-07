@@ -1913,3 +1913,197 @@ fn an_empty_history_says_so() {
     assert!(r.ents().is_empty());
     let _ = r.draw();
 }
+
+// ---- the phone layout ------------------------------------------------------------------------------------------------------
+
+/// The windows a phone has in portrait (CSS pixels at scale 1; the 3x one is the same screen with three times the pixels).
+const PHONES: [(u32, u32, f32); 3] = [(390, 844, 1.0), (360, 800, 1.0), (1170, 2532, 3.0)];
+
+fn phone_rig(w: u32, h: u32, s: f32) -> Rig {
+    let mut r = Rig::new();
+    r.ui.set_size(w, h, s);
+    r
+}
+
+fn geom_of(r: &mut Rig) -> super::geom::Geom {
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    r.ui.lib_geom(&r.m, &ctx)
+}
+
+fn inside(r: crate::gfx::RectF, w: f32, h: f32) -> bool {
+    r.x >= -0.5 && r.y >= -0.5 && r.right() <= w + 0.5 && r.bottom() <= h + 0.5
+}
+
+fn overlap(a: crate::gfx::RectF, b: crate::gfx::RectF) -> bool {
+    a.x < b.right() - 0.5 && b.x < a.right() - 0.5 && a.y < b.bottom() - 0.5 && b.y < a.bottom() - 0.5
+}
+
+#[test]
+fn a_phone_gets_a_header_menu_a_touch_sized_transport_and_no_rail_beside_the_content() {
+    for (w, h, s) in PHONES {
+        let mut r = phone_rig(w, h, s);
+        let g = geom_of(&mut r);
+        let (sw, sh) = (w as f32, h as f32);
+        assert!(g.m.phone, "{w}x{h}");
+        assert_eq!(g.m.rail.w, 0.0, "the rail is a drawer, closed");
+        assert!(g.nav.is_empty(), "nothing in the rail can be hit while it is closed");
+        assert_eq!(g.m.body.x, 0.0);
+        assert_eq!(g.m.body.w, sw, "the content has the whole width");
+        // The menu button, at least 44 px and in the header.
+        let menu = g.menu_btn.expect("a menu button");
+        assert!(menu.w >= 44.0 * s - 0.5 && menu.h >= 44.0 * s - 0.5 && inside(menu, sw, sh), "{menu:?}");
+        // The transport: every control at least 44 px, on screen, none over another, and the bar inside the window.
+        assert!(inside(g.m.bar, sw, sh) && g.m.bar.bottom() <= sh + 0.5);
+        for (b, rect) in &g.bar_btns {
+            assert!(rect.w >= 44.0 * s - 0.5 && rect.h >= 44.0 * s - 0.5, "{b:?} is {rect:?}");
+            assert!(inside(*rect, sw, sh) && rect.y >= g.m.bar.y, "{b:?} is {rect:?}");
+        }
+        for (i, (a, ra)) in g.bar_btns.iter().enumerate() {
+            for (b, rb) in &g.bar_btns[i + 1..] {
+                assert!(!overlap(*ra, *rb), "{a:?} and {b:?} overlap at {w}x{h}");
+            }
+        }
+        for want in
+            [crate::ui::Btn::Prev, crate::ui::Btn::Play, crate::ui::Btn::Next, crate::ui::Btn::ModeSwitch]
+        {
+            assert!(g.bar_btns.iter().any(|(b, _)| *b == want), "{want:?} is missing");
+        }
+        assert!(g.seek_hit.h >= 30.0 * s && inside(g.seek_hit, sw, sh));
+        // The header: the title starts after the menu button, the search and the buttons are inside and apart.
+        assert!(g.title_x >= menu.right());
+        assert!(inside(g.search, sw, sh));
+        for b in &g.header_btns {
+            assert!(
+                inside(b.rect, sw, sh) && b.rect.w >= 44.0 * s - 0.5 && !overlap(b.rect, g.search),
+                "{b:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_drawer_opens_from_the_menu_button_and_closes_on_a_choice_a_tap_outside_or_escape() {
+    for (w, h, s) in PHONES {
+        let mut r = phone_rig(w, h, s);
+        let (sw, sh) = (w as f32, h as f32);
+        let g = geom_of(&mut r);
+        let (x, y) = center(g.menu_btn.unwrap());
+        r.click(x, y);
+        let g = geom_of(&mut r);
+        assert!(g.m.rail.w > 0.0 && g.m.rail.w <= sw * 0.9, "the drawer is open: {:?}", g.m.rail);
+        assert!(inside(g.m.rail, sw, sh));
+        assert!(g.nav.len() >= 10, "{} entries", g.nav.len());
+        for (v, rect) in &g.nav {
+            assert!(inside(*rect, sw, sh) && rect.right() <= g.m.rail.right() + 0.5, "{v:?} {rect:?}");
+            assert!(rect.h >= 22.0 * s, "{v:?} is {} px tall", rect.h);
+        }
+        // Choosing a view goes there and closes the drawer.
+        let (_, tracks) = g.nav.iter().find(|(v, _)| *v == View::Tracks).copied().unwrap();
+        let (x, y) = center(tracks);
+        r.click(x, y);
+        assert_eq!(r.ui.lib_state().view(), View::Tracks);
+        assert_eq!(geom_of(&mut r).m.rail.w, 0.0, "closed after a choice");
+        // A tap on the dimmed content closes it without doing anything else; so does Escape.
+        let g = geom_of(&mut r);
+        r.click(center(g.menu_btn.unwrap()).0, center(g.menu_btn.unwrap()).1);
+        assert!(geom_of(&mut r).m.rail.w > 0.0);
+        r.click(sw - 6.0 * s, sh * 0.5);
+        assert_eq!(geom_of(&mut r).m.rail.w, 0.0, "a tap outside closes it");
+        assert_eq!(r.ui.lib_state().view(), View::Tracks, "and changes nothing");
+        let g = geom_of(&mut r);
+        r.click(center(g.menu_btn.unwrap()).0, center(g.menu_btn.unwrap()).1);
+        r.key(Key::Escape);
+        assert_eq!(geom_of(&mut r).m.rail.w, 0.0, "Escape closes it");
+        // Wider than a phone it is a rail again.
+        r.ui.set_size(1280, 720, 1.0);
+        assert!(!geom_of(&mut r).m.phone);
+    }
+}
+
+#[test]
+fn every_view_fits_a_phone_width_and_the_toast_and_the_error_card_wrap_inside_it() {
+    for (w, h, s) in PHONES {
+        let mut r = phone_rig(w, h, s);
+        let (sw, sh) = (w as f32, h as f32);
+        for view in [
+            View::Albums,
+            View::Artists,
+            View::Tracks,
+            View::Videos,
+            View::Favorites,
+            View::History,
+            View::Playlists,
+            View::Queue,
+            View::Search,
+            View::NowPlaying,
+            View::About,
+        ] {
+            r.ui.show_view(view);
+            let g = geom_of(&mut r);
+            assert!(inside(g.m.body, sw, sh), "{view:?} body {:?}", g.m.body);
+            assert!(g.m.body.bottom() <= g.m.bar.y + 0.5, "{view:?}: the body ends where the bar begins");
+            for e in r.ents() {
+                let _ = e;
+            }
+            for i in 0..r.ents().len().min(12) {
+                let rect = r.ent_rect(i);
+                assert!(
+                    rect.x >= -0.5 && rect.right() <= sw + 0.5,
+                    "{view:?} entity {i} is {rect:?} in {sw} px"
+                );
+            }
+            let _ = r.draw();
+        }
+        // A long toast wraps and stays inside the window, above the bar.
+        let long = "No picture: this video is HEVC (H.265), and WebCodecs can't decode it here (this browser has no HEVC decoder). Convert it to H.264 or AV1 to watch it here. The sound plays on.";
+        let l = r.ui.lib_layout();
+        let (lines, rect) = r.ui.toast_layout(long, &l);
+        assert!(lines.len() >= 3, "{} lines", lines.len());
+        assert!(rect.x >= 8.0 * s - 0.5 && rect.right() <= sw - 8.0 * s + 0.5, "{rect:?} in {sw}");
+        assert!(rect.y >= 0.0 && rect.bottom() <= g_bar_top(&mut r) + 0.5, "{rect:?}");
+        // A short one is still a single pill.
+        let (lines, rect) = r.ui.toast_layout("Muted", &l);
+        assert_eq!(lines.len(), 1);
+        assert!(rect.w < 140.0 * s);
+        // The error card.
+        r.m.state = MediaState::Failed;
+        r.m.error = Some(long.repeat(2));
+        let (lines, card) = r.ui.error_layout(&r.m, &l);
+        assert!(lines.len() >= 5);
+        assert!(
+            card.x >= 15.0 * s && card.right() <= sw - 15.0 * s && card.y >= 0.0 && card.bottom() <= sh,
+            "{card:?}"
+        );
+    }
+}
+
+fn g_bar_top(r: &mut Rig) -> f32 {
+    geom_of(r).m.bar.y
+}
+
+#[test]
+fn menus_and_dialogs_stay_inside_a_phone_window() {
+    for (w, h, s) in PHONES {
+        let mut r = phone_rig(w, h, s);
+        let (sw, sh) = (w as f32, h as f32);
+        // A context menu opened at the far corner is moved back inside the window.
+        r.ui.show_view(View::Tracks);
+        let _ = r.ents();
+        for (x, y) in [(sw - 4.0 * s, sh * 0.4), (sw * 0.5, sh - 160.0 * s), (4.0 * s, 100.0 * s)] {
+            r.right_click(x, y);
+            for p in &r.ui.menu {
+                assert!(p.rect.x >= -0.5 && p.rect.right() <= sw + 0.5, "menu {:?} in {sw}", p.rect);
+                assert!(p.rect.y >= -0.5 && p.rect.bottom() <= sh + 0.5, "menu {:?} in {sh}", p.rect);
+            }
+            r.key(Key::Escape);
+        }
+        let _ = r.draw();
+    }
+}

@@ -223,7 +223,9 @@ impl Updater {
                     g.offer = Some(o.clone());
                     g.state = State::Available(o);
                 }
-                Err(e) => g.state = State::Failed(format!("Could not check for updates: {e}")),
+                Err(e) => {
+                    g.state = State::Failed(format!("Couldn't check for updates: {e}. {}", check_advice(&e)))
+                }
             }
         });
     }
@@ -271,7 +273,11 @@ impl Updater {
                 Err(UpdateError::Cancelled) => {
                     g.state = State::Available(Offer::Update { release, file });
                 }
-                Err(e) => g.state = State::Failed(format!("The update was not installed: {e}")),
+                Err(e) => {
+                    g.state = State::Failed(format!(
+                        "The update wasn't installed: {e}. Nothing was changed; you can try again, or download the new version from software.rustybucket.ai/rusty-wave/latest/."
+                    ))
+                }
             }
         });
     }
@@ -301,6 +307,16 @@ impl Updater {
                 Some(o) => State::Available(o.clone()),
                 None => State::Idle,
             };
+        }
+    }
+}
+
+/// What to do next after a failed check, by what failed.
+fn check_advice(e: &UpdateError) -> &'static str {
+    match e {
+        UpdateError::Io(_) | UpdateError::Http(_) => "Check your internet connection and try again.",
+        _ => {
+            "Try again later; if it keeps happening, download Rusty Wave from software.rustybucket.ai/rusty-wave/latest/."
         }
     }
 }

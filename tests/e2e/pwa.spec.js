@@ -155,10 +155,22 @@ test("the install button appears with the browser's offer and calls prompt()", a
   await expect(button).toBeVisible();
   await expect(button).toHaveText("Install app");
   expect((await page.evaluate(() => window.rvp.installState())).state).toBe("available");
+  // On a computer the card comes first: the desktop app, then the browser's own offer.
   await button.click();
+  const card = page.locator("#install-hint");
+  await expect(card).toBeVisible();
+  const desktop = page.locator("#install-desktop");
+  await expect(desktop).toHaveText("Get the desktop app");
+  await expect(desktop).toHaveAttribute("href", "https://software.rustybucket.ai/rusty-wave/latest/");
+  const web = page.locator("#install-web");
+  await expect(web).toHaveText("Install web app");
+  const [dBox, wBox] = [await desktop.boundingBox(), await web.boundingBox()];
+  expect(dBox.y).toBeLessThan(wBox.y); // the desktop app is offered first
+  expect(await page.evaluate(() => window.__installPrompts)).toBe(0);
+  await web.click();
   await expect(button).toBeHidden();
+  await expect(card).toBeHidden();
   expect(await page.evaluate(() => window.__installPrompts)).toBe(1);
-  await expect(page.locator("#install-hint")).toBeHidden();
   // `appinstalled` keeps it away, with a note for screen readers.
   await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
   await expect(page.locator("#install")).toBeHidden();
@@ -205,6 +217,7 @@ test("without the browser's offer the entry shows how to install from the browse
   await offerInstall(page);
   expect((await page.evaluate(() => window.rvp.installState())).state).toBe("available");
   await button.click();
+  await page.locator("#install-web").click();
   expect(await page.evaluate(() => window.__installPrompts)).toBe(1);
   // "Don't show again" is remembered.
   await page.reload();
@@ -234,11 +247,11 @@ test("the cross on the install button hides it for good", async ({ page }) => {
   await expect(page.locator("#install")).toBeHidden();
 });
 
-for (const [name, userAgent, extra, want] of [
-  ["Safari on iPhone", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1", { hasTouch: true, isMobile: true }, /Share, then Add to Home Screen/],
-  ["Safari on a Mac", "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15", {}, /File > Add to Dock/],
-  ["Firefox on a computer", "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0", {}, /Firefox does not install web apps on a computer/],
-  ["Firefox on Android", "Mozilla/5.0 (Android 14; Mobile; rv:125.0) Gecko/125.0 Firefox/125.0", {}, /choose Install/],
+for (const [name, userAgent, extra, want, desktopApp] of [
+  ["Safari on iPhone", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1", { hasTouch: true, isMobile: true }, /Share, then Add to Home Screen.*Folder libraries aren't available/, false],
+  ["Safari on a Mac", "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15", {}, /File > Add to Dock/, true],
+  ["Firefox on a computer", "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0", {}, /Firefox can't install web apps on a computer/, true],
+  ["Firefox on Android", "Mozilla/5.0 (Android 14; Mobile; rv:125.0) Gecko/125.0 Firefox/125.0", { hasTouch: true, isMobile: true }, /choose Install/, false],
 ]) {
   test(`the hint for ${name} says how to install there`, async ({ browser }) => {
     const context = await browser.newContext({ userAgent, ...extra });
@@ -253,6 +266,8 @@ for (const [name, userAgent, extra, want] of [
     expect(hint).toMatch(want);
     await page.locator("#install").click();
     await expect(page.locator("#install-hint-text")).toHaveText(hint);
+    // A computer is offered the desktop app first; a phone is not (its way in is the browser's own).
+    await expect(page.locator("#install-desktop")).toHaveCount(desktopApp ? 1 : 0);
     await context.close();
   });
 }
@@ -278,3 +293,34 @@ test("running as the installed app (standalone) there is no install entry", asyn
   await expect(page.locator("#install-hint")).toHaveCount(0);
   await context.close();
 });
+
+// ---- a phone ---------------------------------------------------------------------------------------------------------------
+// The install and update buttons are a strip along the top, and the canvas starts under it: nothing floats over the library's header.
+for (const [name, viewport, userAgent] of [
+  ["Chrome on Android, 390x844", { width: 390, height: 844 }, "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"],
+  ["Chrome on Android, 360x800", { width: 360, height: 800 }, "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"],
+]) {
+  test(`on ${name} the install strip sits above the canvas and the card fits the width`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport, userAgent, hasTouch: true, isMobile: true, deviceScaleFactor: 3 });
+    const page = await context.newPage();
+    await page.goto("/");
+    await ready(page);
+    await offerInstall(page);
+    const bar = page.locator("#install-bar");
+    await expect(bar).toBeVisible();
+    const b = await bar.boundingBox();
+    expect(b.x).toBeLessThanOrEqual(1);
+    expect(b.width).toBeGreaterThanOrEqual(viewport.width - 2);
+    expect(b.height).toBeGreaterThanOrEqual(40);
+    const pill = await page.locator("#install").boundingBox();
+    expect(pill.height).toBeGreaterThanOrEqual(32);
+    const canvas = await page.locator("#screen").boundingBox();
+    expect(canvas.y).toBeGreaterThanOrEqual(b.y + b.height - 1); // the strip covers none of the canvas
+    expect(canvas.y + canvas.height).toBeLessThanOrEqual(viewport.height + 1);
+    // On a phone the browser's own offer is the first choice: the pill asks for it at once.
+    await page.locator("#install").tap();
+    expect(await page.evaluate(() => window.__installPrompts)).toBe(1);
+    await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
+    await context.close();
+  });
+}

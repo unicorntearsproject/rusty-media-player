@@ -73,7 +73,7 @@ fn run(first: &str, rest: &[&str], delay_us: i64) -> Run {
     let mut host = HeadlessHost::new();
     host.audio.capture = Some(Vec::new());
     let clock = host.virtual_clock();
-    let codecs = rvp_host_headless::DefaultCodecs { stall: None, clock: Some(clock.clone()) };
+    let codecs = rvp_host_headless::DefaultCodecs { stall: None, clock: Some(clock.clone()), platform: None };
     let mut session = Session::new(FileSource::open(&fixture(first)).unwrap(), Rc::new(codecs));
     session.play();
     let mut chain = rest.iter();

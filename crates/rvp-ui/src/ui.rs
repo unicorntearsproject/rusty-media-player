@@ -143,6 +143,8 @@ pub struct Layout {
     pub time_x: f32,
     /// Vertical centre of the button row.
     pub row_cy: f32,
+    /// Where the time readout sits (its centre line); the button row's for most windows, above the seek bar on a phone.
+    pub time_y: f32,
     /// Buttons that exist at this size and state.
     pub buttons: Vec<(Btn, RectF)>,
     /// The empty-screen card.
@@ -469,6 +471,11 @@ impl Ui {
             ));
             return l;
         }
+        l.time_y = l.row_cy;
+        if w < 600.0 * s {
+            self.layout_phone(&mut l);
+            return l;
+        }
         let cy = l.row_cy;
         let mut x = m;
         let play = 44.0 * s;
@@ -513,6 +520,53 @@ impl Ui {
         let pw = 56.0 * s;
         l.buttons.push((Btn::Speed, RectF::new(rx - pw, cy - 14.0 * s, pw, 28.0 * s)));
         l
+    }
+
+    /// The controls of a phone-width window, in two rows of touch-sized buttons under the seek bar and its times:
+    /// mute, back, play, forward; then the mode switch, queue, tracks, speed, open and fullscreen.
+    fn layout_phone(&self, l: &mut Layout) {
+        let s = l.s;
+        let (w, h) = (l.w, l.h);
+        let m = 16.0 * s;
+        l.bar_top = h - 204.0 * s;
+        l.time_y = h - 172.0 * s;
+        l.time_x = m;
+        l.seek_track = RectF::new(m, h - 148.0 * s - 2.0 * s, w - 2.0 * m, 4.0 * s);
+        l.seek_hit = RectF::new(m, h - 148.0 * s - 18.0 * s, w - 2.0 * m, 36.0 * s);
+        l.vol_hit = None;
+        let gap = 8.0 * s;
+        let row = |l: &mut Layout, cy: f32, items: &[(Btn, f32, f32)]| {
+            let total: f32 =
+                items.iter().map(|(_, bw, _)| bw * s).sum::<f32>() + gap * (items.len() as f32 - 1.0);
+            let mut x = (w - total) * 0.5;
+            for (b, bw, bh) in items {
+                l.buttons.push((*b, RectF::new(x, cy - bh * s * 0.5, bw * s, bh * s)));
+                x += bw * s + gap;
+            }
+        };
+        row(
+            l,
+            h - 96.0 * s,
+            &[
+                (Btn::Mute, 44.0, 44.0),
+                (Btn::Back, 44.0, 44.0),
+                (Btn::Play, 56.0, 56.0),
+                (Btn::Fwd, 44.0, 44.0),
+            ],
+        );
+        l.row_cy = h - 34.0 * s;
+        row(
+            l,
+            l.row_cy,
+            &[
+                (Btn::ModeSwitch, 44.0, 44.0),
+                (Btn::Playlist, 44.0, 44.0),
+                (Btn::Tracks, 44.0, 44.0),
+                (Btn::Speed, 60.0, 36.0),
+                (Btn::Open, 44.0, 44.0),
+                (Btn::Fullscreen, 44.0, 44.0),
+            ],
+        );
     }
 
     fn hit_test(&self, x: f32, y: f32, l: &Layout, model: &UiModel) -> Target {
@@ -867,6 +921,10 @@ impl Ui {
                 }
             }
             Target::Btn(b) => self.activate(b, model, &l, out),
+            // On a phone the first tap on the picture shows the controls; the next one plays or pauses.
+            Target::Video if model.has_media() && l.w < 600.0 * l.s && self.controls_alpha <= 0.3 => {
+                self.last_activity = now_us;
+            }
             Target::Video if model.has_media() => {
                 let double = self.last_click.is_some_and(|(t0, cx, cy)| {
                     now_us - t0 <= DOUBLE_CLICK_US && (cx - x).abs() + (cy - y).abs() < 12.0 * self.scale
@@ -1419,6 +1477,57 @@ mod tests {
     }
 
     #[test]
+    fn a_phone_gets_two_rows_of_touch_sized_controls_and_a_tap_shows_them_first() {
+        for (w, h, dpr) in [(390u32, 844u32, 1.0f32), (360, 800, 1.0), (1170, 2532, 3.0)] {
+            let mut ui = Ui::default();
+            ui.set_size(w, h, dpr);
+            let m = media();
+            let l = ui.layout(&m);
+            let (sw, sh) = (w as f32, h as f32);
+            assert!(l.bar_top < l.seek_hit.y && l.seek_hit.bottom() < sh, "{w}x{h}");
+            for (i, (b, r)) in l.buttons.iter().enumerate() {
+                let min = if *b == Btn::Speed { 36.0 } else { 44.0 } * dpr - 0.5;
+                assert!(r.w >= min.min(44.0 * dpr - 0.5) && r.h >= min, "{b:?} is {r:?} at {w}x{h}");
+                assert!(
+                    r.x >= 0.0 && r.right() <= sw && r.y >= l.bar_top && r.bottom() <= sh,
+                    "{b:?} is {r:?}"
+                );
+                for (b2, r2) in &l.buttons[i + 1..] {
+                    let apart = r.right() <= r2.x + 0.01
+                        || r2.right() <= r.x + 0.01
+                        || r.bottom() <= r2.y + 0.01
+                        || r2.bottom() <= r.y + 0.01;
+                    assert!(apart, "{b:?} overlaps {b2:?} at {w}x{h}");
+                }
+            }
+            for want in [
+                Btn::Play,
+                Btn::Back,
+                Btn::Fwd,
+                Btn::Mute,
+                Btn::Fullscreen,
+                Btn::ModeSwitch,
+                Btn::Speed,
+                Btn::Tracks,
+                Btn::Playlist,
+                Btn::Open,
+            ] {
+                assert!(l.rect_of(want).is_some(), "{want:?} missing at {w}x{h}");
+            }
+            // The time readout sits above the seek bar, clear of every button.
+            assert!(l.time_y < l.seek_hit.y && l.buttons.iter().all(|(_, r)| r.y > l.time_y + 8.0 * dpr));
+            // Drawing never panics and every message card fits.
+            let mut fb = crate::gfx::FrameBuffer::new(w, h);
+            ui.draw_overlay(&mut fb, &m);
+            // With the controls hidden, a tap on the picture shows them and does not pause; the next one pauses.
+            ui.controls_alpha = 0.0;
+            assert_eq!(click(&mut ui, sw * 0.5, sh * 0.3, &m, 5_000_000), []);
+            ui.controls_alpha = 1.0;
+            assert_eq!(click(&mut ui, sw * 0.5, sh * 0.3, &m, 6_000_000), [Action::PlayPause]);
+        }
+    }
+
+    #[test]
     fn the_player_bar_has_shuffle_and_repeat_that_act_and_say_their_state() {
         let mut ui = Ui::default();
         let mut m = media();
@@ -1500,7 +1609,10 @@ mod tests {
                 for (i, (b, r)) in l.buttons.iter().enumerate() {
                     assert!(r.x >= 0.0 && r.right() <= l.w, "{b:?} at {w}");
                     for (b2, r2) in &l.buttons[i + 1..] {
-                        let apart = r.right() <= r2.x + 0.01 || r2.right() <= r.x + 0.01;
+                        let apart = r.right() <= r2.x + 0.01
+                            || r2.right() <= r.x + 0.01
+                            || r.bottom() <= r2.y + 0.01
+                            || r2.bottom() <= r.y + 0.01;
                         assert!(apart, "{b:?} overlaps {b2:?} at {w} @ {dpr}");
                     }
                 }

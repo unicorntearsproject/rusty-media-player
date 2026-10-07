@@ -102,7 +102,9 @@ impl Ui {
             s: self.scale,
             w: self.w as f32,
             h: self.h as f32,
-            toast_y: self.h as f32 - 96.0 * self.scale - 52.0 * self.scale,
+            toast_y: self.h as f32
+                - (if (self.w as f32) < 600.0 * self.scale { 152.0 } else { 96.0 }) * self.scale
+                - 52.0 * self.scale,
             ..Layout::default()
         }
     }
@@ -316,11 +318,18 @@ impl Ui {
             if g.m.table_head.is_some() {
                 self.draw_table_head(fb, &g);
             }
-            self.draw_rail(fb, &g, model, ctx);
+            if !g.m.phone {
+                self.draw_rail(fb, &g, model, ctx);
+            }
         }
         if view != View::Visualizer || self.controls_alpha > 0.005 {
             let a = if view == View::Visualizer { self.controls_alpha } else { 1.0 };
             self.draw_lib_bar(fb, &g, model, ctx, a);
+        }
+        // A phone's rail is a drawer over everything, the bar included, with the content dimmed beside it.
+        if g.m.phone && g.m.rail.w > 0.0 && view != View::Visualizer {
+            fb.fill_rect_paint(RectF::new(0.0, 0.0, g.m.w, g.m.h), Paint::Solid(t::ink_900()), 0.62);
+            self.draw_rail(fb, &g, model, ctx);
         }
         self.draw_toast(fb, &l);
         if self.drag_over {
@@ -732,6 +741,22 @@ impl Ui {
             Paint::Solid(t::white()),
             0.06,
         );
+        if let Some(b) = g.menu_btn {
+            let hot = self.lib.hover == LibHit::DrawerBtn;
+            if hot || self.lib.drawer {
+                fb.fill_rrect(b, 22.0 * s, Paint::Solid(fade(t::white(), 0.10)), 1.0);
+            }
+            self.icon(
+                fb,
+                Icon::Menu,
+                b.cx(),
+                b.cy(),
+                22.0,
+                if hot { t::white() } else { t::text_body() },
+                1.0,
+                false,
+            );
+        }
         if let Some(b) = g.back {
             let hot = self.lib.hover == LibHit::Back;
             if hot {
@@ -754,23 +779,18 @@ impl Ui {
                 .max(120.0 * s);
         let max_w = max_w.min(g.search.x - g.title_x - 16.0 * s);
         let room = max_w > 60.0 * s;
-        let title = self.fonts.fit(Face::SansBold, 28.0 * s, &title, max_w);
+        let (ty, sy, tsz) = if g.m.phone {
+            (hd.y + 27.0 * s, hd.y + 52.0 * s, 21.0)
+        } else {
+            (hd.y + 40.0 * s, hd.y + 68.0 * s, 28.0)
+        };
+        let title = self.fonts.fit(Face::SansBold, tsz * s, &title, max_w);
         if room {
-            self.text(
-                fb,
-                Face::SansBold,
-                28.0,
-                g.title_x,
-                hd.y + 40.0 * s,
-                &title,
-                t::text_strong(),
-                1.0,
-                -0.3,
-            );
+            self.text(fb, Face::SansBold, tsz, g.title_x, ty, &title, t::text_strong(), 1.0, -0.3);
         }
         if !sub.is_empty() && room {
             let sub = self.fonts.fit(Face::Sans, 13.0 * s, &sub, max_w);
-            self.text(fb, Face::Sans, 13.0, g.title_x, hd.y + 68.0 * s, &sub, t::text_dim(), 1.0, 0.0);
+            self.text(fb, Face::Sans, 13.0, g.title_x, sy, &sub, t::text_dim(), 1.0, 0.0);
         }
         // Search.
         let focused = self.lib.zone == Zone::Search;
@@ -2349,7 +2369,7 @@ impl Ui {
                     Face::SansMedium,
                     14.5,
                     tx,
-                    b.y + 36.0 * s,
+                    g.bar_text_y[0],
                     &title,
                     if hot { t::cyan_400() } else { t::text_strong() },
                     a,
@@ -2358,7 +2378,7 @@ impl Ui {
                 let sub = if !model.artist.is_empty() { model.artist.clone() } else { String::new() };
                 if !sub.is_empty() {
                     let sub = self.fonts.fit(Face::Sans, 12.5 * s, &sub, tw);
-                    self.text(fb, Face::Sans, 12.5, tx, b.y + 58.0 * s, &sub, t::text_dim(), a, 0.0);
+                    self.text(fb, Face::Sans, 12.5, tx, g.bar_text_y[1], &sub, t::text_dim(), a, 0.0);
                 }
             }
         } else {
@@ -2370,7 +2390,7 @@ impl Ui {
                     Face::Sans,
                     13.5,
                     g.bar_art.right() + 14.0 * s,
-                    b.y + 48.0 * s,
+                    g.bar_text_y[2],
                     "Nothing playing",
                     t::text_dim(),
                     a,

@@ -207,11 +207,13 @@ impl App {
         } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
             "image/png"
         } else {
-            self.ui.show_toast("That is not a JPEG or a PNG picture", now);
+            self.ui
+                .show_toast("That isn't a JPEG or a PNG picture. Pick a cover in one of those formats.", now);
             return;
         };
         if bytes.len() > MAX_COVER {
-            self.ui.show_toast("That picture is too big (8 MB at most)", now);
+            self.ui
+                .show_toast("That picture is bigger than 8 MB. Pick a smaller one, or shrink it first.", now);
             return;
         }
         self.lib.tags.cover = Some((mime.to_string(), bytes));
@@ -404,7 +406,9 @@ impl App {
         self.lib_save(host);
         let _ = job.total;
         let msg = match (job.done, job.failed.first()) {
-            (0, Some((name, why))) => format!("Could not save {name}: {why}"),
+            (0, Some((name, why))) => format!(
+                "Couldn't save the tags of {name} ({why}). Check that the file isn't read-only or open in another app, then try again."
+            ),
             (n, None) => format!("Saved the tags of {}", crate::plural(n, "song", "songs")),
             (n, Some((name, why))) => format!(
                 "Saved {}; {} not saved ({name}: {why})",

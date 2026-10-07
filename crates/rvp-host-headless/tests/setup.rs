@@ -8,7 +8,7 @@ use rvp_ui::{Mode, UiConfig};
 use std::rc::Rc;
 
 fn new_app() -> App {
-    App::new(Rc::new(DefaultCodecs { stall: None, clock: None }), UiConfig { reduce_motion: true })
+    App::new(Rc::new(DefaultCodecs::default()), UiConfig { reduce_motion: true })
 }
 
 fn standard() -> Vec<StandardFolder> {

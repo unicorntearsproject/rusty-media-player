@@ -1,7 +1,7 @@
 /* Colours are the Unicorn Tears tokens (ink-900 page). The canvas does all the drawing. */
 :root { --ink-900: #07060d; color-scheme: dark; }
 html, body { margin: 0; height: 100%; background: var(--ink-900); overflow: hidden; }
-#screen { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+#screen { display: block; width: 100%; height: 100vh; height: 100dvh; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* The two little buttons of the installable app (pwa.js): install, and update. Tokens of the Unicorn Tears system. */
@@ -44,3 +44,26 @@ html, body { margin: 0; height: 100%; background: var(--ink-900); overflow: hidd
 .pwa-card button:focus-visible { outline: 2px solid #19e3ff; outline-offset: 2px; }
 body:has(#update) .pwa-card { top: 32px; }
 @media (prefers-reduced-motion: no-preference) { .pwa-pill { transition: filter 120ms ease-out; } }
+
+/* A card's main action, and its small print. */
+.pwa-card a.pwa-primary {
+  display: block; text-align: center; text-decoration: none; margin: 4px 0 10px;
+  font: 700 14px/1 "Space Grotesk", system-ui, sans-serif; color: #fff; padding: 12px 16px; border-radius: 999px;
+  background: linear-gradient(120deg, #ff2bd6, #9d4eff 55%, #19e3ff); box-shadow: 0 0 18px rgba(157, 78, 255, 0.45);
+}
+.pwa-card a.pwa-primary:focus-visible { outline: 2px solid #19e3ff; outline-offset: 2px; }
+.pwa-card .pwa-sub { margin: 0 0 8px; font-size: 13px; opacity: 0.8; }
+
+/* A phone: the install and update buttons are a strip along the top (the canvas starts under it, see pwa.js), touch-sized, and the card
+   fills the width. Nothing floats over the library's header. */
+@media (max-width: 600px) {
+  #screen { margin-top: var(--pwa-strip, 0px); height: calc(100vh - var(--pwa-strip, 0px)); height: calc(100dvh - var(--pwa-strip, 0px)); }
+  .pwa-bar { top: 0; left: 0; right: 0; box-sizing: border-box; height: 44px; padding: 0 10px; justify-content: center; gap: 10px;
+    background: #0d0a1f; border-bottom: 1px solid rgba(244, 241, 255, 0.12); }
+  .pwa-bar .pwa-pill { padding: 10px 18px; font-size: 14px; }
+  .pwa-x { width: 32px; height: 32px; font-size: 18px; }
+  .pwa-pill-update { top: 0; left: 0; right: 0; box-sizing: border-box; border-radius: 0; height: 40px; padding: 0 12px; text-align: center; }
+  body:has(.pwa-bar:not([hidden])) .pwa-pill-update { top: 44px; }
+  .pwa-card, body:has(#update) .pwa-card { top: calc(var(--pwa-strip, 0px) + 8px); right: 16px; left: 16px; width: auto; max-height: calc(100dvh - 32px); overflow: auto; }
+  .pwa-card button, .pwa-card a.pwa-primary { min-height: 44px; }
+}

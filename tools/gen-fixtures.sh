@@ -2,7 +2,7 @@
 # Generate small synthetic test media with ffmpeg into target/fixtures (never committed) and, next to each
 # file, the ffprobe packet/stream dump (<name>.probe.json) used as the oracle by the demuxer tests.
 #   tools/gen-fixtures.sh [outdir]      (default: <repo>/target/fixtures, or $RVP_FIXTURES)
-#   RVP_FIXTURE_SET=basic|core|h264|vp9|m8|audio|library|levels|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
+#   RVP_FIXTURE_SET=basic|core|h264|vp9|m8|audio|library|levels|hevc|perf|all   which set to build (default all, which leaves out `perf`); H.264 goes to <outdir>/h264,
 #                                       VP9 to <outdir>/vp9, M8 (subtitles, tracks, gapless) to <outdir>/m8, raw audio files to <outdir>/audio, and the one-minute 1080p30
 #                                       speed streams (M9) to <outdir>/perf (minutes of encoding: `cargo xtask perf-fixtures`)
 #   RVP_FIXTURE_FORCE=1                 rebuild files that already exist (the H.264 set otherwise skips them)
@@ -552,6 +552,19 @@ gen_levels() {
   echo "$version" > "$d/.done"
 }
 
+# HEVC (Main and Main10) and 10-bit H.264, which no decoder of ours takes: the platform decoder handoff and its messages are tested on
+# them (needs libx265; without it the set is skipped and the tests that use it skip).
+gen_hevc() {
+  local d="$out/hevc"; mkdir -p "$d"
+  local v=(-f lavfi -i "testsrc2=size=320x240:rate=25:duration=4") a=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=4")
+  local enc; enc="$(ffmpeg -hide_banner -encoders 2>/dev/null || true)"
+  [[ "$enc" == *libx265* ]] || { echo "libx265 missing: no HEVC fixtures"; return 0; }
+  ff "${v[@]}" "${a[@]}" -c:v libx265 -preset veryfast -x265-params log-level=error:keyint=12 -pix_fmt yuv420p -tag:v hvc1 -c:a aac -b:a 64k -ac 2 -shortest "$d/hevc_aac.mp4"
+  ff "${v[@]}" "${a[@]}" -c:v libx265 -preset veryfast -x265-params log-level=error:keyint=12 -pix_fmt yuv420p10le -tag:v hvc1 -c:a aac -b:a 64k -ac 2 -shortest "$d/hevc10_aac.mp4"
+  ff "${v[@]}" "${a[@]}" -c:v libx265 -preset veryfast -x265-params log-level=error:keyint=12 -pix_fmt yuv420p -c:a flac -ac 2 -shortest "$d/hevc_flac.mkv"
+  ff "${v[@]}" "${a[@]}" -c:v libx264 -preset veryfast -g 12 -pix_fmt yuv420p10le -c:a aac -b:a 64k -ac 2 -shortest "$d/h264_10bit.mp4"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == basic ]]; then gen_basic; fi
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
@@ -561,5 +574,6 @@ if [[ "$fixture_set" == all || "$fixture_set" == m8 ]]; then gen_m8; fi
 if [[ "$fixture_set" == all || "$fixture_set" == audio ]]; then gen_audio; fi
 if [[ "$fixture_set" == all || "$fixture_set" == library ]]; then gen_library; fi
 if [[ "$fixture_set" == all || "$fixture_set" == levels ]]; then gen_levels; fi
+if [[ "$fixture_set" == all || "$fixture_set" == hevc ]]; then gen_hevc; fi
 if [[ "$fixture_set" == perf ]]; then gen_perf; fi
 echo "fixtures in $out"

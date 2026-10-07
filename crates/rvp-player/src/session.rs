@@ -555,7 +555,8 @@ async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
             other => {
                 let mut s = sh.borrow_mut();
                 if let Some(Err(e)) = other {
-                    s.warnings.push(alloc::format!("audio disabled: {e}"));
+                    let codec = s.sel_audio.as_ref().map(|i| i.codec.clone()).unwrap_or_default();
+                    s.warnings.push(alloc::format!("audio disabled ({codec}): {e}"));
                 }
                 s.sel_audio = None;
                 s.audio_done = true;
@@ -574,7 +575,8 @@ async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
                 other => {
                     let mut s = sh.borrow_mut();
                     if let Some(Err(e)) = other {
-                        s.warnings.push(alloc::format!("audio disabled: {e}"));
+                        let codec = info.as_ref().map(|i| i.codec.clone()).unwrap_or_default();
+                        s.warnings.push(alloc::format!("audio disabled ({codec}): {e}"));
                     }
                     s.sel_audio = None;
                     s.audio_done = true;
@@ -631,7 +633,8 @@ async fn video_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
         other => {
             let mut s = sh.borrow_mut();
             if let Some(Err(e)) = other {
-                s.warnings.push(alloc::format!("video disabled: {e}"));
+                let codec = s.sel_video.as_ref().map(|i| i.codec.clone()).unwrap_or_default();
+                s.warnings.push(alloc::format!("video disabled ({codec}): {e}"));
             }
             s.sel_video = None;
             s.video_done = true;
@@ -674,8 +677,20 @@ async fn video_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
             }
         };
         if let Some(p) = packet {
-            let ok = dec.send_packet(&p).is_ok();
+            let sent = dec.send_packet(&p);
+            let ok = sent.is_ok();
             let mut s = sh.borrow_mut();
+            // A stream the decoder opened for and then refuses (10-bit H.264, a profile it does not do) is a stream without a picture, not
+            // a packet to skip a thousand times: say so once and let the sound play on.
+            if let Err(Error::Unsupported(e)) = &sent {
+                let codec = s.sel_video.as_ref().map(|i| i.codec.clone()).unwrap_or_default();
+                s.warnings.push(alloc::format!("video disabled ({codec}): {e}"));
+                s.sel_video = None;
+                s.video_in.clear();
+                s.video_dec.clear();
+                s.video_done = true;
+                return;
+            }
             if ok {
                 while let Ok(Some(f)) = dec.receive_frame() {
                     s.video_dec.push_back(f);

@@ -42,7 +42,7 @@ struct Rig {
 impl Rig {
     fn new() -> Self {
         let host = UiHost::new();
-        let codecs = DefaultCodecs { stall: None, clock: None };
+        let codecs = DefaultCodecs::default();
         // reduce_motion makes fades instant, so the tests do not depend on animation timing.
         let app = App::new(Rc::new(codecs), UiConfig { reduce_motion: true });
         Self { host, app }

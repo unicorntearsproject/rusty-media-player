@@ -30,20 +30,43 @@ export function isInstalled() {
   return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 }
 
-/** What to tell someone whose browser has not offered installing: the way in for their browser. */
+/** Where the native desktop app is offered (the newest release; the page of the release site lists every package). */
+export const DESKTOP_APP_URL = "https://software.rustybucket.ai/rusty-wave/latest/";
+
+/** The kind of device and browser from the user agent: `os` is ios | android | chromeos | windows | mac | linux | other. */
+export function platformOf(ua, touchPoints) {
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && touchPoints > 1);
+  let os = "other";
+  if (ios) os = "ios";
+  else if (/Android/.test(ua)) os = "android";
+  else if (/CrOS/.test(ua)) os = "chromeos";
+  else if (/Windows/.test(ua)) os = "windows";
+  else if (/Macintosh|Mac OS X/.test(ua)) os = "mac";
+  else if (/Linux|X11/.test(ua)) os = "linux";
+  let browser = "other";
+  if (/Firefox\/|FxiOS\//.test(ua) && !/Seamonkey/i.test(ua)) browser = "firefox";
+  else if (/Chrome\/|Chromium\/|Edg\/|CriOS\//.test(ua)) browser = "chromium";
+  else if (/Safari\//.test(ua)) browser = "safari";
+  return { os, browser, desktop: os === "windows" || os === "mac" || os === "linux" };
+}
+
+/** What to tell someone whose browser has not offered installing: the way in for their browser and device. */
 export function installHintFor(ua, touchPoints, secure) {
   if (!secure) return "Installing needs a secure page (https).";
-  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && touchPoints > 1);
-  if (ios) return "Tap Share, then Add to Home Screen.";
-  if (/Firefox\//.test(ua) && !/Seamonkey/i.test(ua)) {
-    return /Android/.test(ua)
-      ? "Open the browser menu and choose Install."
-      : "Firefox does not install web apps on a computer. Use Chrome, Edge or Brave and choose Install in the address bar or the menu, or get the Rusty Wave desktop app.";
+  const { os, browser, desktop } = platformOf(ua, touchPoints);
+  if (os === "ios") {
+    return "Tap Share, then Add to Home Screen. Folder libraries aren't available on iPhone and iPad (Safari can't open folders), so add songs and videos as files.";
   }
-  if (/Chrome\/|Chromium\/|Edg\/|CriOS\//.test(ua)) {
+  if (browser === "firefox") {
+    return os === "android"
+      ? "Open the browser menu and choose Install."
+      : "Firefox can't install web apps on a computer. Get the Rusty Wave desktop app, or use Chrome, Edge or Brave and choose Install in the address bar or the menu.";
+  }
+  if (desktop && os === "mac" && browser === "safari") return "In Safari, choose File > Add to Dock (or Share > Add to Dock).";
+  if (browser === "chromium") {
     return "Open the browser menu and choose Install Rusty Wave (Install page as app, or Install this site as an app). If it is not listed, the app may already be installed.";
   }
-  if (/Macintosh/.test(ua) && /Safari\//.test(ua)) return "In Safari, choose File > Add to Dock (or Share > Add to Home Screen).";
+  if (os === "mac" && browser === "safari") return "In Safari, choose File > Add to Dock (or Share > Add to Home Screen).";
   return "Use your browser's menu: Install app, or Add to Home Screen.";
 }
 
@@ -80,7 +103,24 @@ export function installState() {
   };
 }
 
+/** On a phone the install and update buttons are a strip along the top, and the canvas starts under it (`--pwa-strip`); elsewhere they float. */
+function layoutStrip() {
+  let bottom = 0;
+  if (window.matchMedia("(max-width: 600px)").matches) {
+    for (const el of [installBar, document.getElementById("update")]) {
+      if (el && !el.hidden) bottom = Math.max(bottom, el.getBoundingClientRect().bottom);
+    }
+  }
+  document.documentElement.style.setProperty("--pwa-strip", `${Math.ceil(bottom)}px`);
+}
+window.addEventListener("resize", () => layoutStrip());
+
 function render() {
+  renderBar();
+  layoutStrip();
+}
+
+function renderBar() {
   const { state } = installState();
   const show = (state === "available" || state === "hint") && !dismissed();
   if (!show) {
@@ -99,7 +139,11 @@ function render() {
     installPill.className = "pwa-pill";
     installPill.textContent = "Install app";
     installPill.setAttribute("aria-haspopup", "dialog");
-    installPill.addEventListener("click", () => { install(); });
+    installPill.addEventListener("click", () => {
+      const { desktop } = platformOf(navigator.userAgent, navigator.maxTouchPoints || 0);
+      // On a computer the card comes first (desktop app, then web app); on a phone or tablet the browser's own prompt, if it offered one.
+      if (desktop || !deferred) { if (hintOpen) closeHint(); else openHint(); } else install();
+    });
     const x = document.createElement("button");
     x.id = "install-dismiss";
     x.type = "button";
@@ -119,38 +163,58 @@ function closeHint() {
   if (installPill) installPill.setAttribute("aria-expanded", "false");
 }
 
+function button(id, text, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.id = id;
+  b.textContent = text;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
 function openHint() {
+  const opts = platformOf(navigator.userAgent, navigator.maxTouchPoints || 0);
   if (!hintCard) {
     hintCard = document.createElement("div");
     hintCard.id = "install-hint";
     hintCard.className = "pwa-card";
     hintCard.setAttribute("role", "dialog");
     hintCard.setAttribute("aria-label", "Install Rusty Wave");
-    const title = document.createElement("strong");
-    title.textContent = "Install Rusty Wave";
-    const text = document.createElement("p");
-    text.id = "install-hint-text";
-    const row = document.createElement("div");
-    row.className = "pwa-card-row";
-    const close = document.createElement("button");
-    close.type = "button";
-    close.id = "install-hint-close";
-    close.textContent = "Close";
-    close.addEventListener("click", closeHint);
-    const never = document.createElement("button");
-    never.type = "button";
-    never.id = "install-hint-never";
-    never.textContent = "Don't show again";
-    never.addEventListener("click", () => { remember(dismissedKey, "1"); render(); });
-    row.append(close, never);
-    hintCard.append(title, text, row);
     document.body.appendChild(hintCard);
   }
-  hintCard.querySelector("#install-hint-text").textContent = installState().hint;
+  hintCard.replaceChildren();
+  const title = document.createElement("strong");
+  title.textContent = "Install Rusty Wave";
+  hintCard.append(title);
+  if (opts.desktop) {
+    // On a computer the desktop app comes first: faster, and the folders stay connected.
+    const lead = document.createElement("p");
+    lead.textContent = "The desktop app is the best way to play: faster, with your folders always connected.";
+    const get = document.createElement("a");
+    get.id = "install-desktop";
+    get.className = "pwa-primary";
+    get.href = DESKTOP_APP_URL;
+    get.target = "_blank";
+    get.rel = "noopener";
+    get.textContent = "Get the desktop app";
+    hintCard.append(lead, get);
+  }
+  const text = document.createElement("p");
+  text.id = "install-hint-text";
+  text.textContent = installState().hint;
+  const row = document.createElement("div");
+  row.className = "pwa-card-row";
+  // The browser's own offer, when it made one: the second choice on a computer, the first on a phone.
+  if (deferred) row.append(button("install-web", "Install web app", () => { closeHint(); install(); }));
+  row.append(button("install-hint-close", "Close", closeHint));
+  row.append(button("install-hint-never", "Don't show again", () => { remember(dismissedKey, "1"); render(); }));
+  // Without the browser's offer, the hint explains its menu (and Safari's and iOS's own way in).
+  if (!deferred) hintCard.append(text);
+  hintCard.append(row);
   hintCard.hidden = false;
   hintOpen = true;
   if (installPill) installPill.setAttribute("aria-expanded", "true");
-  hintCard.querySelector("#install-hint-close").focus({ preventScroll: true });
+  (hintCard.querySelector("#install-desktop") || hintCard.querySelector("#install-hint-close")).focus({ preventScroll: true });
 }
 
 /**
@@ -243,6 +307,7 @@ export function setupPwa(api) {
           worker.postMessage({ type: "SKIP_WAITING" });
         });
         b.classList.add("pwa-pill-update");
+        layoutStrip();
         api.status("A new version of Rusty Wave is ready");
       };
       if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);

@@ -85,6 +85,8 @@ pub(crate) struct Geom {
     /// Folders that do not fit under the others: a "+N more" line after the last row.
     pub folders_more: usize,
     pub back: Option<RectF>,
+    /// The menu button that opens the rail as a drawer (phone width only).
+    pub menu_btn: Option<RectF>,
     pub search: RectF,
     pub search_clear: RectF,
     /// The search box is only its icon (a narrow window, not focused).
@@ -95,6 +97,8 @@ pub(crate) struct Geom {
     pub table_cols: Vec<(u8, RectF)>,
     pub bar_btns: Vec<(Btn, RectF)>,
     pub bar_art: RectF,
+    /// Where the bar's title, artist and idle text sit (their centres; a phone's bar has its own rows).
+    pub bar_text_y: [f32; 3],
     pub bar_info: RectF,
     pub seek_hit: RectF,
     pub seek_track: RectF,
@@ -128,7 +132,10 @@ impl Ui {
     pub(crate) fn lib_geom(&mut self, model: &UiModel, ctx: &LibCtx<'_>) -> Geom {
         let s = self.scale;
         let (w, h) = (self.w as f32, self.h as f32);
-        let m = Metrics::new(w, h, s, self.lib.view, self.lib.detail);
+        let m = Metrics::new(w, h, s, self.lib.view, self.lib.detail, self.lib.drawer);
+        if !m.phone {
+            self.lib.drawer = false;
+        }
         let mut g = Geom {
             m,
             nav: Vec::new(),
@@ -139,6 +146,7 @@ impl Ui {
             folders: Vec::new(),
             folders_more: 0,
             back: None,
+            menu_btn: None,
             search: RectF::default(),
             search_clear: RectF::default(),
             search_collapsed: false,
@@ -148,6 +156,7 @@ impl Ui {
             table_cols: Vec::new(),
             bar_btns: Vec::new(),
             bar_art: RectF::default(),
+            bar_text_y: [0.0; 3],
             bar_info: RectF::default(),
             seek_hit: RectF::default(),
             seek_track: RectF::default(),
@@ -161,7 +170,9 @@ impl Ui {
         };
         let full = self.lib.view == View::Visualizer;
         if !full {
-            self.geom_rail(&mut g, ctx);
+            if !g.m.phone || g.m.rail.w > 0.0 {
+                self.geom_rail(&mut g, ctx);
+            }
             self.geom_header(&mut g, model, ctx);
         }
         self.geom_bar(&mut g, model);
@@ -262,9 +273,15 @@ impl Ui {
         let s = self.scale;
         let hd = g.m.header;
         let pad = g.m.pad;
+        let (hy, bh) =
+            if g.m.phone { (hd.y + (hd.h - 44.0 * s) * 0.5, 44.0 * s) } else { (hd.y + 26.0 * s, 40.0 * s) };
         let mut x = hd.x + pad;
+        if g.m.phone {
+            g.menu_btn = Some(RectF::new(hd.x + 8.0 * s, hd.y + (hd.h - 44.0 * s) * 0.5, 44.0 * s, 44.0 * s));
+            x = hd.x + 8.0 * s + 48.0 * s;
+        }
         if self.lib.detail.is_some() || !self.lib.history.is_empty() {
-            g.back = Some(RectF::new(x - 4.0 * s, hd.y + 24.0 * s, 40.0 * s, 40.0 * s));
+            g.back = Some(RectF::new(x - 4.0 * s, hy - 2.0 * s, bh, bh));
             x += 44.0 * s;
         }
         g.title_x = x;
@@ -272,13 +289,13 @@ impl Ui {
         let narrow = hd.w < 620.0 * s;
         let focused = self.lib.zone == super::Zone::Search;
         let sw = if narrow && !focused {
-            40.0 * s
+            bh
         } else if narrow {
             hd.w - 2.0 * pad
         } else {
             (hd.w * 0.30).clamp(190.0 * s, 330.0 * s)
         };
-        g.search = RectF::new(hd.right() - pad - sw, hd.y + 26.0 * s, sw, 40.0 * s);
+        g.search = RectF::new(hd.right() - pad - sw, hy, sw, bh);
         g.search_clear = RectF::new(g.search.right() - 34.0 * s, g.search.y + 6.0 * s, 28.0 * s, 28.0 * s);
         g.search_collapsed = narrow && !focused;
         let mut rx = g.search.x - 12.0 * s;
@@ -323,8 +340,8 @@ impl Ui {
         let compact = hd.w < 900.0 * s;
         for (id, label, icon, primary) in btns {
             let tw = if compact { 0.0 } else { self.text_w(Face::SansMedium, 13.0, label, 0.0) + 8.0 * s };
-            let bw = if compact { 40.0 * s } else { tw + 50.0 * s };
-            let r = RectF::new(rx - bw, hd.y + 26.0 * s, bw, 40.0 * s);
+            let bw = if compact { bh } else { tw + 50.0 * s };
+            let r = RectF::new(rx - bw, hy, bw, bh);
             g.header_btns.push(PillBtn {
                 id,
                 rect: r,
@@ -339,7 +356,7 @@ impl Ui {
             let tw = self.text_w(Face::SansMedium, 13.0, &label, 0.0);
             let bw = tw + 48.0 * s;
             if rx - bw > x + 160.0 * s {
-                g.sort = Some(RectF::new(rx - bw, hd.y + 26.0 * s, bw, 40.0 * s));
+                g.sort = Some(RectF::new(rx - bw, hy, bw, bh));
             }
         }
         // The table head of the Tracks view.
@@ -364,6 +381,10 @@ impl Ui {
         let (w, y0) = (b.w, b.y);
         let compact = g.m.compact;
         let tiny = w < 760.0 * s;
+        if g.m.phone {
+            return self.geom_bar_phone(g, model);
+        }
+        g.bar_text_y = [y0 + 36.0 * s, y0 + 58.0 * s, y0 + 48.0 * s];
         let pad = 20.0 * s;
         // Left: cover and text.
         g.bar_art = RectF::new(pad, y0 + 16.0 * s, 64.0 * s, 64.0 * s);
@@ -435,6 +456,53 @@ impl Ui {
                     RectF::new(g.bar_info.right() - small, y0 + 14.0 * s, small, small),
                 ));
             }
+        }
+    }
+
+    /// The bar of a phone-width window, in three rows: the seek bar with its times, what is playing, and the transport (queue, previous,
+    /// play, next, player), every target at least 44 px.
+    fn geom_bar_phone(&mut self, g: &mut Geom, model: &UiModel) {
+        let s = self.scale;
+        let b = g.m.bar;
+        let (w, y0) = (b.w, b.y);
+        let pad = 16.0 * s;
+        // Row 1: the seek bar, times at its ends.
+        g.time_y = y0 + 18.0 * s;
+        let tw = 40.0 * s;
+        g.time_l = pad;
+        g.time_r = w - pad - tw;
+        g.seek_track = RectF::new(
+            pad + tw + 8.0 * s,
+            g.time_y - 2.0 * s,
+            (w - 2.0 * pad - 2.0 * tw - 16.0 * s).max(10.0),
+            4.0 * s,
+        );
+        g.seek_hit = RectF::new(g.seek_track.x, g.time_y - 16.0 * s, g.seek_track.w, 32.0 * s);
+        // Row 2: the cover and the text (the heart at the right end).
+        g.bar_art = RectF::new(pad, y0 + 40.0 * s, 48.0 * s, 48.0 * s);
+        g.bar_info = RectF::new(pad, y0 + 38.0 * s, w - 2.0 * pad, 52.0 * s);
+        g.bar_text_y = [y0 + 55.0 * s, y0 + 75.0 * s, y0 + 64.0 * s];
+        if model.has_media() {
+            g.bar_btns.push((
+                Btn::Favorite,
+                RectF::new(g.bar_info.right() - 44.0 * s, y0 + 42.0 * s, 44.0 * s, 44.0 * s),
+            ));
+        }
+        // Row 3: the transport.
+        let cy = y0 + 122.0 * s;
+        let row: [(Btn, f32); 5] = [
+            (Btn::QueueView, 44.0),
+            (Btn::Prev, 44.0),
+            (Btn::Play, 56.0),
+            (Btn::Next, 44.0),
+            (Btn::ModeSwitch, 44.0),
+        ];
+        let total: f32 = row.iter().map(|(_, z)| z * s).sum::<f32>() + 10.0 * s * 4.0;
+        let mut x = (w - total) * 0.5;
+        for (btn, z) in row {
+            let z = z * s;
+            g.bar_btns.push((btn, RectF::new(x, cy - z * 0.5, z, z)));
+            x += z + 10.0 * s;
         }
     }
 

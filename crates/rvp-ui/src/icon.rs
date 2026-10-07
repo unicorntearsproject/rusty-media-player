@@ -68,6 +68,7 @@ pub enum Icon {
     House,
     Heart,
     History,
+    Menu,
     ExternalLink,
     Tag,
 }
@@ -140,6 +141,7 @@ impl Icon {
             Icon::House => d::HOUSE,
             Icon::Heart => d::HEART,
             Icon::History => d::HISTORY,
+            Icon::Menu => d::MENU,
             Icon::ExternalLink => d::EXTERNAL_LINK,
             Icon::Tag => d::TAG,
         }

@@ -24,7 +24,7 @@ fn services(version: &str, updates: bool, integration: Integration) -> ScriptedS
 }
 
 fn new_app() -> App {
-    App::new(Rc::new(DefaultCodecs { stall: None, clock: None }), UiConfig { reduce_motion: true })
+    App::new(Rc::new(DefaultCodecs::default()), UiConfig { reduce_motion: true })
 }
 
 struct Rig {
