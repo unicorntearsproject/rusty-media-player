@@ -25,6 +25,7 @@ rvp-ui.workspace = true
 rvp-codec-audio = { path = "../rvp-codec-audio" }
 rvp-codec-av1 = { path = "../rvp-codec-av1" }
 rvp-codec-h264 = { path = "../rvp-codec-h264" }
+rvp-codec-hevc = { path = "../rvp-codec-hevc" }
 rvp-codec-vp9 = { path = "../rvp-codec-vp9" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

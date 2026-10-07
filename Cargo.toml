@@ -11,7 +11,6 @@ members = [
     "crates/rvp-codec-h264",
     "crates/rvp-codec-hevc",
     "crates/rvp-platform-video",
-    "crates/rvp-codec-hevc",
     "crates/rvp-codec-av1",
     "crates/rvp-codec-vp9",
     "crates/rvp-subs",

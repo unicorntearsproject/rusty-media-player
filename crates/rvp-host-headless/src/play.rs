@@ -62,12 +62,13 @@ impl CodecFactory for DefaultCodecs {
                 "av1" => rvp_codec_av1::av1_decoder(info),
                 "h264" => rvp_codec_h264::h264_decoder(info),
                 "vp9" => rvp_codec_vp9::vp9_decoder(info),
+                "hevc" => rvp_codec_hevc::sw::hevc_decoder(info),
                 other => Err(Error::Unsupported(format!("video codec `{other}`"))),
             },
             info,
         );
         let mut dec = rvp_core::open_video(ours, self.platform.as_ref(), info)?;
-        if info.codec == "h264" && self.platform.is_some() {
+        if matches!(info.codec.as_str(), "h264" | "hevc") && self.platform.is_some() {
             dec = Box::new(rvp_core::FallbackVideo::new(dec, self.platform.clone(), info.clone()));
         }
         match (self.stall, &self.clock) {

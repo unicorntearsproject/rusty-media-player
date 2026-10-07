@@ -31,7 +31,7 @@ impl CodecFactory for WebCodecs {
             },
             info,
         );
-        rvp_core::open_video(ours, self.platform.as_ref(), info)
+        self.with_fallback(rvp_core::open_video(ours, self.platform.as_ref(), info), info)
     }
 
     fn video(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
@@ -39,7 +39,7 @@ impl CodecFactory for WebCodecs {
         // thread; without it the decoder runs inside the tick as before.
         let ours = rvp_core::screened(
             || {
-                if rvp_par::available() && matches!(info.codec.as_str(), "av1" | "h264" | "vp9") {
+                if rvp_par::available() && matches!(info.codec.as_str(), "av1" | "h264" | "hevc" | "vp9") {
                     let info = info.clone();
                     return Ok(Box::new(rvp_par::ThreadedVideoDecoder::new(Box::new(move || {
                         build_video(&info)
@@ -49,7 +49,20 @@ impl CodecFactory for WebCodecs {
             },
             info,
         );
-        rvp_core::open_video(ours, self.platform.as_ref(), info)
+        self.with_fallback(rvp_core::open_video(ours, self.platform.as_ref(), info), info)
+    }
+}
+
+impl WebCodecs {
+    /// Our HEVC decoder refuses a stream that needs more than it does (range extensions) on the first packet that says so: the browser's
+    /// decoder takes it from there.
+    fn with_fallback(&self, dec: CoreResult<Box<dyn VideoDecoder>>, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
+        match dec {
+            Ok(d) if info.codec == "hevc" && self.platform.is_some() => {
+                Ok(Box::new(rvp_core::FallbackVideo::new(d, self.platform.clone(), info.clone())))
+            }
+            other => other,
+        }
     }
 }
 
@@ -92,6 +105,7 @@ fn build_video_inner(info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         "h264" if rvp_par::available() => rvp_par::h264::h264_pipelined(info),
         "h264" => rvp_codec_h264::h264_decoder(info),
         "vp9" => rvp_codec_vp9::vp9_decoder(info),
+        "hevc" => rvp_codec_hevc::sw::hevc_decoder(info),
         other => Err(Error::Unsupported(format!("video codec `{other}`"))),
     }
 }

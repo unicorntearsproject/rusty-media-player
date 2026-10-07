@@ -5,7 +5,7 @@
 use rvp_core::{AudioDecoder, CodecFactory, Error, Result as CoreResult, StreamInfo, VideoDecoder};
 
 /// The decoders linked into `rusty-wave`, and the system's own (VA-API, VideoToolbox, Media Foundation) behind them for what ours do
-/// not decode, such as HEVC.
+/// not decode (an HEVC stream with range extensions).
 pub struct DesktopCodecs {
     platform: Option<std::rc::Rc<dyn rvp_core::PlatformVideo>>,
 }
@@ -37,13 +37,13 @@ impl CodecFactory for DesktopCodecs {
             },
             info,
         );
-        rvp_core::open_video(ours, self.platform.as_ref(), info)
+        self.with_fallback(rvp_core::open_video(ours, self.platform.as_ref(), info), info)
     }
 
     fn video(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         let ours = rvp_core::screened(
             || {
-                if matches!(info.codec.as_str(), "av1" | "h264" | "vp9") {
+                if matches!(info.codec.as_str(), "av1" | "h264" | "hevc" | "vp9") {
                     let info = info.clone();
                     return Ok(Box::new(rvp_par::ThreadedVideoDecoder::new(Box::new(move || {
                         build_video(&info)
@@ -53,7 +53,20 @@ impl CodecFactory for DesktopCodecs {
             },
             info,
         );
-        rvp_core::open_video(ours, self.platform.as_ref(), info)
+        self.with_fallback(rvp_core::open_video(ours, self.platform.as_ref(), info), info)
+    }
+}
+
+impl DesktopCodecs {
+    /// Our HEVC decoder refuses a stream that turns out to need more than it does (range extensions) on the first packet that says so:
+    /// the system's decoder takes it from there.
+    fn with_fallback(&self, dec: CoreResult<Box<dyn VideoDecoder>>, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
+        match dec {
+            Ok(d) if info.codec == "hevc" && self.platform.is_some() => {
+                Ok(Box::new(rvp_core::FallbackVideo::new(d, self.platform.clone(), info.clone())))
+            }
+            other => other,
+        }
     }
 }
 
@@ -62,6 +75,7 @@ fn build_video(info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         "av1" => rvp_codec_av1::av1_decoder(info),
         "h264" => rvp_par::h264::h264_pipelined(info),
         "vp9" => rvp_codec_vp9::vp9_decoder(info),
+        "hevc" => rvp_codec_hevc::sw::hevc_decoder(info),
         other => Err(Error::Unsupported(format!("video codec `{other}`"))),
     }
 }

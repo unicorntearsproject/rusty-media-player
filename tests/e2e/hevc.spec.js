@@ -1,6 +1,6 @@
-// The browser's own video decoders (WebCodecs) for what the player does not decode itself: HEVC (Main and Main 10) and 10-bit H.264.
-// Where this browser can decode them the picture plays; where it cannot (Playwright's Chromium usually has no HEVC) the sound plays on and
-// the toast says what the codec is, why there is no picture and what to do. Both are asserted, whichever the machine is.
+// HEVC (Main and Main 10) is decoded by our own decoder in every browser. 10-bit H.264 goes to the browser's decoders (WebCodecs): where
+// this browser can decode it the picture plays; where it cannot (Playwright's Chromium) the sound plays on and the toast says what the
+// codec is, why there is no picture and what to do. Both are asserted, whichever the machine is.
 const { test, expect } = require("@playwright/test");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -24,13 +24,13 @@ const cases = [
 ];
 
 for (const [file, key, codecText, nextText] of cases) {
-  test(`${file}: the picture plays where the browser can decode it, and the message is clear where it cannot`, async ({ page }) => {
+  test(`${file}: the picture plays (ours for HEVC, the browser's decoder for 10-bit H.264 where it has one), and the message is clear where it cannot`, async ({ page }) => {
     test.skip(!have(file), "no HEVC fixtures (needs ffmpeg with libx265)");
     await open(page, file);
     const pv = await page.evaluate(() => window.rvp.platformVideo());
     test.info().annotations.push({ type: "webcodecs", description: JSON.stringify(pv) });
     await waitState(page, "playing");
-    if (pv.supported && pv.supported[key]) {
+    if (key.startsWith("hevc") || (pv.supported && pv.supported[key])) {
       await waitFor(page, () => (window.rvp.snapshot().video || { presented: 0 }).presented > 5);
       const s = await page.evaluate(() => window.rvp.snapshot());
       expect(s.state).toBe("playing");

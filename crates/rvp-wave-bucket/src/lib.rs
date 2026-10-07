@@ -34,7 +34,7 @@ mod module {
             #[cfg(feature = "codecs")]
             {
                 // With threads the decoder runs on a thread of its own, so decoding never competes with the UI thread.
-                if rvp_par::available() && matches!(info.codec.as_str(), "av1" | "h264" | "vp9") {
+                if rvp_par::available() && matches!(info.codec.as_str(), "av1" | "h264" | "hevc" | "vp9") {
                     let info = info.clone();
                     return Ok(Box::new(rvp_par::ThreadedVideoDecoder::new(Box::new(move || {
                         build_video(&info)
@@ -54,6 +54,7 @@ mod module {
             "h264" if rvp_par::available() => rvp_par::h264::h264_pipelined(info),
             "h264" => rvp_codec_h264::h264_decoder(info),
             "vp9" => rvp_codec_vp9::vp9_decoder(info),
+            "hevc" => rvp_codec_hevc::sw::hevc_decoder(info),
             other => Err(Error::Unsupported(format!("video codec `{other}`"))),
         }
     }

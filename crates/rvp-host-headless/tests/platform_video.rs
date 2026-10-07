@@ -1,5 +1,5 @@
-//! The platform decoder handoff on the headless host: HEVC (and 10-bit H.264), which none of our decoders takes, plays its sound with a
-//! clear message when the platform cannot decode it, and plays its picture when the platform can.
+//! The platform decoder handoff on the headless host: 10-bit H.264 moves to the platform; HEVC is decoded by ours first, with or without
+//! a platform decoder behind it.
 use rvp_app::App;
 use rvp_core::PlatformVideo;
 use rvp_host::{HostClock, ScriptedPlatform};
@@ -77,31 +77,21 @@ impl Rig {
 }
 
 #[test]
-fn hevc_without_a_platform_decoder_plays_its_sound_and_says_what_to_do() {
+fn hevc_plays_with_our_own_decoder_when_the_host_has_no_platform_decoder() {
     let Some(d) = hevc_dir() else { return };
-    let mut r = Rig::new(None);
-    r.open(&d.join("hevc_aac.mp4"));
-    r.run(1500);
-    assert_eq!(r.app.model().state, MediaState::Playing, "the audio plays on");
-    assert_eq!(r.host.video.width, 0, "no picture");
-    let t = r.toast();
-    assert!(t.contains("HEVC") && t.contains("H.265"), "names the codec: {t}");
-    assert!(t.contains("audio") || t.contains("sound"), "says the sound plays: {t}");
+    for file in ["hevc_aac.mp4", "hevc10_aac.mp4", "hevc_flac.mkv"] {
+        let mut r = Rig::new(None);
+        r.open(&d.join(file));
+        r.run(2000);
+        assert_eq!(r.app.model().state, MediaState::Playing, "{file}");
+        assert!(r.host.video.count > 10, "{file}: {} frames", r.host.video.count);
+        assert_eq!((r.host.video.width, r.host.video.height), (320, 240), "{file}");
+        assert!(r.toast().is_empty(), "{file}: nothing to say: {}", r.toast());
+    }
 }
 
 #[test]
-fn a_platform_that_says_no_is_named_in_the_message() {
-    let Some(d) = hevc_dir() else { return };
-    let mut r = Rig::new(Some(ScriptedPlatform::refusing("the HEVC Video Extensions are not installed")));
-    r.open(&d.join("hevc_aac.mp4"));
-    r.run(1500);
-    assert_eq!(r.host.video.width, 0);
-    let t = r.toast();
-    assert!(t.contains("HEVC") && t.contains("HEVC Video Extensions"), "{t}");
-}
-
-#[test]
-fn a_platform_that_decodes_hevc_gives_the_picture_and_the_clock_follows_the_audio() {
+fn hevc_with_a_platform_decoder_present_is_still_decoded_by_ours_and_the_clock_follows_the_audio() {
     let Some(d) = hevc_dir() else { return };
     for file in ["hevc_aac.mp4", "hevc10_aac.mp4", "hevc_flac.mkv"] {
         let mut r = Rig::new(Some(ScriptedPlatform::decoding(&["hevc"])));

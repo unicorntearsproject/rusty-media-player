@@ -20,7 +20,7 @@ workspace = true
 default = ["codecs"]
 # `smoke`: an extra export that runs jobs on spawned threads and checks stacks and thread-locals (used by `cargo xtask bucket`).
 smoke = []
-codecs = ["dep:rvp-codec-audio", "dep:rvp-codec-av1", "dep:rvp-codec-h264", "dep:rvp-codec-vp9"]
+codecs = ["dep:rvp-codec-audio", "dep:rvp-codec-av1", "dep:rvp-codec-h264", "dep:rvp-codec-hevc", "dep:rvp-codec-vp9"]
 
 [dependencies]
 
@@ -33,6 +33,7 @@ rvp-host-rb = { path = "../rvp-host-rb" }
 rvp-codec-audio = { workspace = true, optional = true }
 rvp-codec-av1 = { workspace = true, optional = true }
 rvp-codec-h264 = { workspace = true, optional = true }
+rvp-codec-hevc = { workspace = true, optional = true }
 rvp-codec-vp9 = { workspace = true, optional = true }
 
 [dev-dependencies]
