@@ -669,3 +669,106 @@ fn ctrl_comma_opens_settings_and_the_theme_dialog_is_one_step_further() {
     assert_eq!(text(&d, "dialog").as_deref(), Some("Settings"), "{d}");
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// The bug of 1.0.0-rc6: the folders the first run found were never written down, so after a restart the library listed its albums and
+/// posters from the saved index but could play nothing ("Those files aren't reachable right now"): every folder was disconnected. This runs
+/// the whole story with a throwaway home: discover, play from the library, quit, start again with the same data folder and no
+/// arguments, and play an album, a song and a film from the library.
+#[test]
+fn the_libraries_found_on_the_first_run_still_play_after_a_restart() {
+    let _turn = one_at_a_time();
+    if skip("the restart smoke test", &["ffmpeg"]) {
+        return;
+    }
+    let fx = core_fixtures();
+    let dir = scratch("restart-plays");
+    let (music, videos) = (dir.join("Music"), dir.join("Videos"));
+    std::fs::create_dir_all(music.join("Test Artist")).unwrap();
+    std::fs::create_dir_all(&videos).unwrap();
+    for (i, (album, title)) in [("First", "One"), ("First", "Two"), ("Second", "Three")].iter().enumerate() {
+        let f = music.join("Test Artist").join(format!("{i} {title}.flac"));
+        let st = Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=330:duration=3:sample_rate=44100",
+            ])
+            .args(["-metadata", &format!("title={title}"), "-metadata", "artist=Test Artist"])
+            .args(["-metadata", &format!("album={album}"), "-metadata", &format!("track={}", i + 1)])
+            .arg(&f)
+            .status()
+            .unwrap();
+        assert!(st.success());
+    }
+    std::fs::copy(fx.join("h264_aac.mp4"), videos.join("Clip.mp4")).unwrap();
+    let cfg = with_user_dirs(&dir, &music, &videos);
+    let data = dir.join("data");
+    let run = |name: &str, keys: &[(&str, &str)]| {
+        let report = dir.join(format!("{name}.json"));
+        let mut c = rvp(&[]);
+        c.args(base(&data, &report)).args(["--exit-after", "4.5"]).env("XDG_CONFIG_HOME", &cfg);
+        for (t, k) in keys {
+            c.args(["--press", &format!("{t}:{k}")]);
+        }
+        run_ok(c);
+        std::fs::read_to_string(report).unwrap()
+    };
+    // Tracks view, first song.
+    let tracks = [("2", "3"), ("2.6", "Down"), ("3", "Enter")];
+    let first = run("first", &tracks);
+    assert!(first.contains("\"first_run\": true"), "{first}");
+    assert_eq!(num(&first, "library_roots_connected"), Some(2.0), "{first}");
+    assert_eq!(
+        text(&first, "state").as_deref(),
+        Some("Playing"),
+        "playing from the library on the first run: {first}"
+    );
+    // The restart, nothing on the command line: every folder is connected again, everything the index lists can be played, and the
+    // library plays an album from its Albums view.
+    let second =
+        run("second", &[("2", "1"), ("2.6", "Down"), ("3", "Enter"), ("3.6", "Down"), ("4", "Enter")]);
+    assert!(second.contains("\"first_run\": false"), "{second}");
+    assert_eq!(
+        num(&second, "library_roots_connected"),
+        Some(2.0),
+        "folders not reconnected after a restart: {second}"
+    );
+    assert_eq!(num(&second, "library_playable_tracks"), num(&second, "library_tracks"), "{second}");
+    assert_eq!(num(&second, "library_tracks"), Some(3.0), "{second}");
+    assert_eq!(num(&second, "library_playable_videos"), Some(1.0), "{second}");
+    assert_eq!(
+        text(&second, "state").as_deref(),
+        Some("Playing"),
+        "an album from the restarted library: {second}"
+    );
+    assert!(text(&second, "title").is_some_and(|t| !t.is_empty()), "{second}");
+    // A song from the Tracks view, and the film from the Videos view (it opens on the Player face).
+    let third = run("third", &tracks);
+    assert_eq!(text(&third, "state").as_deref(), Some("Playing"), "a song after a restart: {third}");
+    let film = run("film", &[("2", "8"), ("2.6", "Down"), ("3", "Enter")]);
+    assert_eq!(text(&film, "state").as_deref(), Some("Playing"), "a film after a restart: {film}");
+    assert_eq!(text(&film, "mode").as_deref(), Some("player"), "{film}");
+    assert!(num(&film, "video_frames").is_some_and(|n| n > 0.0), "{film}");
+    // A folder that is not there at a start (an unplugged drive) is remembered, not forgotten: it comes back when the folder does.
+    let hidden = dir.join("Music-away");
+    std::fs::rename(&music, &hidden).unwrap();
+    let away = run("away", &[]);
+    assert_eq!(num(&away, "library_roots_connected"), Some(1.0), "{away}");
+    std::fs::rename(&hidden, &music).unwrap();
+    let back = run("back", &[]);
+    assert_eq!(
+        num(&back, "library_roots_connected"),
+        Some(2.0),
+        "a remembered folder did not come back: {back}"
+    );
+    assert_eq!(
+        num(&back, "library_playable_tracks"),
+        Some(3.0),
+        "the folder's songs are playable again: {back}"
+    );
+    std::fs::remove_dir_all(dir).ok();
+}

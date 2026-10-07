@@ -256,11 +256,19 @@ impl Handler {
     fn load_roots(&mut self) {
         let Some(b) = self.host.storage.get(ROOTS_KEY) else { return };
         for line in String::from_utf8_lossy(&b).lines() {
+            if line.is_empty() {
+                continue;
+            }
             let p = PathBuf::from(line);
             if p.is_dir() {
                 self.host.library.add(p);
+            } else {
+                // Not there right now (an unplugged drive): remembered all the same, or saving the list would forget it for good.
+                self.host.library.remember(p);
             }
         }
+        // What was just read is what is saved: nothing to write back.
+        self.host.library.take_roots_dirty();
     }
 
     fn save_roots(&self) {
@@ -303,6 +311,11 @@ impl Handler {
     }
 
     fn handle_effects(&mut self) {
+        // Folders the app added by itself (the first run's Music and Videos) are written down as soon as they are known: the next start reads
+        // this list to bring them back.
+        if self.host.library.take_roots_dirty() {
+            self.save_roots();
+        }
         for e in self.app.take_effects() {
             match e {
                 Effect::PickFile => self.dialogs.pick_files(false),
@@ -357,6 +370,9 @@ impl Handler {
             return;
         }
         self.quitting = true;
+        if self.host.library.take_roots_dirty() {
+            self.save_roots();
+        }
         self.app.save_state(&mut self.host);
         self.save_window_state();
         if let Some(s) = &mut self.smoke {

@@ -122,18 +122,33 @@ pub struct DesktopLibrary {
     /// Folders in the library: root id -> path.
     pub roots: BTreeMap<String, PathBuf>,
     ready: VecDeque<Listing>,
+    /// The set of folders changed since it was last saved (the window saves it: it is what is read back at the next start).
+    roots_dirty: bool,
 }
 
 impl DesktopLibrary {
     fn new() -> Self {
         let (tx, rx) = channel();
-        Self { tx, rx, roots: BTreeMap::new(), ready: VecDeque::new() }
+        Self { tx, rx, roots: BTreeMap::new(), ready: VecDeque::new(), roots_dirty: false }
     }
 
     /// Walk `dir` (on a thread) and remember it as a library folder.
     pub fn add(&mut self, dir: PathBuf) {
-        self.roots.insert(crate::walk::root_id(&dir), dir.clone());
+        self.remember(dir.clone());
         crate::walk::spawn_walk(dir, self.tx.clone());
+    }
+
+    /// Know `dir` as a library folder without walking it (a remembered folder that is not there right now: an unplugged drive). It stays
+    /// in the saved list, shows as not connected, and is walked again by a rescan once it is back.
+    pub fn remember(&mut self, dir: PathBuf) {
+        if self.roots.insert(crate::walk::root_id(&dir), dir).is_none() {
+            self.roots_dirty = true;
+        }
+    }
+
+    /// Whether the folders changed since the last call (and forget that).
+    pub fn take_roots_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.roots_dirty)
     }
 
     /// Walk a known folder again.
@@ -145,7 +160,9 @@ impl DesktopLibrary {
 
     /// Forget a folder.
     pub fn forget(&mut self, root: &str) {
-        self.roots.remove(root);
+        if self.roots.remove(root).is_some() {
+            self.roots_dirty = true;
+        }
     }
 }
 

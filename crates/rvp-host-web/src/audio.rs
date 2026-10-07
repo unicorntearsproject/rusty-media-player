@@ -33,12 +33,12 @@ extern "C" {
     fn set_volume(this: &JsAudio, volume: f32);
 }
 
-/// Frames the sink accepts ahead of playback: three quarters of a second. It must ride over a slow frame of the page (the player tops the ring up
+/// Frames the sink accepts ahead of playback: a second. It must ride over a slow frame of the page (the player tops the ring up
 /// once per turn, and the page's own drawing can take a good fraction of a second on a slow machine); it must not be much longer, because
 /// what is queued here has had the level gain and the crossfade applied already, so a change of either is heard only after the ring plays out.
 /// (Volume and mute are the output's own gain node, and pause, seek and skip hold or flush the ring: they act at once whatever is queued.)
 fn capacity(rate: u32) -> u64 {
-    rate as u64 * 3 / 4
+    rate as u64
 }
 
 /// Audio output through the page.

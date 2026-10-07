@@ -407,6 +407,11 @@ impl AudioOut {
         (self.pending.len() - self.pending_off) / self.sink.channels as usize
     }
 
+    /// The sink's sample rate, Hz.
+    pub fn sink_rate(&self) -> u32 {
+        self.sink.sample_rate
+    }
+
     /// Stream time just after the last frame pushed, if any.
     pub fn end_pts(&self) -> Option<Timestamp> {
         self.segs.last().map(|s| s.origin + self.frames_to_us(self.pushed as i64 - s.start_frame as i64))

@@ -14,6 +14,7 @@ const waitFor = (page, fn, arg, timeout) => waitForAt(page, fn, arg, timeout, 30
 
 const SONG = path.join(FIXTURES, "levels/music.mp3"); // 30 s
 const FILM = path.join(FIXTURES, "av1_opus_60s.webm"); // 60 s
+const FILM_1080 = path.join(FIXTURES, "perf/h264_1080p30_typ.mp4"); // 1080p30 H.264 + AAC, the film that taxes the page most
 
 /** A folder `Films` with `n` small films (copies of one fixture), so the poster grid is long enough to scroll. */
 function manyFilms(n) {
@@ -62,6 +63,9 @@ async function stress(page, rounds) {
     for (let k = 0; k < 8; k++) await page.mouse.move(box.w * (0.2 + 0.08 * k), box.h * (0.3 + 0.05 * ((i + k) % 6)));
   }
 }
+
+// Software rendering, as on the machines where this went wrong: no GPU at all (the page's drawing then competes with everything else for the CPU).
+test.use({ launchOptions: { args: ["--autoplay-policy=no-user-gesture-required", "--disable-gpu"] } });
 
 test.describe("audio stays whole while the page redraws", () => {
   test.describe.configure({ mode: "serial" });
@@ -148,6 +152,45 @@ test.describe("audio stays whole while the page redraws", () => {
     const before = (await audio(page)).played;
     await press(page, "ArrowRight", 4);
     await waitFor(page, (b) => window.rvp.audio().played < b, before, 5_000);
+    expect(errors).toEqual([]);
+  });
+
+  test("a 1080p film keeps its audio whole while menus open and the grid redraws (software rendering, a slow machine)", async ({ page }) => {
+    test.skip(!fs.existsSync(FILM_1080), "the perf fixtures are not generated");
+    const errors = await boot(page);
+    await page.setInputFiles("#file", FILM_1080);
+    await waitFor(page, () => window.rvp.snapshot().state === "playing" && window.rvp.snapshot().position_us > 1_500_000, null, 60_000);
+    // Let the start-up fill settle, then count from here.
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => window.rvp.audioReset());
+    const a0 = await audio(page);
+    const box = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+    const rounds = Number(process.env.RVP_UNDERRUN_ROUNDS || 14);
+    // The counters are read after every round, as long as the film is not within two seconds of its end (the end of a film is silence).
+    let last = a0;
+    let rode = 0;
+    for (let i = 0; i < rounds; i++) {
+      await page.mouse.move(box.w * (0.3 + 0.04 * (i % 8)), box.h * 0.9);
+      await frames(page, 1);
+      await page.keyboard.press("F10");
+      await frames(page, 1);
+      await page.keyboard.press("Escape");
+      await frames(page, 1);
+      await page.keyboard.press("Control+,");
+      await frames(page, 1);
+      await page.keyboard.press("Escape");
+      await frames(page, 1);
+      const s = await page.evaluate(() => window.rvp.snapshot());
+      if (s.state !== "playing" || s.duration_us - s.position_us < 2_000_000) break;
+      last = await audio(page);
+      rode = s.position_us;
+    }
+    console.log(`1080p film: through ${(rode / 1e6).toFixed(1)} s, ring low ${last.ringLow} frames, underruns +${last.underRuns - a0.underRuns} (${last.underFrames - a0.underFrames} frames)`);
+    expect(rode).toBeGreaterThan(8_000_000); // it played a good while under the stress
+    expect(last.underFrames - a0.underFrames).toBe(0);
+    expect(last.ringLow).toBeGreaterThan(0);
+    // The ring kept at least 200 ms of the 900 ms the player aims for, even on the single-thread build with a 1080p film at a quarter speed.
+    expect(last.ringLow).toBeGreaterThan(9_600);
     expect(errors).toEqual([]);
   });
 });

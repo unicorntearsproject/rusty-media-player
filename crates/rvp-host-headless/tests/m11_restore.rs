@@ -41,24 +41,34 @@ fn music() -> PathBuf {
 }
 
 /// Three 40 second FLAC files in a scratch directory.
+/// The three 40 s songs of these tests, made once per process: the tests run on threads of one process, and a test that found a file another
+/// was still writing (ffmpeg creates it at once and fills it over the next moments) would open half a song and see the player fail. The files
+/// are written under another name and renamed when whole, so a file that exists is a file that is complete.
 fn long_files() -> Vec<String> {
-    let dir = std::env::temp_dir().join(format!("rvp-m11-restore-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    (1..=3)
-        .map(|i| {
-            let p = dir.join(format!("long-{i}.flac"));
-            if !p.exists() {
-                let st = Command::new("ffmpeg")
-                    .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
-                    .arg(format!("sine=frequency={}:duration=40:sample_rate=44100", 220 * i))
-                    .arg(&p)
-                    .status()
-                    .expect("ffmpeg");
-                assert!(st.success());
-            }
-            p.to_string_lossy().into_owned()
+    static FILES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    FILES
+        .get_or_init(|| {
+            let dir = std::env::temp_dir().join(format!("rvp-m11-restore-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            (1..=3)
+                .map(|i| {
+                    let p = dir.join(format!("long-{i}.flac"));
+                    if !p.exists() {
+                        let tmp = dir.join(format!("long-{i}.partial.flac"));
+                        let st = Command::new("ffmpeg")
+                            .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+                            .arg(format!("sine=frequency={}:duration=40:sample_rate=44100", 220 * i))
+                            .arg(&tmp)
+                            .status()
+                            .expect("ffmpeg");
+                        assert!(st.success());
+                        std::fs::rename(&tmp, &p).unwrap();
+                    }
+                    p.to_string_lossy().into_owned()
+                })
+                .collect()
         })
-        .collect()
+        .clone()
 }
 
 struct Rig {
@@ -273,4 +283,54 @@ fn thumbnails_stay_inside_their_memory_budget_and_come_back_when_asked_for() {
         assert!(r.app.library().thumb(a).is_some(), "cover {a:x} did not come back");
         assert!(r.app.library().thumb_bytes() <= thumb * 3 + 100);
     }
+}
+
+/// What went wrong once in a while in `something_opened_on_the_command_line_wins_over_the_saved_queue` was this and not the player: when many
+/// tests ask for the songs at the same moment, each must get whole files. (The old helper let a second thread skip generation because the
+/// file already existed, empty or half written, and open it: the player then rightly said Failed.) Eight threads ask at once; every file
+/// they get is complete, and a song opened from it plays.
+#[test]
+fn many_tests_asking_for_the_songs_at_once_all_get_whole_files() {
+    if skip() {
+        return;
+    }
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            std::thread::spawn(|| {
+                let files = long_files();
+                files.iter().map(|f| std::fs::metadata(f).unwrap().len()).collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    let sizes: Vec<Vec<u64>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    for s in &sizes {
+        assert_eq!(s, &sizes[0], "a thread saw a file of another size: {sizes:?}");
+        assert!(s.iter().all(|&n| n > 100_000), "an incomplete song: {s:?}");
+    }
+}
+
+/// The same ordering the other way round, made certain: a command-line open over a saved queue while one of the saved items is broken
+/// (a half-written file stands in) does not take the new item down with it: the opened song plays and only the broken one is skipped.
+#[test]
+fn a_broken_saved_item_does_not_stop_the_command_line_song() {
+    if skip() {
+        return;
+    }
+    let files = long_files();
+    let mut r = Rig::new();
+    r.open(&files);
+    r.run(300);
+    r.app.save_state(&mut r.host);
+    // Replace the first saved song by a few bytes of nothing (what a file that is still being written looks like).
+    let broken = Path::new(&files[0]).with_file_name("broken-saved.flac");
+    std::fs::write(&broken, [0u8; 64]).unwrap();
+    let saved = rvp_app::SavedQueue::decode(&r.host.storage.0[QUEUE_KEY]).unwrap();
+    let mut saved = saved;
+    saved.items[0].source = broken.to_string_lossy().into_owned();
+    r.host.storage.0.insert(QUEUE_KEY.into(), saved.encode());
+    let mut r2 = Rig::restart(r, true);
+    r2.open(&files[2..]);
+    r2.run(600);
+    assert_eq!(r2.current_name(), "long-3.flac");
+    assert_eq!(r2.app.model().state, MediaState::Playing);
 }

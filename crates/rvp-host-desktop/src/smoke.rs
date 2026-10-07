@@ -174,7 +174,7 @@ impl Smoke {
         };
         let state = format!("{:?}", m.state);
         let json = format!(
-            "{{\n  \"version\": \"{}\",\n  \"state\": \"{}\",\n  \"saw_playing\": {},\n  \"saw_ended\": {},\n  \"position_ms\": {},\n  \"max_position_ms\": {},\n  \"duration_ms\": {},\n  \"clock_ratio\": {},\n  \"clock_span_s\": {:.3},\n  \"title\": {},\n  \"artist\": {},\n  \"queue_len\": {},\n  \"video_frames\": {},\n  \"video_size\": [{}, {}],\n  \"frames_presented\": {},\n  \"window\": [{}, {}, {:.2}],\n  \"audio_backend\": {},\n  \"audio_frames_written\": {},\n  \"audio_frames_played\": {},\n  \"audio_failed\": {},\n  \"media_controls\": {},\n  \"mode\": \"{}\",\n  \"fullscreen\": {},\n  \"library_tracks\": {},\n  \"library_albums\": {},\n  \"library_videos\": {},\n  \"library_roots\": [{}],\n  \"dialog\": {},\n  \"first_run\": {},\n  \"crossfade\": {},\n  \"crossfade_secs\": {},\n  \"auto_level\": {},\n  \"target_lufs\": {},\n  \"level_mode\": \"{}\"\n}}\n",
+            "{{\n  \"version\": \"{}\",\n  \"state\": \"{}\",\n  \"saw_playing\": {},\n  \"saw_ended\": {},\n  \"position_ms\": {},\n  \"max_position_ms\": {},\n  \"duration_ms\": {},\n  \"clock_ratio\": {},\n  \"clock_span_s\": {:.3},\n  \"title\": {},\n  \"artist\": {},\n  \"queue_len\": {},\n  \"video_frames\": {},\n  \"video_size\": [{}, {}],\n  \"frames_presented\": {},\n  \"window\": [{}, {}, {:.2}],\n  \"audio_backend\": {},\n  \"audio_frames_written\": {},\n  \"audio_frames_played\": {},\n  \"audio_failed\": {},\n  \"media_controls\": {},\n  \"mode\": \"{}\",\n  \"fullscreen\": {},\n  \"library_tracks\": {},\n  \"library_albums\": {},\n  \"library_videos\": {},\n  \"library_playable_tracks\": {},\n  \"library_playable_videos\": {},\n  \"library_roots_connected\": {},\n  \"library_roots\": [{}],\n  \"dialog\": {},\n  \"first_run\": {},\n  \"crossfade\": {},\n  \"crossfade_secs\": {},\n  \"auto_level\": {},\n  \"target_lufs\": {},\n  \"level_mode\": \"{}\"\n}}\n",
             env!("CARGO_PKG_VERSION"),
             state,
             self.saw_playing,
@@ -204,6 +204,9 @@ impl Smoke {
             app.library().track_count(),
             app.library().albums().len(),
             app.library().video_count(),
+            app.library().all_tracks().iter().filter(|t| !t.src.is_empty()).count(),
+            app.library().all_videos().iter().filter(|v| !v.src.is_empty()).count(),
+            app.library().roots().iter().filter(|r| r.connected).count(),
             app.library().roots().iter().map(|r| json_str(&r.name)).collect::<Vec<_>>().join(", "),
             m.dialog.as_ref().map_or("null".to_string(), |d| json_str(&d.title)),
             app.setup().is_first_run(),

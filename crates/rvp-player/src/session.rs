@@ -35,6 +35,14 @@ const SUB_LOOKBACK_US: i64 = 20_000_000;
 
 /// Packets buffered between the demuxer and a decoder.
 const MAX_PACKETS: usize = 128;
+/// Picture packets the demuxer may have queued while the sound is short of audio (a slow machine falls behind on pictures, and the sound's packets
+/// are further along the file: the demuxer must keep reading, or the sound starves behind a backlog of pictures).
+const MAX_VIDEO_PACKETS_AUDIO_FIRST: usize = 3 * MAX_PACKETS;
+/// When this many picture packets are waiting and the oldest is later than `VIDEO_LATE_US` behind the playback clock, the video task jumps to the
+/// newest keyframe among them: it cannot keep up (a slow machine), and the demuxer behind the backlog would starve the sound.
+const VIDEO_BACKLOG_PACKETS: usize = 96;
+/// How far behind the clock the oldest waiting picture packet must be for that jump.
+const VIDEO_LATE_US: i64 = 1_500_000;
 /// Compressed bytes the demuxer may have queued for one stream before it waits (a hostile file can make packets huge).
 const MAX_QUEUED_BYTES: usize = 96 << 20;
 /// How long a file that ends in the middle of a packet is waited for (it may be still growing), and how often the
@@ -59,6 +67,14 @@ const WANT_AUDIO: AudioParams = AudioParams { sample_rate: 48_000, channels: 2 }
 const TICK_US: i64 = 10_000;
 /// Wall-clock budget for the task polling part of a tick.
 const BUDGET_US: i64 = 8_000;
+/// Sound comes first. Once a turn has spent its budget (a big picture takes much longer than that to decode, most of all in a browser's single
+/// thread), it goes on with cheap rounds only (demuxing and audio decoding, no more pictures) for at most this long while the audio queued ahead
+/// is below `AUDIO_FEED_US`, so a slow turn cannot leave the output without sound.
+const AUDIO_ONLY_US: i64 = 25_000;
+/// How much audio must be waiting (decoded, queued for the sink and in the sink) before a turn that is out of budget stops feeding it.
+const AUDIO_FEED_US: i64 = 900_000;
+/// Rounds of the task loop in one turn, at most.
+const MAX_ROUNDS: usize = 256;
 /// The caller should queue the next item when this little of the current one is left, microseconds (plus the length of the
 /// crossfade, when there is one, so the next item is open and decoding before the fade has to start).
 const NEXT_LEAD_US: i64 = 12_000_000;
@@ -323,6 +339,14 @@ struct Shared {
     progress: u64,
     /// Host time of the current tick (the tasks have no clock of their own).
     now: Timestamp,
+    /// Whether the video task may decode this round: false once the turn's budget is spent (the rest of the turn is for the audio).
+    video_ok: bool,
+    /// Whether the sound is short of audio (set by the turn): the demuxer then reads on even though the pictures are behind.
+    audio_low: bool,
+    /// Where the playback clock is, stream time (set by the turn): how late a waiting picture packet is.
+    clock_us: Timestamp,
+    /// Picture packets dropped by jumping to a keyframe because the decoder fell behind.
+    video_skipped: u64,
     /// When the demuxer first hit the end of a file that is cut off (still being written?), and when to look again.
     cut_since: Option<Timestamp>,
     cut_retry_at: Timestamp,
@@ -436,7 +460,7 @@ async fn demux_task<S: Source + 'static>(source: S, sh: Sh) {
             let s = sh.borrow();
             s.demux_done
                 || s.audio_in.len() >= MAX_PACKETS
-                || s.video_in.len() >= MAX_PACKETS
+                || s.video_in.len() >= if s.audio_low { MAX_VIDEO_PACKETS_AUDIO_FIRST } else { MAX_PACKETS }
                 || s.audio_in.iter().map(|p| p.data.len()).sum::<usize>() >= MAX_QUEUED_BYTES
                 || s.video_in.iter().map(|p| p.data.len()).sum::<usize>() >= MAX_QUEUED_BYTES
                 || s.now < s.cut_retry_at
@@ -628,8 +652,20 @@ async fn video_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
             while s.video_dec.len() >= 2 && s.video_dec[1].pts <= s.video_floor {
                 s.video_dec.pop_front();
             }
+            // Far behind (a slow machine): jump to the newest keyframe of the backlog, skipping the pictures between, and start the decoder
+            // clean there. Better a gap in the picture than a decoder that never catches up and a sound that starves behind it.
+            let late = s.video_in.front().is_some_and(|p| p.pts + VIDEO_LATE_US < s.clock_us);
+            if s.video_in.len() >= VIDEO_BACKLOG_PACKETS && late {
+                if let Some(k) = s.video_in.iter().rposition(|p| p.keyframe).filter(|&k| k > 0) {
+                    s.video_in.drain(..k);
+                    s.video_skipped += k as u64;
+                    s.video_dec.clear();
+                    dec.flush();
+                    drained = false;
+                }
+            }
             // A decoder on its own thread has packets in flight whose frames are still to come.
-            if s.video_dec.len() + dec.pending() >= MAX_VIDEO_FRAMES {
+            if s.video_dec.len() + dec.pending() >= MAX_VIDEO_FRAMES || !s.video_ok {
                 (None, false)
             } else {
                 let p = s.video_in.pop_front();
@@ -1238,6 +1274,20 @@ impl Session {
 }
 
 impl Session {
+    /// Whether the audio is running short: less than `AUDIO_FEED_US` decoded, waiting or in the sink, and more of it still to come.
+    fn audio_hungry<H: Host>(&self, host: &mut H) -> bool {
+        let s = self.sh.borrow();
+        if s.sel_audio.is_none() || s.audio_done || s.seeking {
+            return false;
+        }
+        let mut us = s.audio_dec_us;
+        if let Some(out) = &self.audio {
+            let rate = out.sink_rate().max(1) as i64;
+            us += (out.pending_frames() as i64 + host.audio().queued_frames() as i64) * 1_000_000 / rate;
+        }
+        us < AUDIO_FEED_US
+    }
+
     /// Advance the session: run tasks, feed the audio sink, update the clock. Call this regularly (the host
     /// clock's `request_wake` tells the host when).
     pub fn tick<H: Host>(&mut self, host: &mut H) {
@@ -1247,10 +1297,25 @@ impl Session {
         if let Some(n) = &self.next {
             n.sh.borrow_mut().now = t0;
         }
-        // 1. Demux and decode tasks, until quiescent or out of budget.
-        for _ in 0..64 {
+        // 1. Demux and decode tasks, until quiescent or out of budget. Pictures only while the budget lasts; after it, rounds for the audio
+        // alone (see `AUDIO_ONLY_US`).
+        let mut over_at: Option<Timestamp> = None;
+        for _ in 0..MAX_ROUNDS {
             let before = self.sh.borrow().progress;
             let next_before = self.next.as_ref().map(|n| n.sh.borrow().progress);
+            let now_r = host.clock().now_us();
+            let in_budget = now_r - t0 <= BUDGET_US;
+            let low = self.audio_hungry(host);
+            let clock_us = self.clock.now_stream(now_r);
+            {
+                let mut sh = self.sh.borrow_mut();
+                sh.video_ok = in_budget;
+                sh.audio_low = low;
+                sh.clock_us = clock_us;
+            }
+            if let Some(n) = &self.next {
+                n.sh.borrow_mut().video_ok = in_budget;
+            }
             self.exec.poll_all();
             if let Some(n) = &mut self.next {
                 n.exec.poll_all();
@@ -1260,9 +1325,21 @@ impl Session {
             }
             let moved = self.sh.borrow().progress != before
                 || self.next.as_ref().map(|n| n.sh.borrow().progress) != next_before;
-            if !moved || host.clock().now_us() - t0 > BUDGET_US {
+            if !moved {
                 break;
             }
+            let after = host.clock().now_us();
+            if after - t0 > BUDGET_US {
+                // Out of budget: go on only while the sound is short of audio, and only for a little longer.
+                let over = *over_at.get_or_insert(after);
+                if after - over > AUDIO_ONLY_US || !self.audio_hungry(host) {
+                    break;
+                }
+            }
+        }
+        self.sh.borrow_mut().video_ok = true;
+        if let Some(n) = &self.next {
+            n.sh.borrow_mut().video_ok = true;
         }
         let now = host.clock().now_us();
         // A queued item that cannot be opened is dropped, and the caller told.
