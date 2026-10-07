@@ -88,7 +88,7 @@ impl PlatformVideo for ScriptedPlatform {
     }
 
     fn supports(&self, info: &StreamInfo) -> PlatformSupport {
-        if self.codecs.iter().any(|c| *c == info.codec) {
+        if self.codecs.contains(&info.codec) {
             PlatformSupport::Yes
         } else {
             PlatformSupport::No(self.why_not.clone())

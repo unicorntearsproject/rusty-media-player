@@ -124,11 +124,12 @@ fn hdr_streams_come_out_tone_mapped_to_sdr_rgba() {
         let f = &frames[60];
         assert_eq!(f.format, PixelFormat::Rgba8, "{name}: mapped to SDR");
         let px = &f.planes[0];
-        let mean = px.chunks_exact(4).map(|p| p[0] as u32 + p[1] as u32 + p[2] as u32).sum::<u32>() as f64
+        let mean = px.as_chunks::<4>().0.iter().map(|p| p[0] as u32 + p[1] as u32 + p[2] as u32).sum::<u32>()
+            as f64
             / (px.len() / 4) as f64
             / 3.0;
         assert!((15.0..245.0).contains(&mean), "{name}: mean level {mean}");
-        assert!(px.chunks_exact(4).all(|p| p[3] == 255));
+        assert!(px.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
     }
 }
 
@@ -194,10 +195,11 @@ fn the_committed_hdr10_stream_is_tone_mapped_or_refused_clearly() {
             let f = &frames[20];
             assert_eq!(f.format, PixelFormat::Rgba8, "mapped to SDR");
             let px = &f.planes[0];
-            let mean = px.chunks_exact(4).map(|p| p[0] as u32 + p[1] as u32 + p[2] as u32).sum::<u32>()
-                as f64
-                / (px.len() / 4) as f64
-                / 3.0;
+            let mean =
+                px.as_chunks::<4>().0.iter().map(|p| p[0] as u32 + p[1] as u32 + p[2] as u32).sum::<u32>()
+                    as f64
+                    / (px.len() / 4) as f64
+                    / 3.0;
             assert!((15.0..245.0).contains(&mean), "mean level {mean}");
         }
     }

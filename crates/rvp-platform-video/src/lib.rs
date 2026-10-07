@@ -213,8 +213,8 @@ mod tests {
             };
             let off = if ten { 300 } else { 0 };
             // First displayed luma sample is at (2, 2) of the decoder's picture.
-            assert_eq!(get(0, 0), (2 + 2 * 3) % 200 + off);
-            assert_eq!(get(0, 8 + 1), (3 + 3 * 3) % 200 + off);
+            assert_eq!(get(0, 0), 8 + off);
+            assert_eq!(get(0, 8 + 1), 12 + off);
             // First chroma sample is the one at (1, 1) of the decoder's chroma plane.
             assert_eq!(get(1, 0), 101 + off);
             assert_eq!(get(2, 0), 200 + 1 + off);

@@ -33,11 +33,26 @@ module.exports = defineConfig({
   projects: [
     {
       name: "chromium",
+      // The audio stress test has a project of its own, below.
+      testIgnore: /audio-underrun\.spec\.js/,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 720 },
         deviceScaleFactor: 1,
         // Playback starts without a click in tests, as it does after any user gesture in real use.
+        launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
+      },
+    },
+    {
+      // The audio stress test throttles the page to a quarter of a CPU on purpose, so it measures the app only when nothing else of the
+      // suite runs beside it: it starts after every other test has finished.
+      name: "audio-stress",
+      testMatch: /audio-underrun\.spec\.js/,
+      dependencies: ["chromium"],
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 720 },
+        deviceScaleFactor: 1,
         launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
       },
     },

@@ -381,6 +381,30 @@ impl Host for DesktopHost {
     }
 }
 
+/// Seconds local time is ahead of UTC at `t` (seconds since 1970); 0 when the system will not say.
+#[cfg(unix)]
+fn local_utc_offset(t: i64) -> i32 {
+    // `struct tm` as glibc, musl and the BSDs lay it out: nine ints, then the offset and the zone name.
+    #[repr(C)]
+    struct Tm {
+        ints: [i32; 9],
+        gmtoff: i64,
+        zone: *const u8,
+    }
+    unsafe extern "C" {
+        fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
+    }
+    let mut tm = Tm { ints: [0; 9], gmtoff: 0, zone: core::ptr::null() };
+    // SAFETY: `t` and `tm` are valid for the call; `localtime_r` only writes the struct, which is at least as large as the C one.
+    let ok = unsafe { !localtime_r(&t, &mut tm).is_null() };
+    if ok { tm.gmtoff as i32 } else { 0 }
+}
+
+#[cfg(not(unix))]
+fn local_utc_offset(_t: i64) -> i32 {
+    0
+}
+
 #[cfg(test)]
 mod standard_folder_tests {
     use super::*;
@@ -426,28 +450,4 @@ mod standard_folder_tests {
         assert_eq!(found[0].name, "Music");
         assert!(note.is_none());
     }
-}
-
-/// Seconds local time is ahead of UTC at `t` (seconds since 1970); 0 when the system will not say.
-#[cfg(unix)]
-fn local_utc_offset(t: i64) -> i32 {
-    // `struct tm` as glibc, musl and the BSDs lay it out: nine ints, then the offset and the zone name.
-    #[repr(C)]
-    struct Tm {
-        ints: [i32; 9],
-        gmtoff: i64,
-        zone: *const u8,
-    }
-    unsafe extern "C" {
-        fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
-    }
-    let mut tm = Tm { ints: [0; 9], gmtoff: 0, zone: core::ptr::null() };
-    // SAFETY: `t` and `tm` are valid for the call; `localtime_r` only writes the struct, which is at least as large as the C one.
-    let ok = unsafe { !localtime_r(&t, &mut tm).is_null() };
-    if ok { tm.gmtoff as i32 } else { 0 }
-}
-
-#[cfg(not(unix))]
-fn local_utc_offset(_t: i64) -> i32 {
-    0
 }

@@ -125,6 +125,7 @@ impl Ui {
             let nav: Vec<String> =
                 g.nav.iter().map(|(v, r)| format!("\"{}\":{}", view_name(*v), rect(*r))).collect();
             j += &format!("\"rail\":{{{}}},", nav.join(","));
+            j += &format!("\"menu\":{},", g.menu_btn.map_or("null".to_string(), rect));
             j += &format!(
                 "\"mode_switch\":{{\"library\":{},\"player\":{}}},",
                 rect(g.mode[0]),

@@ -33,7 +33,7 @@ pub fn codec_name(codec: &str) -> String {
 }
 
 /// The codec a message of the session names, from `video disabled (hevc): video codec `hevc` [WebCodecs: why]`.
-fn between<'a>(s: &'a str, open: char, close: char) -> Option<&'a str> {
+fn between(s: &str, open: char, close: char) -> Option<&str> {
     let a = s.find(open)? + open.len_utf8();
     let b = s[a..].find(close)? + a;
     Some(&s[a..b])
