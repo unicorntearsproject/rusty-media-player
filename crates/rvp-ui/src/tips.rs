@@ -629,6 +629,7 @@ impl Ui {
             return control.map(|c| match c {
                 DialogControl::Toggle(n) => n as i32,
                 DialogControl::Button(n) => 100 + n as i32,
+                DialogControl::Back => 99,
             });
         }
         let panel = self.audio_panel.as_ref()?;
@@ -671,6 +672,10 @@ impl Ui {
             self.dialog.hover
         };
         let (text, key, anchor) = match control? {
+            DialogControl::Back => {
+                let to = spec.back.as_ref()?;
+                (alloc::format!("Back to {to}."), "Esc / Backspace".to_string(), g.back?)
+            }
             DialogControl::Toggle(n) => {
                 let t = spec.toggles.get(n as usize)?;
                 (
@@ -722,6 +727,7 @@ impl Ui {
                 "Space",
             ),
             A::Done => ("Close the audio settings.", "Esc"),
+            A::Back => ("Back to Settings.", "Esc / Backspace"),
         };
         let anchor = g.controls.iter().find(|x| x.0 == c).map(|x| x.1)?;
         if self.dlg_sig.is_none() || self.now - self.dlg_since < crate::ui::TOOLTIP_DELAY_US {

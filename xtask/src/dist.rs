@@ -485,6 +485,12 @@ impl Ctx {
             let rel = format!("hicolor/{size}x{size}/apps/{APP_ID}.png");
             copy(&icons.join(format!("{size}x{size}/apps/{APP_ID}.png")), &s.join("share/icons").join(rel))?;
         }
+        // The same icon in pixmaps: the place older software centres (and the local-package path of some) look for the icon of a package
+        // that is not installed yet, since the icon theme cannot name it before it is.
+        copy(
+            &icons.join(format!("128x128/apps/{APP_ID}.png")),
+            &s.join(format!("share/pixmaps/{APP_ID}.png")),
+        )?;
         // The man page, gzipped (-n: no timestamp, so the package is reproducible).
         let man = fs::read_to_string(shared.join("rusty-wave.1.in")).map_err(|e| e.to_string())?;
         let man_path = s.join("share/man/man1/rusty-wave.1");

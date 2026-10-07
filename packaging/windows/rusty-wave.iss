@@ -50,7 +50,7 @@ LicenseFile={#StageDir}\LICENSE.txt
 OutputDir={#OutDir}
 OutputBaseFilename=rusty-wave-{#AppVersion}-x64-Setup
 SetupIconFile=..\icons\rusty-wave.ico
-UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayIcon={app}\rusty-wave.ico
 UninstallDisplayName={#AppName}
 WizardStyle=modern
 WizardImageFile=wizard-164.bmp,wizard-246.bmp,wizard-328.bmp
@@ -87,9 +87,9 @@ Source: "{#StageDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadm
 Source: "..\icons\rusty-wave.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppId}"
-Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "{#AppId}"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\rusty-wave.ico"; AppUserModelID: "{#AppId}"
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"; IconFilename: "{app}\rusty-wave.ico"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\rusty-wave.ico"; AppUserModelID: "{#AppId}"; Tasks: desktopicon
 
 [Registry]
 ; The program itself: "Open with" and the Default apps page.

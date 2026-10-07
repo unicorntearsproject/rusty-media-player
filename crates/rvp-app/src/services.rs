@@ -172,7 +172,6 @@ enum Btn {
     // The default-player dialog.
     SetDefault,
     CheckAll,
-    BackToSettings,
     // The Theme dialog.
     ThemePreview,
     ThemeApply,
@@ -227,6 +226,10 @@ pub(crate) struct Services {
     toggles: Vec<Tog>,
     /// A message for the dialog from the user's last action (an error from the host).
     notice: Option<String>,
+    /// The Settings button whose page is open (or was just left): where the keyboard goes when Settings is shown again.
+    settings_focus: Option<Btn>,
+    /// The Updates page was opened from Settings (so it has a Back control).
+    update_from_settings: bool,
 }
 
 fn percent(done: u64, total: u64) -> u16 {
@@ -471,6 +474,9 @@ impl App {
                     on: st.viz_cycle,
                 });
                 toggles.push(Tog::VizCycle);
+                // Coming back from one of its pages, the keyboard is on the button that opened it.
+                spec.focus_button =
+                    self.svc.settings_focus.and_then(|k| buttons.iter().position(|b| *b == k));
             }
             Screen::Theme => {
                 spec.title = "Theme".into();
@@ -494,6 +500,7 @@ impl App {
                 buttons.push(Btn::ThemeReset);
                 spec.buttons.push(DialogButton::new("Close", false));
                 buttons.push(Btn::Close);
+                spec.back = Some("Settings".into());
             }
             Screen::Default(offer) => {
                 spec.compact = true;
@@ -542,8 +549,8 @@ impl App {
                             spec.buttons.push(DialogButton::new("No thanks", false));
                             buttons.push(Btn::Never);
                         } else {
-                            spec.buttons.push(DialogButton::new("Back", false));
-                            buttons.push(Btn::BackToSettings);
+                            // A page of Settings: the Back control at the top left (and Escape) goes up.
+                            spec.back = Some("Settings".into());
                         }
                     }
                 }
@@ -551,6 +558,9 @@ impl App {
             Screen::Update => {
                 let ver = c.version.clone();
                 spec.title = "Updates".into();
+                if self.svc.update_from_settings {
+                    spec.back = Some("Settings".into());
+                }
                 match &c.state {
                     UpdateState::Idle => {
                         spec.body.push(format!("You are running Rusty Wave {ver}."));
@@ -663,6 +673,7 @@ impl App {
             return;
         }
         self.svc.notice = None;
+        self.svc.update_from_settings = false;
         self.svc.screen = Some(Screen::Update);
         let state = svc.update_state();
         if !matches!(
@@ -683,6 +694,7 @@ impl App {
     /// The menu entry and Ctrl+,: the Settings dialog.
     pub(crate) fn show_settings(&mut self, now: Timestamp) {
         self.svc.notice = None;
+        self.svc.settings_focus = None;
         self.svc.screen = Some(Screen::Settings);
         self.refresh_model(now);
     }
@@ -771,12 +783,14 @@ impl App {
                 return;
             }
             Btn::OpenAudio => {
+                self.svc.settings_focus = Some(Btn::OpenAudio);
                 self.svc.screen = None;
-                self.ui.open_audio_settings();
+                self.ui.open_audio_settings_from_settings();
                 self.refresh_model(now);
                 return;
             }
             Btn::OpenTheme => {
+                self.svc.settings_focus = Some(Btn::OpenTheme);
                 self.svc.notice = None;
                 self.open_theme();
                 self.refresh_model(now);
@@ -857,15 +871,17 @@ impl App {
             | Btn::ThemeApply
             | Btn::ThemeReset => {}
             Btn::OpenDefault => {
+                self.svc.settings_focus = Some(Btn::OpenDefault);
                 self.svc.default_checked = alloc::vec![true; MEDIA_TYPES.len()];
                 self.svc.screen = Some(Screen::Default(false));
             }
-            Btn::BackToSettings => self.svc.screen = Some(Screen::Settings),
             Btn::ToggleMenu => {
                 self.toggle_integration(host, now);
             }
             Btn::OpenUpdates => {
+                self.svc.settings_focus = Some(Btn::OpenUpdates);
                 self.check_for_updates(host, now);
+                self.svc.update_from_settings = true;
             }
             Btn::CheckAll => {
                 let all = self.svc.default_checked.iter().all(|&b| b);
@@ -937,7 +953,29 @@ impl App {
         self.refresh_model(now);
     }
 
-    /// The dialog's X or Escape.
+    /// The Back control, Escape or Backspace on a page of Settings: up to Settings, the keyboard on the button that opened the page. A
+    /// preview of a theme that was not applied goes away.
+    pub(crate) fn dialog_back(&mut self, now: Timestamp) {
+        match self.svc.screen {
+            Some(Screen::Theme) => self.theme_closed(),
+            Some(Screen::Default(_) | Screen::Update) => {}
+            _ => return,
+        }
+        self.svc.notice = None;
+        self.svc.update_from_settings = false;
+        self.svc.screen = Some(Screen::Settings);
+        self.refresh_model(now);
+    }
+
+    /// The audio panel's Back control: Settings again, the keyboard on "Audio settings".
+    pub(crate) fn audio_back(&mut self, now: Timestamp) {
+        self.svc.settings_focus = Some(Btn::OpenAudio);
+        self.svc.notice = None;
+        self.svc.screen = Some(Screen::Settings);
+        self.refresh_model(now);
+    }
+
+    /// The dialog's X.
     pub(crate) fn dialog_close<H>(&mut self, host: &mut H, now: Timestamp)
     where
         H: Host<Video = FrameSink>,
@@ -952,19 +990,7 @@ impl App {
                 self.svc.settings.default_player = IntegrationChoice::Never;
                 self.save_app_settings(host);
             }
-            // Theme: an unapplied preview goes away; Settings is where it came from.
-            Some(Screen::Theme) => {
-                self.theme_closed();
-                self.svc.screen = Some(Screen::Settings);
-                self.refresh_model(now);
-                return;
-            }
-            // The step-by-step dialogs of Settings go back to it; Settings itself closes.
-            Some(Screen::Default(false)) if self.svc.notice.is_none() => {
-                self.svc.screen = Some(Screen::Settings);
-                self.refresh_model(now);
-                return;
-            }
+            // (The X closes the whole dialog from any page; going up one level is the Back control, Escape and Backspace: `dialog_back`.)
             _ => {}
         }
         self.close_dialog(host);

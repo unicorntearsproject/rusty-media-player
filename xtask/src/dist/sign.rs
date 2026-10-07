@@ -319,6 +319,28 @@ impl Ctx {
                         .ok_or_else(|| format!("the bundle does not name the ref {want}"))
                 });
                 check(format!("{name} is a bundle of {want}"), r);
+                // GNOME Software and Discover show a bundle's icon from its header (the 64 and 128 pixel icons of the appstream data) before
+                // it is installed: a bundle built without them is shown with the generic icon.
+                let r = fs::read(f).map_err(|e| e.to_string()).and_then(|b| {
+                    let sizes = png_sizes(&b[..b.len().min(1 << 16)]);
+                    [(64, 64), (128, 128)].iter().all(|s| sizes.contains(s)).then_some(()).ok_or_else(|| {
+                        format!("the bundle header holds icons of {sizes:?}, not 64x64 and 128x128")
+                    })
+                });
+                check(format!("{name} carries its icon"), r);
+            } else if name.ends_with(".AppImage") {
+                // File managers and AppImageLauncher read `.DirIcon` out of the image for its thumbnail.
+                let work = self.dist().join("verify-appimage-icon");
+                let r = fs::create_dir_all(&work).map_err(|e| e.to_string()).and_then(|()| {
+                    sh(Command::new(f).current_dir(&work).args(["--appimage-extract", ".DirIcon"]))?;
+                    let b = fs::read(work.join("squashfs-root/.DirIcon"))
+                        .map_err(|e| format!(".DirIcon: {e}"))?;
+                    let sizes = png_sizes(&b);
+                    sizes.iter().any(|&(w, h)| w >= 128 && h >= 128).then_some(()).ok_or_else(|| {
+                        format!(".DirIcon is {sizes:?}, expected a PNG of at least 128 pixels")
+                    })
+                });
+                check(format!("{name} carries its .DirIcon"), r);
             } else if name.ends_with(".zip") {
                 let script = "import sys,zipfile; bad=zipfile.ZipFile(sys.argv[1]).testzip(); sys.exit(f'corrupt member {bad}' if bad else 0)";
                 let r = capture(Command::new("python3").args(["-c", script]).arg(f));
@@ -386,10 +408,53 @@ pub(super) fn release_fprs(root: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// Width and height of every PNG whose signature is found in `bytes`.
+pub(super) fn png_sizes(bytes: &[u8]) -> Vec<(u32, u32)> {
+    const SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 24 <= bytes.len() {
+        if &bytes[i..i + 8] == SIG {
+            let be = |o: usize| {
+                u32::from_be_bytes([bytes[i + o], bytes[i + o + 1], bytes[i + o + 2], bytes[i + o + 3]])
+            };
+            out.push((be(16), be(20)));
+            i += 8;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 /// The fingerprint of the public key in the repository.
 pub(super) fn resolve_public_fpr(root: &Path) -> Result<String, String> {
     fingerprint(&capture(
         Command::new("gpg").args(["--batch", "--show-keys", "--with-colons"]).arg(root.join(KEY_ASC)),
     )?)
     .ok_or_else(|| format!("no key in {KEY_ASC}"))
+}
+
+#[cfg(test)]
+mod icon_tests {
+    use super::png_sizes;
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut v = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        v.extend_from_slice(&w.to_be_bytes());
+        v.extend_from_slice(&h.to_be_bytes());
+        v.extend_from_slice(&[8, 6, 0, 0, 0]);
+        v
+    }
+
+    #[test]
+    fn the_sizes_of_the_pngs_in_a_header_are_read() {
+        let mut b = b"flatpak\0header".to_vec();
+        b.extend(png(64, 64));
+        b.extend_from_slice(b"padding");
+        b.extend(png(128, 128));
+        assert_eq!(png_sizes(&b), [(64, 64), (128, 128)]);
+        assert!(png_sizes(b"no pictures here").is_empty());
+        assert!(png_sizes(&png(1, 1)[..10]).is_empty(), "a cut-off signature is not a picture");
+    }
 }

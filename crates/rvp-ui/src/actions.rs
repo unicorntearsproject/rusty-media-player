@@ -106,6 +106,10 @@ pub enum Action {
     DialogToggle(u8),
     /// Close the application's dialog (Escape, the X).
     DialogClose,
+    /// The dialog's Back control (or Escape, or Backspace) went up one level.
+    DialogBack,
+    /// The audio panel's Back control went up to the Settings dialog it was opened from.
+    AudioBack,
     /// A character typed into the text box of the application's dialog.
     DialogChar(char),
     /// Backspace in the text box of the application's dialog.

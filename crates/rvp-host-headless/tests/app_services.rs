@@ -555,9 +555,84 @@ fn the_default_player_checklist_has_every_media_type_ticked_and_sets_the_chosen_
     r.press("Uncheck all");
     assert!(!r.app.model().dialog.as_ref().unwrap().buttons[0].enabled);
     assert_eq!(r.buttons()[1], "Check all");
-    // Back (and Escape) return to Settings.
-    r.press("Back");
+    // The Back control (and Escape) return to Settings.
+    assert_eq!(r.app.model().dialog.as_ref().unwrap().back.as_deref(), Some("Settings"));
+    r.do_action(Action::DialogBack);
     assert_eq!(r.title().as_deref(), Some("Settings"));
+}
+
+/// Every page of Settings has a Back control, Escape and Backspace go up one level (Backspace not where a text box takes it), the X closes
+/// the whole thing, and on the way back the keyboard is on the button that opened the page.
+#[test]
+fn every_page_of_settings_goes_back_with_the_keyboard_on_the_button_that_opened_it() {
+    let mut r = Rig::with(Some(with_default(false)));
+    let focused = |r: &Rig| -> String {
+        let d = r.app.model().dialog.clone().unwrap();
+        let i = r.app.ui().dialog_focus(&d).map_or(usize::MAX, |c| match c {
+            rvp_ui::dialog::DialogControl::Button(n) => n as usize,
+            _ => usize::MAX,
+        });
+        d.buttons.get(i).map(|b| b.label.clone()).unwrap_or_default()
+    };
+    // Settings itself has no Back control.
+    r.do_action(Action::ShowSettings);
+    assert_eq!(r.title().as_deref(), Some("Settings"));
+    assert!(r.app.model().dialog.as_ref().unwrap().back.is_none());
+    for (page, title) in [
+        ("Theme\u{2026}", "Theme"),
+        ("Set as default media player\u{2026}", "Set as default media player"),
+        ("Check for updates\u{2026}", "Updates"),
+    ] {
+        // By the button...
+        r.press(page);
+        assert_eq!(r.title().as_deref(), Some(title), "{page}");
+        assert_eq!(
+            r.app.model().dialog.as_ref().unwrap().back.as_deref(),
+            Some("Settings"),
+            "{title} has a Back control"
+        );
+        r.do_action(Action::DialogBack);
+        assert_eq!(r.title().as_deref(), Some("Settings"), "{title}: back");
+        assert_eq!(focused(&r), page, "{title}: the keyboard is on the button that opened it");
+        // ...by Escape...
+        r.press(page);
+        r.key(Key::Escape);
+        assert_eq!(r.title().as_deref(), Some("Settings"), "{title}: Escape");
+        assert_eq!(focused(&r), page);
+        // ...by Backspace (the Theme page has a text box that takes it)...
+        r.press(page);
+        r.key(Key::Other("Backspace".into()));
+        assert_eq!(
+            r.title().as_deref(),
+            Some(if title == "Theme" { "Theme" } else { "Settings" }),
+            "{title}: Backspace"
+        );
+        if title == "Theme" {
+            r.key(Key::Escape);
+        }
+        assert_eq!(r.title().as_deref(), Some("Settings"));
+        // ...and the X closes everything.
+        r.press(page);
+        r.do_action(Action::DialogClose);
+        assert!(r.title().is_none(), "{title}: the X closes the whole dialog");
+        r.do_action(Action::ShowSettings);
+    }
+    // The audio page is a panel: its Back control (and Escape) return to Settings with the keyboard on its button, while the same panel
+    // opened from the menu has no Back control and Escape closes it.
+    r.press("Audio settings\u{2026}");
+    assert!(r.app.ui().audio_settings_open() && r.title().is_none());
+    r.key(Key::Escape);
+    assert!(!r.app.ui().audio_settings_open());
+    assert_eq!(r.title().as_deref(), Some("Settings"));
+    assert_eq!(focused(&r), "Audio settings\u{2026}");
+    r.do_action(Action::DialogClose);
+    r.do_action(Action::ShowAudioSettings);
+    assert!(r.app.ui().audio_settings_open());
+    r.key(Key::Escape);
+    assert!(
+        !r.app.ui().audio_settings_open() && r.title().is_none(),
+        "the panel opened from the menu just closes"
+    );
 }
 
 #[test]

@@ -3,7 +3,9 @@
 //! a new [`DialogSpec`] (so what is shown is always what is true).
 //!
 //! Mouse: click a switch or a button, the corner X closes. Keyboard: Tab, Shift+Tab and the arrows move between the controls (switches,
-//! then buttons), Space and Enter press, Escape closes. The dialog takes every event while it is up.
+//! then buttons), Space and Enter press, Escape closes. The dialog takes every event while it is up. A page reached from another (the pages
+//! of Settings) has a Back control at the top left: Escape, Backspace (where no text box takes it) and Alt+Left do the same, and the X closes
+//! the whole thing.
 use crate::actions::Action;
 use crate::font::Face;
 use crate::gfx::{FrameBuffer, Paint, RectF, fade};
@@ -72,6 +74,11 @@ pub struct DialogSpec {
     pub input: Option<DialogInput>,
     /// Slim switch rows without the explanation line (a long checklist); the rows also shrink on their own when the card would not fit.
     pub compact: bool,
+    /// A Back control at the top left, going up one level: what it leads to ("Settings"), for its tooltip.
+    pub back: Option<String>,
+    /// The button (an index into `buttons`) the keyboard starts on when the dialog appears, instead of the primary one: the page you came back
+    /// from.
+    pub focus_button: Option<usize>,
 }
 
 /// What can have the keyboard focus or the pointer.
@@ -81,6 +88,8 @@ pub enum DialogControl {
     Toggle(u8),
     /// Button number `n`.
     Button(u8),
+    /// The Back control (reached by the pointer and by keys, not by Tab).
+    Back,
 }
 
 impl DialogControl {
@@ -89,6 +98,7 @@ impl DialogControl {
         match self {
             DialogControl::Toggle(n) => alloc::format!("toggle{n}"),
             DialogControl::Button(n) => alloc::format!("button{n}"),
+            DialogControl::Back => "back".into(),
         }
     }
 }
@@ -100,6 +110,8 @@ pub struct DialogGeom {
     pub card: RectF,
     /// The close X.
     pub close: RectF,
+    /// The Back control, if the dialog has one.
+    pub back: Option<RectF>,
     /// Where the body paragraphs start (top).
     pub body_top: f32,
     /// The progress bar, if any.
@@ -132,6 +144,20 @@ const PAD: f32 = 28.0;
 const LINE_H: f32 = 21.0;
 
 impl Ui {
+    /// The Back control of a card (a dialog's or a panel's): a pill at its top left.
+    pub(crate) fn back_rect(card: RectF, s: f32) -> RectF {
+        RectF::new(card.x + PAD * s, card.y + 16.0 * s, 84.0 * s, 32.0 * s)
+    }
+
+    /// Draw the Back control: a chevron and the word, in the design system's quiet button style.
+    pub(crate) fn draw_back(&mut self, fb: &mut FrameBuffer, r: RectF, hot: bool) {
+        let s = self.scale;
+        fb.fill_rrect(r, r.h * 0.5, Paint::Solid(fade(t::white(), if hot { 0.14 } else { 0.07 })), 1.0);
+        fb.stroke_rrect(r, r.h * 0.5, 1.0 * s, fade(t::white(), if hot { 0.30 } else { 0.18 }), 1.0);
+        self.icon(fb, Icon::ChevronLeft, r.x + 18.0 * s, r.cy(), 16.0, t::text_strong(), 1.0, false);
+        self.text(fb, Face::SansBold, 13.0, r.x + 32.0 * s, r.cy(), "Back", t::text_strong(), 1.0, 0.0);
+    }
+
     /// The wrapped body lines for the card width.
     fn dialog_lines(&mut self, spec: &DialogSpec, inner: f32) -> Vec<Vec<String>> {
         spec.body.iter().map(|p| self.wrap(Face::Sans, 14.0, p, inner, 12)).collect()
@@ -228,7 +254,18 @@ impl Ui {
             .map(|(bx, by, bw, bh)| RectF::new(x0 + bx * s, card.y + by * s, bw * s, bh * s))
             .collect();
         self.dialog.lines = lines;
-        DialogGeom { card, close, body_top: card.y + 64.0 * s, progress, input, row_h, toggles, buttons }
+        let back = spec.back.as_ref().map(|_| Self::back_rect(card, s));
+        DialogGeom {
+            card,
+            close,
+            back,
+            body_top: card.y + 64.0 * s,
+            progress,
+            input,
+            row_h,
+            toggles,
+            buttons,
+        }
     }
 
     fn dialog_controls(spec: &DialogSpec) -> Vec<DialogControl> {
@@ -238,6 +275,9 @@ impl Ui {
     }
 
     fn dialog_hit(g: &DialogGeom, x: f32, y: f32) -> Option<DialogControl> {
+        if g.back.is_some_and(|b| b.contains(x, y)) {
+            return Some(DialogControl::Back);
+        }
         for (i, b) in g.buttons.iter().enumerate() {
             if b.contains(x, y) {
                 return Some(DialogControl::Button(i as u8));
@@ -260,6 +300,7 @@ impl Ui {
     fn dialog_activate(spec: &DialogSpec, c: DialogControl, out: &mut Vec<Action>) {
         match c {
             DialogControl::Toggle(n) => out.push(Action::DialogToggle(n)),
+            DialogControl::Back => out.push(Action::DialogBack),
             DialogControl::Button(n) => {
                 if spec.buttons.get(n as usize).is_some_and(|b| b.enabled) {
                     out.push(Action::DialogButton(n));
@@ -297,6 +338,9 @@ impl Ui {
         let controls = Self::dialog_controls(spec);
         if controls.is_empty() {
             return None;
+        }
+        if let Some(i) = spec.focus_button.filter(|&i| spec.buttons.get(i).is_some_and(|b| b.enabled)) {
+            return Some(spec.toggles.len() + i);
         }
         let primary =
             spec.buttons.iter().position(|b| b.primary && b.enabled).map(|i| spec.toggles.len() + i);
@@ -356,6 +400,13 @@ impl Ui {
         out: &mut Vec<Action>,
     ) {
         let n = controls.len();
+        // Up one level: Escape, Alt+Left and (where no text box wants it) Backspace do what the Back control does.
+        if spec.back.is_some() {
+            let backspace = matches!(key, Key::Other(name) if name == "Backspace") && spec.input.is_none();
+            if matches!(key, Key::Escape) || backspace || (mods.alt && matches!(key, Key::Left)) {
+                return out.push(Action::DialogBack);
+            }
+        }
         // A text box takes what is typed (not the keys that press controls).
         if spec.input.is_some() && !mods.ctrl && !mods.logo {
             match key {
@@ -429,8 +480,15 @@ impl Ui {
         let pad = PAD * s;
         let x0 = card.x + pad;
         let inner = card.w - 2.0 * pad;
-        let title = self.fonts.fit(Face::SansBold, 20.0 * s, &spec.title, inner - 44.0 * s);
-        self.text(fb, Face::SansBold, 20.0, x0, card.y + 36.0 * s, &title, t::text_strong(), 1.0, -0.2);
+        // With a Back control the title starts after it.
+        let tx = if g.back.is_some() { x0 + 96.0 * s } else { x0 };
+        let title = self.fonts.fit(Face::SansBold, 20.0 * s, &spec.title, inner - 44.0 * s - (tx - x0));
+        self.text(fb, Face::SansBold, 20.0, tx, card.y + 36.0 * s, &title, t::text_strong(), 1.0, -0.2);
+        if let Some(b) = g.back {
+            let hot = self.dialog.hover == Some(DialogControl::Back)
+                || (self.dialog.hover.is_none() && self.pointer.is_some_and(|(x, y)| b.contains(x, y)));
+            self.draw_back(fb, b, hot);
+        }
         let hot_close =
             self.dialog.hover.is_none() && self.pointer.is_some_and(|(x, y)| g.close.contains(x, y));
         if hot_close {
@@ -552,6 +610,8 @@ mod tests {
             ],
             input: None,
             compact: false,
+            back: None,
+            focus_button: None,
         }
     }
 
@@ -598,6 +658,71 @@ mod tests {
         // Outside the card, and on empty card, nothing happens.
         assert!(click(&mut ui, &m, 2.0, 2.0).is_empty());
         assert!(click(&mut ui, &m, g.card.x + 10.0, g.card.y + 100.0).is_empty());
+    }
+
+    #[test]
+    fn a_page_with_a_back_control_goes_up_by_click_escape_backspace_and_alt_left_and_the_x_still_closes() {
+        let mut ui = ui(1280);
+        let mut sp = spec();
+        sp.back = Some("Settings".into());
+        sp.focus_button = Some(2);
+        let m = model(Some(sp.clone()));
+        let g = ui.dialog_geom(&sp);
+        let back = g.back.expect("a Back control");
+        assert!(
+            back.x < g.card.x + g.card.w * 0.3 && back.y < g.card.y + 60.0,
+            "at the top left of the card"
+        );
+        assert_eq!(click(&mut ui, &m, back.cx(), back.cy()), alloc::vec![Action::DialogBack]);
+        assert_eq!(click(&mut ui, &m, g.close.cx(), g.close.cy()), alloc::vec![Action::DialogClose]);
+        assert_eq!(key(&mut ui, &m, Key::Escape, false), alloc::vec![Action::DialogBack]);
+        assert_eq!(key(&mut ui, &m, Key::Other("Backspace".into()), false), alloc::vec![Action::DialogBack]);
+        let alt = ui.handle(
+            &InputEvent::KeyDown {
+                key: Key::Left,
+                mods: Modifiers { alt: true, ..Modifiers::default() },
+                repeat: false,
+            },
+            4,
+            &m,
+        );
+        assert_eq!(alt, alloc::vec![Action::DialogBack]);
+        // The keyboard starts on the button the page was opened from, not the primary one: Enter presses it.
+        let mut ui2 = self::ui(1280);
+        assert_eq!(key(&mut ui2, &m, Key::Enter, false), alloc::vec![Action::DialogButton(2)]);
+        // A text box keeps Backspace for itself; Escape still goes up.
+        let mut with_box = sp.clone();
+        with_box.input = Some(DialogInput::default());
+        let mb = model(Some(with_box));
+        let mut ui3 = self::ui(1280);
+        assert_eq!(
+            key(&mut ui3, &mb, Key::Other("Backspace".into()), false),
+            alloc::vec![Action::DialogBackspace]
+        );
+        assert_eq!(key(&mut ui3, &mb, Key::Escape, false), alloc::vec![Action::DialogBack]);
+        // Without the control, Escape closes as before and there is no Back to hit.
+        let plain = spec();
+        let mp = model(Some(plain.clone()));
+        assert!(ui.dialog_geom(&plain).back.is_none());
+        assert_eq!(key(&mut ui, &mp, Key::Escape, false), alloc::vec![Action::DialogClose]);
+    }
+
+    #[test]
+    fn the_back_control_has_a_tooltip_with_its_keys() {
+        let mut ui = ui(1280);
+        ui.set_tooltips(true);
+        let mut sp = spec();
+        sp.back = Some("Settings".into());
+        let m = model(Some(sp.clone()));
+        let g = ui.dialog_geom(&sp);
+        let back = g.back.unwrap();
+        ui.handle(&InputEvent::PointerMove { x: back.cx(), y: back.cy() }, 0, &m);
+        ui.overlay_tip_tick(&m, 0);
+        ui.overlay_tip_tick(&m, 1_000_000);
+        ui.now = 1_000_000;
+        let tip = ui.dialog_tip_now(&m).expect("a tooltip");
+        assert_eq!(tip.text, "Back to Settings.");
+        assert_eq!(tip.key, "Esc / Backspace");
     }
 
     #[test]

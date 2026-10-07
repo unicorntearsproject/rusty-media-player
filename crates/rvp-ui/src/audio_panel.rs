@@ -36,6 +36,8 @@ pub enum AudioControl {
     Mode,
     /// The button that closes the panel.
     Done,
+    /// The Back control (when the panel was opened from Settings): by the pointer and by keys, not by Tab.
+    Back,
 }
 
 /// The controls in tab order.
@@ -58,6 +60,7 @@ impl AudioControl {
             AudioControl::Target => "target",
             AudioControl::Mode => "mode",
             AudioControl::Done => "done",
+            AudioControl::Back => "back",
         }
     }
 
@@ -75,6 +78,8 @@ pub(crate) struct AudioPanel {
     pub hover: Option<AudioControl>,
     /// The slider being dragged.
     pub drag: Option<AudioControl>,
+    /// Opened from the Settings dialog: a Back control goes up to it.
+    pub back: bool,
 }
 
 /// Where everything is, in pixels.
@@ -110,8 +115,16 @@ impl Ui {
     /// Show the Audio settings panel.
     pub fn open_audio_settings(&mut self) {
         self.menu.clear();
-        self.audio_panel = Some(AudioPanel { focus: 0, hover: None, drag: None });
+        self.audio_panel = Some(AudioPanel { focus: 0, hover: None, drag: None, back: false });
         self.dirty = true;
+    }
+
+    /// Show the Audio settings panel as a page of the Settings dialog: it has a Back control, and Escape and Backspace go back to Settings.
+    pub fn open_audio_settings_from_settings(&mut self) {
+        self.open_audio_settings();
+        if let Some(p) = &mut self.audio_panel {
+            p.back = true;
+        }
     }
 
     /// Close the panel.
@@ -158,7 +171,7 @@ impl Ui {
         let hit_row = |row: f32, h: f32| RectF::new(card.x + 8.0 * s, row, card.w - 16.0 * s, h);
         let slider_hit =
             |tr: RectF| RectF::new(tr.x - 12.0 * s, tr.cy() - 16.0 * s, tr.w + 24.0 * s, 32.0 * s);
-        let controls = alloc::vec![
+        let mut controls = alloc::vec![
             (AudioControl::Crossfade, hit_row(r_cross, 62.0 * s), switch(r_cross)),
             (AudioControl::CrossfadeLength, slider_hit(slider(r_len)), slider(r_len)),
             (AudioControl::AutoLevel, hit_row(r_auto, 62.0 * s), switch(r_auto)),
@@ -166,6 +179,10 @@ impl Ui {
             (AudioControl::Mode, seg, seg),
             (AudioControl::Done, done, done),
         ];
+        if self.audio_panel.as_ref().is_some_and(|p| p.back) {
+            let b = Self::back_rect(card, s);
+            controls.push((AudioControl::Back, b, b));
+        }
         AudioPanelGeom {
             card,
             close,
@@ -226,6 +243,10 @@ impl Ui {
                 LevelMode::Album => LevelMode::Track,
             })),
             AudioControl::Done => self.close_audio_settings(),
+            AudioControl::Back => {
+                self.close_audio_settings();
+                out.push(Action::AudioBack);
+            }
             AudioControl::CrossfadeLength | AudioControl::Target => {}
         }
     }
@@ -332,6 +353,16 @@ impl Ui {
         let Some(p) = &mut self.audio_panel else { return };
         let n = ORDER.len();
         let cur = ORDER[p.focus];
+        // Opened from Settings: Escape, Backspace and Alt+Left go up to it; the X and Done close the whole thing.
+        if p.back
+            && (matches!(key, Key::Escape)
+                || matches!(key, Key::Other(name) if name == "Backspace")
+                || (mods.alt && matches!(key, Key::Left)))
+        {
+            self.close_audio_settings();
+            out.push(Action::AudioBack);
+            return;
+        }
         match key {
             Key::Escape => self.close_audio_settings(),
             Key::Other(name) if name == "Tab" => {
@@ -407,7 +438,12 @@ impl Ui {
         let pad = 28.0 * s;
         let x0 = card.x + pad;
         let inner = card.w - 2.0 * pad;
-        self.text(fb, Face::SansBold, 20.0, x0, card.y + 36.0 * s, "Audio", t::text_strong(), 1.0, -0.2);
+        let tx = if panel.back { x0 + 96.0 * s } else { x0 };
+        self.text(fb, Face::SansBold, 20.0, tx, card.y + 36.0 * s, "Audio", t::text_strong(), 1.0, -0.2);
+        if panel.back {
+            let b = Self::back_rect(card, s);
+            self.draw_back(fb, b, panel.hover == Some(AudioControl::Back));
+        }
         // The close button.
         let hot_close = panel.hover.is_none() && self.pointer.is_some_and(|(x, y)| g.close.contains(x, y));
         if hot_close {
@@ -511,7 +547,7 @@ impl Ui {
             let r = match c {
                 AudioControl::Crossfade | AudioControl::AutoLevel => drawn,
                 AudioControl::CrossfadeLength | AudioControl::Target => hit,
-                AudioControl::Mode | AudioControl::Done => drawn,
+                AudioControl::Mode | AudioControl::Done | AudioControl::Back => drawn,
             };
             let radius = match c {
                 AudioControl::CrossfadeLength | AudioControl::Target => 12.0 * s,

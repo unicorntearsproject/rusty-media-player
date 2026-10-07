@@ -195,6 +195,19 @@ impl Ctx {
         if link.symlink_metadata().is_err() {
             sh(Command::new("ln").args(["-s", "/Applications"]).arg(&link))?;
         }
+        // The volume's own icon (what Finder shows for the mounted disk and for the .dmg once it is mounted): `.VolumeIcon.icns` in the root
+        // and the "custom icon" flag on the folder the image is made from (create-dmg does this itself with --volicon).
+        let icns = self.root.join("packaging/icons/rusty-wave.icns");
+        copy(&icns, &stage.join(".VolumeIcon.icns"))?;
+        if !have("create-dmg") {
+            let flagged = have("SetFile")
+                && Command::new("SetFile").args(["-a", "C"]).arg(&stage).status().is_ok_and(|s| s.success());
+            if !flagged {
+                // 32 bytes of Finder info, the custom icon bit (0x0400) in the flags at offset 8.
+                let hex = format!("{}04 00 {}", "00 ".repeat(8), vec!["00"; 22].join(" "));
+                sh(Command::new("xattr").args(["-wx", "com.apple.FinderInfo", &hex]).arg(&stage))?;
+            }
+        }
         let dmg = dir.join(format!("rusty-wave-{}-macos-universal.dmg", self.version));
         if dmg.exists() {
             fs::remove_file(&dmg).map_err(|e| e.to_string())?;
@@ -203,6 +216,8 @@ impl Ctx {
             // `create-dmg` lays out the window (app on the left, the link on the right) and makes the volume icon.
             sh(Command::new("create-dmg")
                 .args(["--volname", "Rusty Wave", "--window-size", "640", "380", "--icon-size", "96"])
+                .arg("--volicon")
+                .arg(&icns)
                 .args([
                     "--icon",
                     APP_DIR,
@@ -291,6 +306,22 @@ mod tests {
         assert_eq!(plist_strings(&p, "CFBundleIdentifier"), ["io.github.unicorntearsproject.RustyWave"]);
         assert_eq!(plist_strings(&p, "LSMinimumSystemVersion"), ["11.0"]);
         assert_eq!(plist_strings(&p, "CFBundleExecutable"), ["rusty-wave"]);
+    }
+
+    #[test]
+    fn the_installer_and_its_shortcuts_carry_the_icon() {
+        let t = iss();
+        assert!(t.contains("SetupIconFile=..\\icons\\rusty-wave.ico"), "the Setup.exe icon");
+        assert!(t.contains("UninstallDisplayIcon={app}\\rusty-wave.ico"), "Add or remove programs");
+        for line in
+            t.lines().filter(|l| l.starts_with("Name: \"{group}") || l.starts_with("Name: \"{autodesktop}"))
+        {
+            assert!(
+                line.contains("IconFilename: \"{app}\\rusty-wave.ico\""),
+                "a shortcut without the icon: {line}"
+            );
+        }
+        assert!(template().contains("<key>CFBundleIconFile</key>"), "the app's icon in the bundle");
     }
 
     #[test]

@@ -1175,6 +1175,8 @@ impl App {
             Action::DialogButton(n) => self.dialog_button(host, n, now),
             Action::DialogToggle(n) => self.dialog_toggle(host, n, now),
             Action::DialogClose => self.dialog_close(host, now),
+            Action::DialogBack => self.dialog_back(now),
+            Action::AudioBack => self.audio_back(now),
             Action::SetCrossfade(on) => {
                 self.update_settings(host, |s| s.crossfade = on);
                 let secs = self.settings.crossfade_secs;
