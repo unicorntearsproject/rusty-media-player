@@ -187,8 +187,7 @@ impl<B: Backend> HevcStream<B> {
                 Ok(())
             }
             _ if h.is_slice() => {
-                let pending_prev =
-                    self.pending.as_ref().and_then(|p| p.headers.last().filter(|h| !h.dependent).cloned());
+                let pending_prev = self.pending.as_ref().and_then(|p| p.headers.last().cloned());
                 let header = {
                     let (sps, pps) = (&self.sps, &self.pps);
                     let lookup = |id: u8| -> Option<(Pps, Sps)> {

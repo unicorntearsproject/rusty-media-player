@@ -128,6 +128,20 @@ fn print_sps() {
         let d = open(MemSource::new(data)).await.unwrap();
         let info = d.streams().iter().find(|s| s.kind == StreamKind::Video).unwrap().clone();
         for (k, u) in rvp_codec_hevc::ps::hvcc_units(&info.extra_data) {
+            if k == 34 {
+                let (mut r, mut rem) = (Vec::new(), Vec::new());
+                rvp_codec_hevc::nal::unescape(&u[2..], &mut r, &mut rem);
+                let p = rvp_codec_hevc::ps::Pps::parse(&r).unwrap();
+                println!(
+                    "pps weighted_pred={} weighted_bipred={} tiles={} wpp={} cu_qp_delta={} tskip={}",
+                    p.weighted_pred,
+                    p.weighted_bipred,
+                    p.tiles_enabled,
+                    p.entropy_coding_sync_enabled,
+                    p.cu_qp_delta_enabled,
+                    p.transform_skip_enabled
+                );
+            }
             if k == 33 {
                 let (mut r, mut rem) = (Vec::new(), Vec::new());
                 rvp_codec_hevc::nal::unescape(&u[2..], &mut r, &mut rem);

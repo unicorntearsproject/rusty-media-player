@@ -89,16 +89,16 @@ gen_h264() {
   enc p_base_nodb 352x288 20 "${base[@]}" -g 30 -bf 0 -refs 2 -x264-params no-deblock=1
   enc p_base_720p 1280x720 30 "${base[@]}" -g 30 -bf 0 -refs 2
   # --- 6c: B slices, weighted prediction, direct modes (Main, CAVLC)
-  enc b_cavlc_spatial 352x288 40 "${main[@]}" -g 40 -bf 3 -refs 3 -x264-params cabac=0:direct=spatial:weightp=2
-  enc b_cavlc_temporal 352x288 40 "${main[@]}" -g 40 -bf 3 -refs 3 -x264-params cabac=0:direct=temporal:weightp=2
-  enc b_cavlc_pyramid 352x288 40 "${main[@]}" -g 40 -bf 5 -refs 4 -x264-params cabac=0:b-pyramid=normal:weightb=1:weightp=2
+  enc b_cavlc_spatial 352x288 40 "${main[@]}" -g 40 -bf 3 -refs 3 -x264-params cabac=0:direct=spatial:weightp=1
+  enc b_cavlc_temporal 352x288 40 "${main[@]}" -g 40 -bf 3 -refs 3 -x264-params cabac=0:direct=temporal:weightp=1
+  enc b_cavlc_pyramid 352x288 40 "${main[@]}" -g 40 -bf 5 -refs 4 -x264-params cabac=0:b-pyramid=normal:weightb=1:weightp=1
   enc b_cavlc_auto 352x288 40 "${main[@]}" -g 40 -bf 2 -refs 2 -x264-params cabac=0:direct=auto:b-adapt=2
   enc b_cavlc_slices 352x288 30 "${main[@]}" -g 30 -bf 3 -refs 3 -x264-params cabac=0:slices=3:weightb=1
   enc b_cavlc_odd 326x246 30 "${main[@]}" -g 30 -bf 3 -refs 3 -x264-params cabac=0:weightb=1
   # --- 6d: CABAC (Main)
   enc c_main_i 352x288 8 "${main[@]}" -g 1
   enc c_main_p 352x288 30 "${main[@]}" -g 30 -bf 0 -refs 3
-  enc c_main_b 352x288 40 "${main[@]}" -g 40 -bf 3 -refs 3 -x264-params weightp=2:weightb=1
+  enc c_main_b 352x288 40 "${main[@]}" -g 40 -bf 3 -refs 3 -x264-params weightp=1:weightb=1
   enc c_main_temporal 352x288 40 "${main[@]}" -g 40 -bf 3 -refs 3 -x264-params direct=temporal
   enc c_main_pyramid 352x288 40 "${main[@]}" -g 40 -bf 5 -refs 4 -x264-params b-pyramid=normal
   enc c_main_slices 352x288 30 "${main[@]}" -g 30 -bf 3 -refs 3 -x264-params slices=4
@@ -109,7 +109,7 @@ gen_h264() {
   enc c_main_1080p 1920x1080 12 "${main[@]}" -g 12 -bf 2 -refs 2
   # --- 6e: High profile (8x8 transform, scaling matrices)
   enc h_high_i 352x288 8 "${high[@]}" -g 1
-  enc h_high 352x288 40 "${high[@]}" -g 40 -bf 3 -refs 3 -x264-params weightp=2:weightb=1
+  enc h_high 352x288 40 "${high[@]}" -g 40 -bf 3 -refs 3 -x264-params weightp=1:weightb=1
   enc h_high_cavlc 352x288 40 "${high[@]}" -g 40 -bf 3 -refs 3 -x264-params cabac=0
   enc h_high_cqm_jvt 352x288 30 "${high[@]}" -g 30 -bf 3 -refs 3 -x264-params cqm=jvt
   enc h_high_cqm_flat 352x288 20 "${high[@]}" -g 30 -bf 2 -refs 2 -x264-params cqm=flat
@@ -121,10 +121,10 @@ gen_h264() {
   enc h_high_refs16 352x288 40 "${high[@]}" -g 60 -bf 3 -refs 16 -x264-params b-pyramid=normal
   enc h_high_mbtree 352x288 60 "${high[@]}" -g 60 -bf 3 -refs 4 -x264-params rc-lookahead=30:aq-mode=2
   enc h_high_cip 352x288 30 "${high[@]}" -g 30 -bf 2 -refs 3 -x264-params constrained-intra=1
-  NOISE=12 enc h_high_720p 1280x720 90 "${high[@]}" -g 60 -bf 3 -refs 3 -x264-params weightp=2:weightb=1
+  NOISE=12 enc h_high_720p 1280x720 90 "${high[@]}" -g 60 -bf 3 -refs 3 -x264-params weightp=1:weightb=1
   enc h_high_1080p 1920x1080 20 "${high[@]}" -g 20 -bf 3 -refs 3
   # Typical-bitrate content for the speed numbers (a few Mbit/s instead of the 25+ of the noisy streams above).
-  NOISE=2 enc h_high_720p_typ 1280x720 90 "${high[@]}" -g 60 -bf 3 -refs 3 -crf 22 -x264-params weightp=2:weightb=1
+  NOISE=2 enc h_high_720p_typ 1280x720 90 "${high[@]}" -g 60 -bf 3 -refs 3 -crf 22 -x264-params weightp=1:weightb=1
   NOISE=2 enc h_high_1080p_typ 1920x1080 60 "${high[@]}" -g 60 -bf 3 -refs 3 -crf 22
   # --- interlaced (rejected cleanly) and non-4:2:0 / high bit depth (rejected cleanly)
   enc x_interlaced 352x288 10 "${main[@]}" -g 10 -bf 0 -x264-params interlaced=1
@@ -653,6 +653,16 @@ gen_hevcconf() {
   e b_dbk_sao 200x136 16 yuv420p "scenecut=0:rc-lookahead=24:keyint=60:bframes=4:ref=3:ctu=32"
   e b_dbk_sao_10bit 200x136 16 yuv420p10le "scenecut=0:rc-lookahead=24:keyint=60:bframes=4:ref=3:ctu=32"
   e b_dbk_sao_amp 200x136 16 yuv420p "scenecut=0:rc-lookahead=24:keyint=60:bframes=4:ref=3:ctu=32:rect=1:amp=1"
+  # Weighted prediction needs brightness changes: a fade in, then a fade out, over the moving test picture.
+  w() { # name frames fmt params
+    local name=$1 frames=$2 fmt=$3 params=$4
+    ff -f lavfi -i "testsrc2=size=200x136:rate=25:duration=$(python3 -c "print($frames/25)"),noise=alls=8:allf=t,fade=t=in:st=0:d=0.4,fade=t=out:st=0.5:d=0.4" -c:v libx265 -preset veryfast -pix_fmt "$fmt" -tag:v hvc1 -an \
+       -x265-params "log-level=error:$params" "$d/$name.mp4"
+  }
+  w w_p 24 yuv420p "$nl:keyint=60:bframes=0:ref=3:ctu=32:weightp=1"
+  w w_b 24 yuv420p "$nlb:keyint=60:bframes=4:ref=3:ctu=32:weightp=1:weightb=1"
+  w w_b_10bit 24 yuv420p10le "$nlb:keyint=60:bframes=4:ref=3:ctu=32:weightp=1:weightb=1"
+  w w_b_full 24 yuv420p "scenecut=0:rc-lookahead=24:keyint=60:bframes=4:ref=3:ctu=32:weightp=1:weightb=1"
   touch "$d/.done"
 }
 
