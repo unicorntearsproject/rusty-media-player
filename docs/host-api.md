@@ -155,10 +155,10 @@ and `set_integration(bool)` changes it. `unix_time()` is wall-clock seconds, bec
 
 ## Platform video decoders (`PlatformVideo`, rc8)
 
-A host may offer to decode what the player does not decode itself: HEVC (Main and Main 10) and 10-bit H.264. The seam is `rvp_core::PlatformVideo`
+A host may offer to decode what the player does not decode itself: 10-bit H.264, and HEVC that our own decoder (since rc9: Main and Main 10, 4:2:0) refuses, such as range extensions. The seam is `rvp_core::PlatformVideo`
 (`name`, `supports(&StreamInfo) -> Yes | No(reason)`, `open(&StreamInfo) -> Box<dyn VideoDecoder>`), used from the host's `CodecFactory` through
 `rvp_core::open_video` (ours first; the platform is asked only when ours answers `Unsupported`; 10-bit H.264 is screened out up front by
-`ours_refuses`). A refusal travels as `Error::Unsupported("video codec `hevc` [Platform: reason]")`, which the application turns into a message that names
+`ours_refuses`; an HEVC stream ours refuses on its first packet moves over through `FallbackVideo`). A refusal travels as `Error::Unsupported("video codec `hevc` [Platform: reason]")`, which the application turns into a message that names
 the codec, the reason and the next step. Frames are `Yuv420p8`, `Yuv420p10`, or packed `Rgba8` when the system already converted the picture (HDR is
 always tone-mapped to SDR). Implementations: WebCodecs (`web/webcodecs.js`), VA-API (dlopen, Linux), VideoToolbox (macOS), Media Foundation (Windows;
 needs the HEVC Video Extensions) in `crates/rvp-platform-video`. Rusty Bucket has none: the seam is there, nothing is wired.
