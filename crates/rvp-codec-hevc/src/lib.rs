@@ -16,11 +16,15 @@ extern crate alloc;
 extern crate std;
 
 pub mod bits;
+pub mod cabac;
+pub mod ctx;
 pub mod dpb;
 pub mod nal;
 pub mod ps;
 pub mod slice;
 pub mod stream;
+pub mod sw;
+pub mod tables;
 
 mod error;
 pub use error::{Error, Result};

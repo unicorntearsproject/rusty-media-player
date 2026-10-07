@@ -474,7 +474,18 @@ impl Sps {
         let strong_intra_smoothing = r.flag()?;
         let mut colour = Colour::default();
         if r.flag()? {
-            colour = parse_vui_colour(&mut r)?;
+            colour = parse_vui(&mut r, max_sub_layers_minus1)?;
+        }
+        if r.flag()? {
+            // sps_extension_present_flag
+            let (range, multilayer, ext3d, scc) = (r.flag()?, r.flag()?, r.flag()?, r.flag()?);
+            r.bits(4)?;
+            if multilayer || ext3d || scc {
+                return Err(Error::Unsupported("multilayer, 3D or screen content coding tools"));
+            }
+            if range && r.bits(9)? != 0 {
+                return Err(Error::Unsupported("range extension coding tools"));
+            }
         }
         Ok(Self {
             id: id as u8,
@@ -533,7 +544,9 @@ fn parse_profile_tier_level(r: &mut BitReader, max_sub_layers_minus1: u8) -> Res
     if profile == 0 {
         profile = (1..32u8).find(|p| compat & (1 << (31 - p)) != 0).unwrap_or(0);
     }
-    if !matches!(profile, 1 | 2) {
+    // Main (1), Main 10 (2), Main Still Picture (3), and the range-extension profile id (4) that x265 and others use for the intra-only
+    // Main profiles: all of them are accepted when the stream turns none of the extension tools on (checked where the SPS and PPS end).
+    if !matches!(profile, 1..=4) {
         return Err(Error::Unsupported("HEVC profile other than Main and Main 10"));
     }
     let mut profile_present = [false; 8];
@@ -558,8 +571,8 @@ fn parse_profile_tier_level(r: &mut BitReader, max_sub_layers_minus1: u8) -> Res
     Ok((profile, tier, level))
 }
 
-/// The start of `vui_parameters()`, as far as the colour description.
-fn parse_vui_colour(r: &mut BitReader) -> Result<Colour> {
+/// `vui_parameters()` (E.2.1): the colour description is kept, the rest is read to reach what follows.
+fn parse_vui(r: &mut BitReader, max_sub_layers_minus1: u8) -> Result<Colour> {
     let mut c = Colour::default();
     if r.flag()? {
         // aspect_ratio_info_present_flag
@@ -580,7 +593,87 @@ fn parse_vui_colour(r: &mut BitReader) -> Result<Colour> {
             c.matrix = r.bits(8)? as u8;
         }
     }
+    if r.flag()? {
+        // chroma_loc_info_present_flag
+        r.ue()?;
+        r.ue()?;
+    }
+    r.skip(3)?; // neutral_chroma_indication_flag, field_seq_flag, frame_field_info_present_flag
+    if r.flag()? {
+        // default_display_window_flag
+        for _ in 0..4 {
+            r.ue()?;
+        }
+    }
+    if r.flag()? {
+        // vui_timing_info_present_flag
+        r.skip(64)?;
+        if r.flag()? {
+            r.ue()?; // num_ticks_poc_diff_one_minus1
+        }
+        if r.flag()? {
+            parse_hrd(r, true, max_sub_layers_minus1)?;
+        }
+    }
+    if r.flag()? {
+        // bitstream_restriction_flag
+        r.skip(3)?;
+        for _ in 0..5 {
+            r.ue()?;
+        }
+    }
     Ok(c)
+}
+
+/// `hrd_parameters()` (E.2.2), read and dropped.
+fn parse_hrd(r: &mut BitReader, common: bool, max_sub_layers_minus1: u8) -> Result<()> {
+    let (mut nal, mut vcl, mut sub_pic) = (false, false, false);
+    if common {
+        nal = r.flag()?;
+        vcl = r.flag()?;
+        if nal || vcl {
+            sub_pic = r.flag()?;
+            if sub_pic {
+                r.skip(8 + 5 + 1 + 5)?;
+            }
+            r.skip(8)?; // bit_rate_scale, cpb_size_scale
+            if sub_pic {
+                r.skip(4)?;
+            }
+            r.skip(15)?;
+        }
+    }
+    for _ in 0..=max_sub_layers_minus1 {
+        let fixed_general = r.flag()?;
+        let fixed_cvs = if fixed_general { true } else { r.flag()? };
+        let mut low_delay = false;
+        if fixed_cvs {
+            r.ue()?; // elemental_duration_in_tc_minus1
+        } else {
+            low_delay = r.flag()?;
+        }
+        let mut cpb_cnt = 1;
+        if !low_delay {
+            cpb_cnt = r.ue()? as usize + 1;
+            if cpb_cnt > 32 {
+                return Err(Error::Invalid("cpb_cnt_minus1"));
+            }
+        }
+        for present in [nal, vcl] {
+            if present {
+                for _ in 0..cpb_cnt {
+                    r.ue()?;
+                    r.ue()?;
+                    if sub_pic {
+                        r.ue()?;
+                        r.ue()?;
+                    }
+                    r.flag()?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The PPS fields a decoder needs.
@@ -730,6 +823,26 @@ impl Pps {
         let lists_modification_present = r.flag()?;
         let log2_parallel_merge_level_minus2 = r.ue()?;
         let slice_segment_header_extension_present = r.flag()?;
+        if r.flag()? {
+            // pps_extension_present_flag
+            let (range, multilayer, ext3d, scc) = (r.flag()?, r.flag()?, r.flag()?, r.flag()?);
+            r.bits(4)?;
+            if multilayer || ext3d || scc {
+                return Err(Error::Unsupported("multilayer, 3D or screen content coding tools"));
+            }
+            if range {
+                let log2_max_ts = if transform_skip_enabled { r.ue()? } else { 0 };
+                let cross_component = r.flag()?;
+                let chroma_qp_offset_list = r.flag()?;
+                if chroma_qp_offset_list {
+                    return Err(Error::Unsupported("chroma QP offset lists"));
+                }
+                let (sao_l, sao_c) = (r.ue()?, r.ue()?);
+                if log2_max_ts != 0 || cross_component || sao_l != 0 || sao_c != 0 {
+                    return Err(Error::Unsupported("range extension coding tools"));
+                }
+            }
+        }
         Ok(Self {
             id: id as u8,
             sps_id: sps_id as u8,

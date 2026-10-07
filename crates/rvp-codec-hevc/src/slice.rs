@@ -126,6 +126,8 @@ pub struct SliceHeader {
     pub entry_points: Vec<u32>,
     /// Where the slice data starts in the unit: the byte offset in the escaped bytes of the unit (header included).
     pub data_offset: usize,
+    /// Where the slice data starts in the unit with the emulation prevention bytes taken out.
+    pub data_offset_rbsp: usize,
     /// How many emulation prevention bytes the header (up to `data_offset`) has.
     pub header_emulation_bytes: usize,
 }
@@ -221,6 +223,7 @@ impl SliceHeader {
         // The header ends at this byte of the unescaped unit (two header bytes in front); in the escaped bytes it is further on by the
         // emulation prevention bytes before it.
         let end = 2 + r.byte_pos();
+        h.data_offset_rbsp = end;
         h.data_offset = nal::escaped_pos(end, &removed);
         h.header_emulation_bytes = removed.iter().filter(|p| **p < h.data_offset).count();
         Ok(h)
@@ -348,6 +351,7 @@ impl SliceHeader {
             loop_filter_across_slices: pps.loop_filter_across_slices_enabled,
             entry_points: Vec::new(),
             data_offset: 0,
+            data_offset_rbsp: 0,
             header_emulation_bytes: 0,
         };
         if slice_type != SliceType::I {

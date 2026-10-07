@@ -580,6 +580,59 @@ gen_hevc() {
   touch "$out/hevc/.done"
 }
 
+# HEVC conformance matrix for the software decoder: small x265 streams that switch on one family of tools at a time, checked frame by
+# frame against ffmpeg's decode (crates/rvp-codec-hevc/tests/conformance.rs).
+gen_hevcconf() {
+  local d="$out/hevcconf"; mkdir -p "$d"
+  [[ -f "$d/.done" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return 0
+  local enc; enc="$(ffmpeg -hide_banner -encoders 2>/dev/null || true)"
+  [[ "$enc" == *libx265* ]] || { echo "libx265 missing: no HEVC conformance fixtures"; return 0; }
+  # name | size | frames | pix_fmt | x265 params
+  local src8="testsrc2=size=%s:rate=25:duration=%s,noise=alls=10:allf=t"
+  e() { # name size frames fmt params
+    local name=$1 size=$2 frames=$3 fmt=$4 params=$5
+    ff -f lavfi -i "$(printf "$src8" "$size" "$(python3 -c "print($frames/25)")")" -c:v libx265 -preset veryfast -pix_fmt "$fmt" -tag:v hvc1 -an \
+       -x265-params "log-level=error:$params" "$d/$name.mp4"
+  }
+  local base="no-deblock=1:no-sao=1:keyint=1:bframes=0:ref=1:rc-lookahead=0:scenecut=0"
+  e i_ctu64 200x136 6 yuv420p "$base:ctu=64"
+  e i_ctu32 200x136 6 yuv420p "$base:ctu=32"
+  e i_ctu16 200x136 6 yuv420p "$base:ctu=16"
+  e i_ctu32_mincu16 208x144 4 yuv420p "$base:ctu=32:min-cu-size=16"
+  e i_tskip 200x136 4 yuv420p "$base:ctu=32:tskip=1:tskip-fast=0"
+  e i_nosign 200x136 4 yuv420p "$base:ctu=32:no-signhide=1"
+  e i_qp_low 200x136 4 yuv420p "$base:ctu=32:qp=8:rc-lookahead=0:crf=8"
+  e i_qp_high 200x136 4 yuv420p "$base:ctu=32:crf=40"
+  e i_cuqp 200x136 4 yuv420p "$base:ctu=32:aq-mode=3:cutree=0"
+  e i_10bit 200x136 4 yuv420p10le "$base:ctu=32"
+  e i_constrained 200x136 4 yuv420p "$base:ctu=32:constrained-intra=1"
+  e i_nostrong 200x136 4 yuv420p "$base:ctu=32:no-strong-intra-smoothing=1"
+  e i_scaling 200x136 4 yuv420p "$base:ctu=32:scaling-list=default"
+  e i_lossless 96x64 3 yuv420p "$base:ctu=16:lossless=1"
+  e i_cu_lossless 200x136 4 yuv420p "$base:ctu=32:cu-lossless=1"
+  e i_slices 200x136 4 yuv420p "$base:ctu=32:slices=4"
+  e i_wpp 200x136 4 yuv420p "$base:ctu=32:wpp=1"
+  e i_nowpp 200x136 4 yuv420p "$base:ctu=32:wpp=0"
+  # Loop filters (intra pictures first).
+  local nof="no-sao=1:keyint=1:bframes=0:ref=1:rc-lookahead=0:scenecut=0"
+  e f_dbk 200x136 4 yuv420p "$nof:ctu=32"
+  e f_dbk_ctu64 200x136 4 yuv420p "$nof:ctu=64"
+  e f_dbk_ctu16 200x136 4 yuv420p "$nof:ctu=16"
+  e f_dbk_offsets 200x136 4 yuv420p "$nof:ctu=32:deblock=-3,2"
+  e f_dbk_slices 200x136 4 yuv420p "$nof:ctu=32:slices=4"
+  e f_dbk_10bit 200x136 4 yuv420p10le "$nof:ctu=32"
+  e f_dbk_lossless 200x136 4 yuv420p "$nof:ctu=32:cu-lossless=1"
+  e f_dbk_qp 200x136 4 yuv420p "$nof:ctu=32:crf=36:aq-mode=3"
+  local nof2="no-deblock=1:keyint=1:bframes=0:ref=1:rc-lookahead=0:scenecut=0"
+  e s_sao 200x136 4 yuv420p "$nof2:ctu=32"
+  e s_sao_ctu64 200x136 4 yuv420p "$nof2:ctu=64"
+  e s_sao_ctu16 200x136 4 yuv420p "$nof2:ctu=16"
+  e s_sao_10bit 200x136 4 yuv420p10le "$nof2:ctu=32"
+  e s_sao_both 200x136 4 yuv420p "keyint=1:bframes=0:ref=1:rc-lookahead=0:scenecut=0:ctu=32"
+  e s_sao_both_10bit 200x136 4 yuv420p10le "keyint=1:bframes=0:ref=1:rc-lookahead=0:scenecut=0:ctu=32:limit-sao=0"
+  touch "$d/.done"
+}
+
 fixture_set="${RVP_FIXTURE_SET:-all}"
 if [[ "$fixture_set" == basic ]]; then gen_basic; fi
 if [[ "$fixture_set" == all || "$fixture_set" == core ]]; then gen_core; fi
@@ -590,5 +643,6 @@ if [[ "$fixture_set" == all || "$fixture_set" == audio ]]; then gen_audio; fi
 if [[ "$fixture_set" == all || "$fixture_set" == library ]]; then gen_library; fi
 if [[ "$fixture_set" == all || "$fixture_set" == levels ]]; then gen_levels; fi
 if [[ "$fixture_set" == all || "$fixture_set" == hevc ]]; then gen_hevc; fi
+if [[ "$fixture_set" == hevcconf ]]; then gen_hevcconf; fi
 if [[ "$fixture_set" == perf ]]; then gen_perf; fi
 echo "fixtures in $out"
