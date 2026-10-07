@@ -354,17 +354,18 @@ impl PlatformVideo for VideoToolboxPlatform {
         } else {
             rvp_core::avcc_bit_depth(&info.extra_data) > 8
         };
-        let colour = if info.codec == "hevc" {
+        let sps = if info.codec == "hevc" {
             hvcc_units(&info.extra_data).into_iter().find(|(k, _)| *k == 33).and_then(|(_, u)| {
                 let mut rbsp = Vec::new();
                 let mut rem = Vec::new();
                 rvp_codec_hevc::nal::unescape(&u[2..], &mut rbsp, &mut rem);
-                Sps::parse(&rbsp).ok().map(|s| s.colour)
+                Sps::parse(&rbsp).ok()
             })
         } else {
             None
-        }
-        .unwrap_or_default();
+        };
+        let colour = sps.as_ref().map(|s| s.colour).unwrap_or_default();
+        let reorder = sps.as_ref().map_or(4, |s| s.max_num_reorder_pics as usize);
         let shared =
             Rc::new(Shared { frames: RefCell::new(Vec::new()), error: RefCell::new(None), ten, colour });
         // Ask for the biplanar layouts we know how to read.
@@ -403,7 +404,7 @@ impl PlatformVideo for VideoToolboxPlatform {
             }
             (session, attrs)
         };
-        Ok(Box::new(VtDecoder { session, format: fd, attrs, shared, length_size }))
+        Ok(Box::new(VtDecoder { session, format: fd, attrs, shared, length_size, reorder, draining: false }))
     }
 }
 
@@ -414,6 +415,10 @@ struct VtDecoder {
     shared: Rc<Shared>,
     #[allow(dead_code)]
     length_size: usize,
+    /// How many pictures the stream can have waiting for reordering.
+    reorder: usize,
+    /// End of stream: everything held back may go.
+    draining: bool,
 }
 
 impl VideoDecoder for VtDecoder {
@@ -484,14 +489,17 @@ impl VideoDecoder for VtDecoder {
         if let Some(e) = self.shared.error.borrow_mut().take() {
             return Err(Error::Invalid(e));
         }
+        // The decoder may hand pictures over in decode order: hold back as many as the stream can reorder, and give out the earliest.
         let mut frames = self.shared.frames.borrow_mut();
-        if frames.is_empty() {
+        if frames.is_empty() || (!self.draining && frames.len() <= self.reorder) {
             return Ok(None);
         }
-        Ok(Some(frames.remove(0)))
+        let first = frames.iter().enumerate().min_by_key(|(_, f)| f.pts).map(|(i, _)| i).unwrap_or(0);
+        Ok(Some(frames.remove(first)))
     }
 
     fn flush(&mut self) {
+        self.draining = false;
         // SAFETY: the session is valid until drop.
         unsafe {
             VTDecompressionSessionFinishDelayedFrames(self.session);
@@ -502,6 +510,7 @@ impl VideoDecoder for VtDecoder {
     }
 
     fn drain(&mut self) -> CoreResult<()> {
+        self.draining = true;
         // SAFETY: as above.
         unsafe {
             VTDecompressionSessionFinishDelayedFrames(self.session);
