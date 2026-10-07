@@ -83,9 +83,7 @@ pub struct Rav1dMsacDSPContext {
 
 impl Rav1dMsacDSPContext {
     pub const fn default() -> Self {
-        Self {
-            symbol_adapt16: rav1d_msac_decode_symbol_adapt_c,
-        }
+        Self { symbol_adapt16: rav1d_msac_decode_symbol_adapt_c }
     }
 
     #[cfg(all(feature = "asm", any(target_arch = "x86", target_arch = "x86_64")))]
@@ -180,10 +178,7 @@ unsafe impl Sync for MsacAsmContextBuf {}
 
 impl Default for MsacAsmContextBuf {
     fn default() -> Self {
-        Self {
-            pos: ptr::null(),
-            end: ptr::null(),
-        }
+        Self { pos: ptr::null(), end: ptr::null() }
     }
 }
 
@@ -289,11 +284,7 @@ pub fn rav1d_msac_decode_uniform(s: &mut MsacContext, n: c_uint) -> c_int {
     assert!(l > 1);
     let m = (1 << l) - n;
     let v = rav1d_msac_decode_bools(s, l - 1);
-    (if v < m {
-        v
-    } else {
-        (v << 1) - m + rav1d_msac_decode_bool_equi(s) as c_uint
-    }) as c_int
+    (if v < m { v } else { (v << 1) - m + rav1d_msac_decode_bool_equi(s) as c_uint }) as c_int
 }
 
 const EC_PROB_SHIFT: c_uint = 6;
@@ -340,10 +331,7 @@ fn ctx_norm(s: &mut MsacContext, dif: EcWin, rng: c_uint) {
     }
 }
 
-#[cfg_attr(
-    all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")),
-    allow(dead_code)
-)]
+#[cfg_attr(all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")), allow(dead_code))]
 fn rav1d_msac_decode_bool_equi_rust(s: &mut MsacContext) -> bool {
     let r = s.rng;
     let mut dif = s.dif;
@@ -357,10 +345,7 @@ fn rav1d_msac_decode_bool_equi_rust(s: &mut MsacContext) -> bool {
     !ret
 }
 
-#[cfg_attr(
-    all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")),
-    allow(dead_code)
-)]
+#[cfg_attr(all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")), allow(dead_code))]
 fn rav1d_msac_decode_bool_rust(s: &mut MsacContext, f: c_uint) -> bool {
     let r = s.rng;
     let mut dif = s.dif;
@@ -384,11 +369,7 @@ pub fn rav1d_msac_decode_subexp(s: &mut MsacContext, r#ref: c_uint, n: c_uint, m
         a = 1 << k;
     }
     let v = rav1d_msac_decode_bools(s, k) + a;
-    (if r#ref * 2 <= n {
-        inv_recenter(r#ref, v)
-    } else {
-        n - 1 - inv_recenter(n - 1 - r#ref, v)
-    }) as c_int
+    (if r#ref * 2 <= n { inv_recenter(r#ref, v) } else { n - 1 - inv_recenter(n - 1 - r#ref, v) }) as c_int
 }
 
 /// Return value is in the range `0..=n_symbols`.
@@ -413,11 +394,7 @@ fn rav1d_msac_decode_symbol_adapt_rust(s: &mut MsacContext, cdf: &mut [u16], n_s
         val += 1;
     }
     assert!(u <= s.rng);
-    ctx_norm(
-        s,
-        s.dif.wrapping_sub((v as EcWin) << (EC_WIN_SIZE - 16)),
-        u - v,
-    );
+    ctx_norm(s, s.dif.wrapping_sub((v as EcWin) << (EC_WIN_SIZE - 16)), u - v);
     if s.allow_update_cdf() {
         let count = cdf[n_symbols as usize];
         let rate = 4 + (count >> 4) + (n_symbols > 2) as u16;
@@ -450,11 +427,7 @@ unsafe extern "C" fn rav1d_msac_decode_symbol_adapt_c(
     // `&mut s.asm` is passed, so we can reverse this to get back `s`.
     // The `.sub` is safe since were are subtracting the offset of `asm` within `s`,
     // so that will stay in bounds of the `s: MsacContext` allocated object.
-    let s = unsafe {
-        &mut *ptr::from_mut(s)
-            .sub(mem::offset_of!(MsacContext, asm))
-            .cast::<MsacContext>()
-    };
+    let s = unsafe { &mut *ptr::from_mut(s).sub(mem::offset_of!(MsacContext, asm)).cast::<MsacContext>() };
 
     // SAFETY: This is only called from [`dav1d_msac_decode_symbol_adapt16`],
     // where it comes from `cdf.len()`.
@@ -463,10 +436,7 @@ unsafe extern "C" fn rav1d_msac_decode_symbol_adapt_c(
     rav1d_msac_decode_symbol_adapt_rust(s, cdf, n_symbols as u8) as c_uint
 }
 
-#[cfg_attr(
-    all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")),
-    allow(dead_code)
-)]
+#[cfg_attr(all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")), allow(dead_code))]
 fn rav1d_msac_decode_bool_adapt_rust(s: &mut MsacContext, cdf: &mut [u16; 2]) -> bool {
     let bit = rav1d_msac_decode_bool(s, cdf[0] as c_uint);
     if s.allow_update_cdf() {
@@ -483,10 +453,7 @@ fn rav1d_msac_decode_bool_adapt_rust(s: &mut MsacContext, cdf: &mut [u16; 2]) ->
 }
 
 /// Return value is in the range `0..=15`.
-#[cfg_attr(
-    all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")),
-    allow(dead_code)
-)]
+#[cfg_attr(all(feature = "asm", any(target_feature = "sse2", target_feature = "neon")), allow(dead_code))]
 fn rav1d_msac_decode_hi_tok_rust(s: &mut MsacContext, cdf: &mut [u16; 4]) -> u8 {
     let mut tok_br = rav1d_msac_decode_symbol_adapt4(s, cdf, 3);
     let mut tok = 3 + tok_br;
@@ -515,10 +482,7 @@ impl MsacContext {
             #[cfg(all(feature = "asm", target_arch = "x86_64"))]
             symbol_adapt16: dsp.symbol_adapt16,
         };
-        let mut s = Self {
-            asm,
-            data: Some(data),
-        };
+        let mut s = Self { asm, data: Some(data) };
         let _ = dsp.symbol_adapt16; // Silence unused warnings.
         ctx_refill(&mut s);
         s

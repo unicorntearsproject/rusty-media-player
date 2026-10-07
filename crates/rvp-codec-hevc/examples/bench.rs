@@ -31,7 +31,7 @@ fn main() {
         frames = 0;
         sum = 0;
         let t = Instant::now();
-        let mut take = |dec: &mut Box<dyn rvp_core::VideoDecoder>, frames: &mut usize, sum: &mut u64| {
+        let take = |dec: &mut Box<dyn rvp_core::VideoDecoder>, frames: &mut usize, sum: &mut u64| {
             while let Ok(Some(f)) = dec.receive_frame() {
                 *frames += 1;
                 for p in &f.planes {
@@ -47,5 +47,8 @@ fn main() {
         take(&mut dec, &mut frames, &mut sum);
         best = best.min(t.elapsed().as_secs_f64());
     }
-    println!("{path}: {frames} frames, best {best:.2} s = {:.1} fps, checksum {sum:016x}", frames as f64 / best);
+    println!(
+        "{path}: {frames} frames, best {best:.2} s = {:.1} fps, checksum {sum:016x}",
+        frames as f64 / best
+    );
 }

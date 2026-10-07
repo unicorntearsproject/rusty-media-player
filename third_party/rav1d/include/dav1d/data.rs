@@ -23,12 +23,7 @@ pub(crate) struct Rav1dData {
 
 impl From<Dav1dData> for Rav1dData {
     fn from(value: Dav1dData) -> Self {
-        let Dav1dData {
-            data: _,
-            sz: _,
-            r#ref,
-            m,
-        } = value;
+        let Dav1dData { data: _, sz: _, r#ref, m } = value;
         Self {
             data: r#ref.map(|r#ref| {
                 // SAFETY: `r#ref` is a [`RawCArc`] originally from [`CArc`].
@@ -43,9 +38,7 @@ impl From<Rav1dData> for Dav1dData {
     fn from(value: Rav1dData) -> Self {
         let Rav1dData { data, m } = value;
         Self {
-            data: data
-                .as_ref()
-                .map(|data| data.as_ref().to::<NonNull<[u8]>>().cast()),
+            data: data.as_ref().map(|data| data.as_ref().to::<NonNull<[u8]>>().cast()),
             sz: data.as_ref().map(|data| data.len()).unwrap_or_default(),
             r#ref: data.map(|data| data.into_raw()),
             m: m.into(),

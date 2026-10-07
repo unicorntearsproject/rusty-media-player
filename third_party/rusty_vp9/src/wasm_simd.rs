@@ -37,7 +37,15 @@ fn tap_pairs(f: &[i32; 8]) -> [v128; 4] {
 /// `src` must be readable for `i + 7*tap_stride + 7` u16s (`+ 3` for the final four outputs) and `dst` writable for `n`
 /// u16s; the caller checks that the whole window lies inside the plane. `n` is a multiple of 4.
 #[inline]
-unsafe fn conv8(src: *const u16, tap_stride: usize, f: &[i32; 8], dst: *mut u16, n: usize, max: i32, avg: bool) {
+unsafe fn conv8(
+    src: *const u16,
+    tap_stride: usize,
+    f: &[i32; 8],
+    dst: *mut u16,
+    n: usize,
+    max: i32,
+    avg: bool,
+) {
     let taps = tap_pairs(f);
     let (round, zero, maxv) = (i32x4_splat(64), i32x4_splat(0), i32x4_splat(max));
     let mut i = 0usize;
@@ -46,7 +54,10 @@ unsafe fn conv8(src: *const u16, tap_stride: usize, f: &[i32; 8], dst: *mut u16,
         for (k, t) in taps.iter().enumerate() {
             // SAFETY: by the contract, 8 u16 are readable at each tap.
             let (a, b) = unsafe {
-                (v128_load(src.add(i + 2 * k * tap_stride).cast()), v128_load(src.add(i + (2 * k + 1) * tap_stride).cast()))
+                (
+                    v128_load(src.add(i + 2 * k * tap_stride).cast()),
+                    v128_load(src.add(i + (2 * k + 1) * tap_stride).cast()),
+                )
             };
             let il = i16x8_shuffle::<0, 8, 1, 9, 2, 10, 3, 11>(a, b);
             let ih = i16x8_shuffle::<4, 12, 5, 13, 6, 14, 7, 15>(a, b);
@@ -99,7 +110,10 @@ unsafe fn avg_row(src: *const u16, dst: *mut u16, n: usize) {
     // SAFETY: by the contract.
     unsafe {
         while i + 8 <= n {
-            v128_store(dst.add(i).cast(), u16x8_avgr(v128_load(src.add(i).cast()), v128_load(dst.add(i).cast())));
+            v128_store(
+                dst.add(i).cast(),
+                u16x8_avgr(v128_load(src.add(i).cast()), v128_load(dst.add(i).cast())),
+            );
             i += 8;
         }
         if i + 4 <= n {
@@ -200,22 +214,10 @@ fn transpose8x8(r: [v128; 8]) -> [v128; 8] {
         i16x8_shuffle::<4, 12, 5, 13, 6, 14, 7, 15>(r[6], r[7]),
     );
     // 32-bit interleave of (t0,t2), (t1,t3), (t4,t6), (t5,t7).
-    let (u0, u1) = (
-        i32x4_shuffle::<0, 4, 1, 5>(t0, t2),
-        i32x4_shuffle::<2, 6, 3, 7>(t0, t2),
-    );
-    let (u2, u3) = (
-        i32x4_shuffle::<0, 4, 1, 5>(t1, t3),
-        i32x4_shuffle::<2, 6, 3, 7>(t1, t3),
-    );
-    let (u4, u5) = (
-        i32x4_shuffle::<0, 4, 1, 5>(t4, t6),
-        i32x4_shuffle::<2, 6, 3, 7>(t4, t6),
-    );
-    let (u6, u7) = (
-        i32x4_shuffle::<0, 4, 1, 5>(t5, t7),
-        i32x4_shuffle::<2, 6, 3, 7>(t5, t7),
-    );
+    let (u0, u1) = (i32x4_shuffle::<0, 4, 1, 5>(t0, t2), i32x4_shuffle::<2, 6, 3, 7>(t0, t2));
+    let (u2, u3) = (i32x4_shuffle::<0, 4, 1, 5>(t1, t3), i32x4_shuffle::<2, 6, 3, 7>(t1, t3));
+    let (u4, u5) = (i32x4_shuffle::<0, 4, 1, 5>(t4, t6), i32x4_shuffle::<2, 6, 3, 7>(t4, t6));
+    let (u6, u7) = (i32x4_shuffle::<0, 4, 1, 5>(t5, t7), i32x4_shuffle::<2, 6, 3, 7>(t5, t7));
     // 64-bit interleave.
     [
         i64x2_shuffle::<0, 2>(u0, u4),
@@ -247,10 +249,19 @@ fn sel(m: v128, a: v128, b: v128) -> v128 {
 /// The filter of one edge for 8 positions in parallel (lane = position); `p[k]` / `q[k]` are the samples `k + 1` before
 /// and `k` after the edge. Returns the new `p0..p6` and `q0..q6` (unmodified where the width does not reach).
 #[allow(clippy::too_many_arguments)]
-fn lf_core(p: [v128; 8], q: [v128; 8], width: usize, lim: i32, blimit: i32, hev_thr: i32, bd: i32) -> ([v128; 7], [v128; 7]) {
+fn lf_core(
+    p: [v128; 8],
+    q: [v128; 8],
+    width: usize,
+    lim: i32,
+    blimit: i32,
+    hev_thr: i32,
+    bd: i32,
+) -> ([v128; 7], [v128; 7]) {
     let base = 1i32 << (bd - 1);
     let ft = u16x8_splat(1 << (bd - 8));
-    let (lim, blimit, hev_thr) = (u16x8_splat(lim as u16), u16x8_splat(blimit as u16), u16x8_splat(hev_thr as u16));
+    let (lim, blimit, hev_thr) =
+        (u16x8_splat(lim as u16), u16x8_splat(blimit as u16), u16x8_splat(hev_thr as u16));
     let (p0, p1, p2, p3) = (p[0], p[1], p[2], p[3]);
     let (q0, q1, q2, q3) = (q[0], q[1], q[2], q[3]);
     // filter_mask
@@ -271,7 +282,8 @@ fn lf_core(p: [v128; 8], q: [v128; 8], width: usize, lim: i32, blimit: i32, hev_
     let hev = v128_or(u16x8_gt(absd(p1, p0), hev_thr), u16x8_gt(absd(q1, q0), hev_thr));
 
     // filter4 on offset (signed) samples
-    let (bv, lo_c, hi_c) = (i16x8_splat(base as i16), i16x8_splat(-base as i16), i16x8_splat((base - 1) as i16));
+    let (bv, lo_c, hi_c) =
+        (i16x8_splat(base as i16), i16x8_splat(-base as i16), i16x8_splat((base - 1) as i16));
     let scl = |v: v128| i16x8_min(i16x8_max(v, lo_c), hi_c);
     let (ps1, ps0, qs0, qs1) = (i16x8_sub(p1, bv), i16x8_sub(p0, bv), i16x8_sub(q0, bv), i16x8_sub(q1, bv));
     let f_hev = scl(i16x8_sub(ps1, qs1));
@@ -402,7 +414,13 @@ pub(crate) fn filter_edge8(
             q[k] = ld8(&buf[i + k * pos_stride..]);
         }
         let (np, nq) = lf_core(p, q, width, lim, blimit, hev_thr, bd);
-        let modified = if width >= 16 { 7 } else if width >= 8 { 3 } else { 2 };
+        let modified = if width >= 16 {
+            7
+        } else if width >= 8 {
+            3
+        } else {
+            2
+        };
         for k in 0..modified {
             st8(&mut buf[i - (k + 1) * pos_stride..], np[k]);
             st8(&mut buf[i + k * pos_stride..], nq[k]);
@@ -473,11 +491,29 @@ pub fn selftest() -> u32 {
                         let mut a = seed_dst.clone();
                         let mut b = seed_dst;
                         // `predict_block` with the scalar branches only: call the reference through the unvectorised entry.
-                        crate::inter::predict_block_scalar(&refp, bx, by, sx, sy, filter, &mut a, w, w, h, avg, max);
+                        crate::inter::predict_block_scalar(
+                            &refp, bx, by, sx, sy, filter, &mut a, w, w, h, avg, max,
+                        );
                         let fx = &SUBPEL_FILTERS[filter][sx];
                         let fy = &SUBPEL_FILTERS[filter][sy];
                         // SAFETY: the window was checked to lie inside the plane.
-                        unsafe { predict_block_interior(&refp, bx, by, fx, fy, sx != 0, sy != 0, &mut b, w, w, h, max, avg) };
+                        unsafe {
+                            predict_block_interior(
+                                &refp,
+                                bx,
+                                by,
+                                fx,
+                                fy,
+                                sx != 0,
+                                sy != 0,
+                                &mut b,
+                                w,
+                                w,
+                                h,
+                                max,
+                                avg,
+                            )
+                        };
                         bad += (a != b) as u32;
                     }
                 }
@@ -491,16 +527,16 @@ pub fn selftest() -> u32 {
             let stride = 40usize;
             let rough = 1 + rnd() % (if round % 3 == 0 { 3 } else { 40 });
             let base = rnd() % (max / 2) + (max / 4);
-            let data: Vec<u16> = (0..stride * 40)
-                .map(|_| (base + rnd() % rough).min(max) as u16)
-                .collect();
+            let data: Vec<u16> = (0..stride * 40).map(|_| (base + rnd() % rough).min(max) as u16).collect();
             let lvl = 1 + (rnd() % 63) as i32;
             let shift = bd - 8;
             let lim = (1 + (lvl >> 2).min(8)) << shift;
             let blimit = (2 * (lvl + 2) + lim) << shift >> shift;
             let hev = (lvl >> 4) << shift;
             for &width in &[4usize, 8, 16] {
-                for &(pos, lane, i) in &[(1usize, stride, 12 + 10 * stride), (stride, 1usize, 8 + 14 * stride)] {
+                for &(pos, lane, i) in
+                    &[(1usize, stride, 12 + 10 * stride), (stride, 1usize, 8 + 14 * stride)]
+                {
                     let mut a = data.clone();
                     let mut b = data.clone();
                     crate::loopfilter::filter_edge8_scalar(&mut a, i, pos, lane, width, lim, blimit, hev, bd);

@@ -15,7 +15,7 @@ mod transform;
 
 pub use frame::{Frame, Plane};
 
-use crate::ps::{Pps, Sps};
+use crate::ps::Sps;
 use crate::stream::{Backend, HevcStream, Picture};
 use crate::{Error, Result};
 use alloc::boxed::Box;
@@ -107,13 +107,6 @@ pub(crate) fn format_of(sps: &Sps) -> PixelFormat {
     if sps.bit_depth_luma > 8 { PixelFormat::Yuv420p10 } else { PixelFormat::Yuv420p8 }
 }
 
-pub(crate) fn unsupported<T>(what: &'static str) -> Result<T> {
-    Err(Error::Unsupported(what))
-}
-
 pub(crate) fn invalid<T>(what: &'static str) -> Result<T> {
     Err(Error::Invalid(what))
 }
-
-#[allow(dead_code)]
-fn _keep(_: &Pps) {}

@@ -7,6 +7,7 @@ use crate::include::common::bitdepth::LeftPixelRow2px;
 use crate::include::common::intops::apply_sign;
 use crate::include::common::intops::iclip;
 use crate::include::dav1d::picture::Rav1dPictureDataComponentOffset;
+use crate::libc::ptrdiff_t;
 use crate::src::align::AlignedVec64;
 use crate::src::cpu::CpuFlags;
 use crate::src::disjoint_mut::DisjointMut;
@@ -17,16 +18,12 @@ use crate::src::tables::dav1d_cdef_directions;
 use crate::src::with_offset::WithOffset;
 use crate::src::wrap_fn_ptr::wrap_fn_ptr;
 use bitflags::bitflags;
-use crate::libc::ptrdiff_t;
 use std::cmp;
 use std::ffi::c_int;
 use std::ffi::c_uint;
 use std::ptr;
 
-#[cfg(all(
-    feature = "asm",
-    not(any(target_arch = "riscv64", target_arch = "riscv32"))
-))]
+#[cfg(all(feature = "asm", not(any(target_arch = "riscv64", target_arch = "riscv32"))))]
 use crate::include::common::bitdepth::bd_fn;
 
 #[cfg(all(feature = "asm", any(target_arch = "x86", target_arch = "x86_64")))]
@@ -149,10 +146,7 @@ pub struct Rav1dCdefDSPContext {
 #[inline]
 pub fn constrain(diff: c_int, threshold: c_int, shift: c_int) -> c_int {
     let adiff = diff.abs();
-    apply_sign(
-        cmp::min(adiff, cmp::max(0, threshold - (adiff >> shift))),
-        diff,
-    )
+    apply_sign(cmp::min(adiff, cmp::max(0, threshold - (adiff >> shift))), diff)
 }
 
 const TMP_STRIDE: usize = 12;
@@ -316,8 +310,7 @@ fn cdef_filter_block_rust<BD: BitDepth, const W: usize, const H: usize>(
                         min = cmp::min(s3 as c_uint, min as c_uint) as c_int;
                         max = cmp::max(s3, max);
                     }
-                    dst[x] = iclip(px + (sum - (sum < 0) as c_int + 8 >> 4), min, max)
-                        .as_::<BD::Pixel>();
+                    dst[x] = iclip(px + (sum - (sum < 0) as c_int + 8 >> 4), min, max).as_::<BD::Pixel>();
                 }
             }
         } else {
@@ -586,18 +579,7 @@ mod neon {
             let bd = bd.into_c();
             // SAFETY: asm should be safe.
             unsafe {
-                self.get()(
-                    dst,
-                    dst_stride,
-                    tmp,
-                    pri_strength,
-                    sec_strength,
-                    dir,
-                    damping,
-                    h,
-                    edges,
-                    bd,
-                )
+                self.get()(dst, dst_stride, tmp, pri_strength, sec_strength, dir, damping, h, edges, bd)
             }
         }
 

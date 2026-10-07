@@ -35,8 +35,7 @@ fn write_loop_filter(w: &mut BitWriter, h: &FrameHeader) {
     w.put(h.loop_filter_sharpness, 3);
     w.put_bit(h.lf_delta_enabled as u32);
     if h.lf_delta_enabled {
-        let any =
-            h.lf_ref_delta_updated.iter().any(|&x| x) || h.lf_mode_delta_updated.iter().any(|&x| x);
+        let any = h.lf_ref_delta_updated.iter().any(|&x| x) || h.lf_mode_delta_updated.iter().any(|&x| x);
         w.put_bit(any as u32); // mode_ref_delta_update
         if any {
             for i in 0..4 {
@@ -275,10 +274,7 @@ mod tests {
     fn keyframe_headers_roundtrip() {
         let mut s = 0x1122_3344_5566_7788u64;
         for _ in 0..400 {
-            let mut h = key_frame(
-                1 + (xs(&mut s) % 4096) as u32,
-                1 + (xs(&mut s) % 4096) as u32,
-            );
+            let mut h = key_frame(1 + (xs(&mut s) % 4096) as u32, 1 + (xs(&mut s) % 4096) as u32);
             h.color_space = (xs(&mut s) % 7) as u32; // 0..6 (not RGB)
             h.error_resilient = xs(&mut s) & 1 == 0;
             if !h.error_resilient {
@@ -294,10 +290,8 @@ mod tests {
             h.delta_q_y_dc = (xs(&mut s) % 31) as i32 - 15;
             h.delta_q_uv_dc = (xs(&mut s) % 31) as i32 - 15;
             h.delta_q_uv_ac = (xs(&mut s) % 31) as i32 - 15;
-            h.lossless = h.base_q_idx == 0
-                && h.delta_q_y_dc == 0
-                && h.delta_q_uv_dc == 0
-                && h.delta_q_uv_ac == 0;
+            h.lossless =
+                h.base_q_idx == 0 && h.delta_q_y_dc == 0 && h.delta_q_uv_dc == 0 && h.delta_q_uv_ac == 0;
             h.tile_rows_log2 = (xs(&mut s) % 3) as u32;
             h.header_size = 1 + (xs(&mut s) % 60000) as u32;
             roundtrip(&h);

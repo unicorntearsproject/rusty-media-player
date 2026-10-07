@@ -51,10 +51,7 @@ use std::cmp;
 use std::num::NonZeroUsize;
 use std::slice;
 
-#[cfg(all(
-    feature = "asm",
-    not(any(target_arch = "riscv64", target_arch = "riscv32"))
-))]
+#[cfg(all(feature = "asm", not(any(target_arch = "riscv64", target_arch = "riscv32"))))]
 use crate::include::common::bitdepth::bd_fn;
 
 #[cfg(all(feature = "asm", any(target_arch = "x86", target_arch = "x86_64")))]
@@ -151,12 +148,7 @@ fn inv_txfm_add<BD: BitDepth>(
     }
 
     for x in 0..w {
-        second_1d_fn(
-            &mut tmp[x..],
-            w.try_into().unwrap(),
-            col_clip_min,
-            col_clip_max,
-        );
+        second_1d_fn(&mut tmp[x..], w.try_into().unwrap(), col_clip_min, col_clip_max);
     }
 
     for y in 0..h {
@@ -251,18 +243,7 @@ fn inv_txfm_add_rust<const W: usize, const H: usize, const TYPE: TxfmType, BD: B
     let first_1d_fn = resolve_1d_fn(first, W);
     let second_1d_fn = resolve_1d_fn(second, H);
 
-    inv_txfm_add(
-        dst,
-        coeff,
-        eob,
-        W,
-        H,
-        shift,
-        first_1d_fn,
-        second_1d_fn,
-        has_dc_only,
-        bd,
-    )
+    inv_txfm_add(dst, coeff, eob, W, H, shift, first_1d_fn, second_1d_fn, has_dc_only, bd)
 }
 
 /// # Safety
@@ -358,10 +339,7 @@ fn inv_txfm_add_wht_wht_4x4_rust<BD: BitDepth>(
     }
 }
 
-#[cfg(all(
-    feature = "asm",
-    not(any(target_arch = "riscv64", target_arch = "riscv32"))
-))]
+#[cfg(all(feature = "asm", not(any(target_arch = "riscv64", target_arch = "riscv32"))))]
 macro_rules! assign_itx_fn {
     ($c:ident, $BD:ty, $w:literal, $h:literal, $type:ident, $type_enum:ident, $ext:ident) => {{
         use paste::paste;
@@ -481,8 +459,7 @@ impl Rav1dInvTxfmDSPContext {
 
         macro_rules! assign {
             ($type:expr) => {{
-                self.itxfm_add[tx][$type as usize] =
-                    itxfm::Fn::new(inv_txfm_add_c_erased::<W, H, $type, BD>);
+                self.itxfm_add[tx][$type as usize] = itxfm::Fn::new(inv_txfm_add_c_erased::<W, H, $type, BD>);
             }};
         }
 
@@ -526,9 +503,7 @@ impl Rav1dInvTxfmDSPContext {
     }
 
     pub const fn default<BD: BitDepth>() -> Self {
-        let mut c = Self {
-            itxfm_add: [[itxfm::Fn::DEFAULT; N_TX_TYPES_PLUS_LL]; TxfmSize::COUNT],
-        };
+        let mut c = Self { itxfm_add: [[itxfm::Fn::DEFAULT; N_TX_TYPES_PLUS_LL]; TxfmSize::COUNT] };
 
         c = c.assign::<4, 4, BD>();
         c = c.assign::<4, 8, BD>();

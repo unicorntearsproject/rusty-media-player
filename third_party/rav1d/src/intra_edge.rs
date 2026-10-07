@@ -18,20 +18,13 @@ bitflags! {
 }
 
 impl EdgeFlags {
-    pub const ALL_LEFT_HAS_BOTTOM: Self = Self::union_all([
-        Self::I444_LEFT_HAS_BOTTOM,
-        Self::I422_LEFT_HAS_BOTTOM,
-        Self::I420_LEFT_HAS_BOTTOM,
-    ]);
+    pub const ALL_LEFT_HAS_BOTTOM: Self =
+        Self::union_all([Self::I444_LEFT_HAS_BOTTOM, Self::I422_LEFT_HAS_BOTTOM, Self::I420_LEFT_HAS_BOTTOM]);
 
-    pub const ALL_TOP_HAS_RIGHT: Self = Self::union_all([
-        Self::I444_TOP_HAS_RIGHT,
-        Self::I422_TOP_HAS_RIGHT,
-        Self::I420_TOP_HAS_RIGHT,
-    ]);
+    pub const ALL_TOP_HAS_RIGHT: Self =
+        Self::union_all([Self::I444_TOP_HAS_RIGHT, Self::I422_TOP_HAS_RIGHT, Self::I420_TOP_HAS_RIGHT]);
 
-    pub const ALL_TR_AND_BL: Self =
-        Self::union_all([Self::ALL_LEFT_HAS_BOTTOM, Self::ALL_TOP_HAS_RIGHT]);
+    pub const ALL_TR_AND_BL: Self = Self::union_all([Self::ALL_LEFT_HAS_BOTTOM, Self::ALL_TOP_HAS_RIGHT]);
 
     pub const fn union_all<const N: usize>(flags: [Self; N]) -> Self {
         let mut i = 0;
@@ -78,10 +71,7 @@ pub struct EdgeIndex {
 
 impl EdgeIndex {
     pub const fn root() -> Self {
-        Self {
-            index: 0,
-            kind: EdgeKind::Branch,
-        }
+        Self { index: 0, kind: EdgeKind::Branch }
     }
 
     #[must_use]
@@ -134,9 +124,7 @@ impl EdgeTip {
         let node = EdgeNode { o, h, v };
 
         let split = [
-            edge_flags
-                .intersection(EdgeFlags::ALL_TOP_HAS_RIGHT)
-                .union(EdgeFlags::I422_LEFT_HAS_BOTTOM),
+            edge_flags.intersection(EdgeFlags::ALL_TOP_HAS_RIGHT).union(EdgeFlags::I422_LEFT_HAS_BOTTOM),
             edge_flags.union(EdgeFlags::I444_TOP_HAS_RIGHT),
             edge_flags.intersection(EdgeFlags::union_all([
                 EdgeFlags::I420_TOP_HAS_RIGHT,
@@ -177,12 +165,7 @@ impl EdgeBranch {
 
         let split = [EdgeIndex::root(); 4];
 
-        Self {
-            node,
-            h4,
-            v4,
-            split,
-        }
+        Self { node, h4, v4, split }
     }
 }
 
@@ -216,9 +199,7 @@ const fn level_index(mut level: u8) -> u8 {
     index as u8
 }
 
-impl<const SB128: bool, const N_BRANCH: usize, const N_TIP: usize>
-    IntraEdge<SB128, N_BRANCH, N_TIP>
-{
+impl<const SB128: bool, const N_BRANCH: usize, const N_TIP: usize> IntraEdge<SB128, N_BRANCH, N_TIP> {
     #[must_use]
     const fn init_mode_node(
         mut self,
@@ -272,14 +253,8 @@ impl<const SB128: bool, const N_BRANCH: usize, const N_TIP: usize>
 
     const fn init(mut self) -> Self {
         let mut indices = EdgeIndices {
-            branch: [EdgeIndex {
-                index: 0,
-                kind: EdgeKind::Branch,
-            }; 3],
-            tip: EdgeIndex {
-                index: 0,
-                kind: EdgeKind::Tip,
-            },
+            branch: [EdgeIndex { index: 0, kind: EdgeKind::Branch }; 3],
+            tip: EdgeIndex { index: 0, kind: EdgeKind::Tip },
         };
 
         let sb128 = SB128 as u8;
@@ -290,11 +265,7 @@ impl<const SB128: bool, const N_BRANCH: usize, const N_TIP: usize>
             bl += 1;
         }
 
-        let bl = if SB128 {
-            BlockLevel::Bl128x128
-        } else {
-            BlockLevel::Bl64x64
-        };
+        let bl = if SB128 { BlockLevel::Bl128x128 } else { BlockLevel::Bl64x64 };
         (self, indices) = self.init_mode_node(EdgeIndex::root(), bl, indices, true, false);
 
         let mut bl = BlockLevel::Bl128x128 as u8;
@@ -331,12 +302,9 @@ impl<const SB128: bool, const N_BRANCH: usize, const N_TIP: usize>
     }
 
     const fn new() -> Self {
-        Self {
-            branch: [EdgeBranch::DEFAULT; N_BRANCH],
-            tip: [EdgeTip::DEFAULT; N_TIP],
-        }
-        .init()
-        .check_indices()
+        Self { branch: [EdgeBranch::DEFAULT; N_BRANCH], tip: [EdgeTip::DEFAULT; N_TIP] }
+            .init()
+            .check_indices()
     }
 
     fn edge<E, const N: usize>(edges: &[E; N], edge: EdgeIndex, kind: EdgeKind) -> &E {
@@ -375,10 +343,7 @@ pub struct IntraEdges {
 impl IntraEdges {
     #[inline(always)]
     const fn new() -> Self {
-        Self {
-            sb128: IntraEdge::new(),
-            sb64: IntraEdge::new(),
-        }
+        Self { sb128: IntraEdge::new(), sb64: IntraEdge::new() }
     }
 
     pub fn branch(&self, sb128: bool, branch: EdgeIndex) -> &EdgeBranch {

@@ -16,13 +16,7 @@ use std::ptr::NonNull;
 impl From<CArc<[u8]>> for Rav1dData {
     fn from(data: CArc<[u8]>) -> Self {
         let size = data.len();
-        Self {
-            data: Some(data),
-            m: Rav1dDataProps {
-                size,
-                ..Default::default()
-            },
-        }
+        Self { data: Some(data), m: Rav1dDataProps { size, ..Default::default() } }
     }
 }
 

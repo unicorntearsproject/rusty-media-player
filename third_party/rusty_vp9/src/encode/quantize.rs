@@ -58,9 +58,7 @@ pub fn quantize(
         };
     }
 
-    quantize_scan_loop(
-        coeffs, scan, dc_step, ac_step, ac_round, dq_shift, ac_thresh, levels, dqcoeff,
-    )
+    quantize_scan_loop(coeffs, scan, dc_step, ac_step, ac_round, dq_shift, ac_thresh, levels, dqcoeff)
 }
 
 /// The scan-order reference loop (early-out on the AC threshold) — the oracle
@@ -158,8 +156,7 @@ unsafe fn quantize_masked_avx2(
     // its own round-to-nearest offset.
     let dc = coeffs[0] as i64;
     if dc != 0 {
-        let level =
-            (((dc.unsigned_abs() << dq_shift) as i64 + dc_step as i64 / 2) / dc_step as i64) as i32;
+        let level = (((dc.unsigned_abs() << dq_shift) as i64 + dc_step as i64 / 2) / dc_step as i64) as i32;
         if level != 0 {
             let mag = ((level as i64 * dc_step as i64) >> dq_shift) as i32;
             levels[0] = if dc < 0 { -level } else { level };
@@ -244,8 +241,7 @@ mod tests {
                 let ac = ac_quant(qindex, 8);
                 for &round_div in &[2i64, 3] {
                     let ac_round = ac as i64 / round_div; // nearest + deadzone
-                    let ac_thresh =
-                        ((ac as i64 - ac_round + ((1i64 << dq_shift) - 1)) >> dq_shift).max(0);
+                    let ac_thresh = ((ac as i64 - ac_round + ((1i64 << dq_shift) - 1)) >> dq_shift).max(0);
                     for density in [1u64, 4, 16] {
                         let coeffs: Vec<i32> = (0..n * n)
                             .map(|_| {
@@ -265,8 +261,7 @@ mod tests {
                         );
                         let e2 = unsafe {
                             quantize_masked_avx2(
-                                &coeffs, scan, dc, ac, ac_round, dq_shift, ac_thresh, &mut l2,
-                                &mut d2,
+                                &coeffs, scan, dc, ac, ac_round, dq_shift, ac_thresh, &mut l2, &mut d2,
                             )
                         };
                         assert_eq!(e1, e2, "eob {n}x{n} q{qindex} rd{round_div}");
@@ -306,9 +301,7 @@ mod tests {
                 let step = ac.max(dc);
                 let mut max_err = 0i32;
                 for _ in 0..40 {
-                    let residual: Vec<i32> = (0..n * n)
-                        .map(|_| (xs(&mut s) % 321) as i32 - 160)
-                        .collect();
+                    let residual: Vec<i32> = (0..n * n).map(|_| (xs(&mut s) % 321) as i32 - 160).collect();
                     let mut coeffs = vec![0i32; n * n];
                     crate::encode::forward_transform(&residual, n, tx, &mut coeffs);
                     let mut levels = vec![0i32; n * n];
@@ -328,8 +321,7 @@ mod tests {
                     for (idx, &p) in scan.iter().enumerate() {
                         let pos = p as usize;
                         let st = if idx == 0 { dc } else { ac };
-                        let mag =
-                            ((levels[pos].unsigned_abs() as i64 * st as i64) >> dq_shift) as i32;
+                        let mag = ((levels[pos].unsigned_abs() as i64 * st as i64) >> dq_shift) as i32;
                         let want = if levels[pos] < 0 { -mag } else { mag };
                         assert_eq!(dqcoeff[pos], want, "dequant identity {n}x{n} pos {pos}");
                         if idx >= eob {
@@ -345,10 +337,7 @@ mod tests {
                     }
                 }
                 // The pixel error is bounded by the step; comfortably so.
-                assert!(
-                    max_err <= step,
-                    "{n}x{n} {tx:?} q{qindex}: max pixel err {max_err} > step {step}"
-                );
+                assert!(max_err <= step, "{n}x{n} {tx:?} q{qindex}: max pixel err {max_err} > step {step}");
             }
         }
     }

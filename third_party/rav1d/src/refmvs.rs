@@ -218,12 +218,8 @@ impl load_tmvs::Fn {
             n_tile_threads,
             n_frame_threads,
         } = *rf;
-        fn mvs_to_dav1d(
-            mvs: &Option<DisjointMutArcSlice<RefMvsTemporalBlock>>,
-        ) -> *mut RefMvsTemporalBlock {
-            mvs.as_ref()
-                .map(|rp| rp.inner.as_mut_ptr())
-                .unwrap_or_else(ptr::null_mut)
+        fn mvs_to_dav1d(mvs: &Option<DisjointMutArcSlice<RefMvsTemporalBlock>>) -> *mut RefMvsTemporalBlock {
+            mvs.as_ref().map(|rp| rp.inner.as_mut_ptr()).unwrap_or_else(ptr::null_mut)
         }
         let rp_ref_dav1d = rp_ref.each_ref().map(mvs_to_dav1d);
         let rf_dav1d = AsmRefMvsFrame {
@@ -258,18 +254,7 @@ impl load_tmvs::Fn {
         // SAFETY: Assembly call. Arguments are safe Rust references converted to
         // pointers for use in assembly. For the Rust fallback function the extra args
         // `rp_proj` and `rp_ref` are passed to allow for disjointedness checking.
-        unsafe {
-            self.get()(
-                rf,
-                tile_row_idx,
-                col_start8,
-                col_end8,
-                row_start8,
-                row_end8,
-                rp_proj,
-                rp_ref,
-            )
-        };
+        unsafe { self.get()(rf, tile_row_idx, col_start8, col_end8, row_start8, row_end8, rp_proj, rp_ref) };
     }
 }
 
@@ -348,9 +333,7 @@ impl save_tmvs::Fn {
         // SAFETY: Assembly call. Arguments are safe Rust references converted to
         // pointers for use in assembly.
         unsafe {
-            self.get()(
-                rp_ptr, stride, rr, ref_sign, col_end8, row_end8, col_start8, row_start8, r, ri, rp,
-            )
+            self.get()(rp_ptr, stride, rr, ref_sign, col_end8, row_end8, col_start8, row_start8, r, ri, rp)
         };
     }
 }
@@ -465,11 +448,7 @@ fn add_spatial_candidate(
     if r#ref.r#ref[1] == -1 {
         for n in 0..2 {
             if b.r#ref.r#ref[n] == r#ref.r#ref[0] {
-                let cand_mv = if mf_odd && gmv[0] != Mv::INVALID {
-                    gmv[0]
-                } else {
-                    b.mv.mv[n]
-                };
+                let cand_mv = if mf_odd && gmv[0] != Mv::INVALID { gmv[0] } else { b.mv.mv[n] };
 
                 *have_refmv_match = 1;
                 *have_newmv_match |= b.mf as i32 >> 1;
@@ -494,16 +473,8 @@ fn add_spatial_candidate(
     } else if b.r#ref == r#ref {
         let cand_mv = RefMvsMvPair {
             mv: [
-                if mf_odd && gmv[0] != Mv::INVALID {
-                    gmv[0]
-                } else {
-                    b.mv.mv[0]
-                },
-                if mf_odd && gmv[1] != Mv::INVALID {
-                    gmv[1]
-                } else {
-                    b.mv.mv[1]
-                },
+                if mf_odd && gmv[0] != Mv::INVALID { gmv[0] } else { b.mv.mv[0] },
+                if mf_odd && gmv[1] != Mv::INVALID { gmv[1] } else { b.mv.mv[1] },
             ],
         };
 
@@ -552,11 +523,8 @@ fn scan_row(
         // position of the first block has to be odd already, i.e. not just
         // for row_offset=-3/-5
         // FIXME why can this not be cand_bw4?
-        let weight = if bw4 == 1 {
-            2
-        } else {
-            cmp::max(2, cmp::min(2 * max_rows, first_cand_b_dim[1] as i32))
-        };
+        let weight =
+            if bw4 == 1 { 2 } else { cmp::max(2, cmp::min(2 * max_rows, first_cand_b_dim[1] as i32)) };
         add_spatial_candidate(
             mvstack,
             cnt,
@@ -575,16 +543,7 @@ fn scan_row(
         // FIXME if we overhang above, we could fill a bitmask so we don't have
         // to repeat the add_spatial_candidate() for the next row, but just increase
         // the weight here
-        add_spatial_candidate(
-            mvstack,
-            cnt,
-            len * 2,
-            cand_b,
-            r#ref,
-            gmv,
-            have_newmv_match,
-            have_refmv_match,
-        );
+        add_spatial_candidate(mvstack, cnt, len * 2, cand_b, r#ref, gmv, have_newmv_match, have_refmv_match);
         x += len;
         if x >= w4 {
             return 1;
@@ -622,11 +581,8 @@ fn scan_col(
         // position of the first block has to be odd already, i.e. not just
         // for col_offset=-3/-5
         // FIXME why can this not be cand_bh4?
-        let weight = if bh4 == 1 {
-            2
-        } else {
-            cmp::max(2, cmp::min(2 * max_cols, first_cand_b_dim[0] as i32))
-        };
+        let weight =
+            if bh4 == 1 { 2 } else { cmp::max(2, cmp::min(2 * max_cols, first_cand_b_dim[0] as i32)) };
         add_spatial_candidate(
             mvstack,
             cnt,
@@ -645,16 +601,7 @@ fn scan_col(
         // FIXME if we overhang above, we could fill a bitmask so we don't have
         // to repeat the add_spatial_candidate() for the next row, but just increase
         // the weight here
-        add_spatial_candidate(
-            mvstack,
-            cnt,
-            len * 2,
-            cand_b,
-            r#ref,
-            gmv,
-            have_newmv_match,
-            have_refmv_match,
-        );
+        add_spatial_candidate(mvstack, cnt, len * 2, cand_b, r#ref, gmv, have_newmv_match, have_refmv_match);
         y += len;
         if y >= h4 {
             return 1;
@@ -669,8 +616,8 @@ fn scan_col(
 #[inline]
 fn mv_projection(mv: Mv, num: i32, den: i32) -> Mv {
     static div_mult: [u16; 32] = [
-        0, 16384, 8192, 5461, 4096, 3276, 2730, 2340, 2048, 1820, 1638, 1489, 1365, 1260, 1170,
-        1092, 1024, 963, 910, 862, 819, 780, 744, 712, 682, 655, 630, 606, 585, 564, 546, 528,
+        0, 16384, 8192, 5461, 4096, 3276, 2730, 2340, 2048, 1820, 1638, 1489, 1365, 1260, 1170, 1092, 1024,
+        963, 910, 862, 819, 780, 744, 712, 682, 655, 630, 606, 585, 564, 546, 528,
     ];
     assert!(den > 0 && den < 32);
     assert!(num > -32 && num < 32);
@@ -698,11 +645,7 @@ fn add_temporal_candidate(
         return;
     }
 
-    let mut mv = mv_projection(
-        rb.mv,
-        rf.pocdiff[r#ref.r#ref[0] as usize - 1] as i32,
-        rb.r#ref as i32,
-    );
+    let mut mv = mv_projection(rb.mv, rf.pocdiff[r#ref.r#ref[0] as usize - 1] as i32, rb.r#ref as i32);
     fix_mv_precision(frame_hdr, &mut mv);
 
     let last = *cnt;
@@ -725,14 +668,7 @@ fn add_temporal_candidate(
         }
     } else {
         let mut mvp = RefMvsMvPair {
-            mv: [
-                mv,
-                mv_projection(
-                    rb.mv,
-                    rf.pocdiff[r#ref.r#ref[1] as usize - 1] as i32,
-                    rb.r#ref as i32,
-                ),
-            ],
+            mv: [mv, mv_projection(rb.mv, rf.pocdiff[r#ref.r#ref[1] as usize - 1] as i32, rb.r#ref as i32)],
         };
         fix_mv_precision(frame_hdr, &mut mvp.mv[1]);
 
@@ -800,20 +736,12 @@ fn add_compound_extended_candidate(
             let i_cand_mv = -cand_mv;
 
             if diff_count[0] < 2 {
-                diff[diff_count[0]].mv.mv[0] = if (sign0 ^ sign_bias) != 0 {
-                    i_cand_mv
-                } else {
-                    cand_mv
-                };
+                diff[diff_count[0]].mv.mv[0] = if (sign0 ^ sign_bias) != 0 { i_cand_mv } else { cand_mv };
                 diff_count[0] += 1;
             }
 
             if diff_count[1] < 2 {
-                diff[diff_count[1]].mv.mv[1] = if (sign1 ^ sign_bias) != 0 {
-                    i_cand_mv
-                } else {
-                    cand_mv
-                };
+                diff[diff_count[1]].mv.mv[1] = if (sign1 ^ sign_bias) != 0 { i_cand_mv } else { cand_mv };
                 diff_count[1] += 1;
             }
         }
@@ -898,22 +826,11 @@ pub(crate) fn rav1d_refmvs_find(
     let mut tgmv = [Mv::default(); 2];
 
     *cnt = 0;
-    assert!(
-        r#ref.r#ref[0] >= 0 && r#ref.r#ref[0] <= 8 && r#ref.r#ref[1] >= -1 && r#ref.r#ref[1] <= 8
-    );
+    assert!(r#ref.r#ref[0] >= 0 && r#ref.r#ref[0] <= 8 && r#ref.r#ref[1] >= -1 && r#ref.r#ref[1] <= 8);
     if r#ref.r#ref[0] > 0 {
-        tgmv[0] = get_gmv_2d(
-            &frame_hdr.gmv[r#ref.r#ref[0] as usize - 1],
-            bx4,
-            by4,
-            bw4,
-            bh4,
-            frame_hdr,
-        );
+        tgmv[0] = get_gmv_2d(&frame_hdr.gmv[r#ref.r#ref[0] as usize - 1], bx4, by4, bw4, bh4, frame_hdr);
 
-        gmv[0] = if frame_hdr.gmv[r#ref.r#ref[0] as usize - 1].r#type
-            > Rav1dWarpedMotionType::Translation
-        {
+        gmv[0] = if frame_hdr.gmv[r#ref.r#ref[0] as usize - 1].r#type > Rav1dWarpedMotionType::Translation {
             tgmv[0]
         } else {
             Mv::INVALID
@@ -923,17 +840,8 @@ pub(crate) fn rav1d_refmvs_find(
         gmv[0] = Mv::INVALID;
     }
     if r#ref.r#ref[1] > 0 {
-        tgmv[1] = get_gmv_2d(
-            &frame_hdr.gmv[r#ref.r#ref[1] as usize - 1],
-            bx4,
-            by4,
-            bw4,
-            bh4,
-            frame_hdr,
-        );
-        gmv[1] = if frame_hdr.gmv[r#ref.r#ref[1] as usize - 1].r#type
-            > Rav1dWarpedMotionType::Translation
-        {
+        tgmv[1] = get_gmv_2d(&frame_hdr.gmv[r#ref.r#ref[1] as usize - 1], bx4, by4, bw4, bh4, frame_hdr);
+        gmv[1] = if frame_hdr.gmv[r#ref.r#ref[1] as usize - 1].r#type > Rav1dWarpedMotionType::Translation {
             tgmv[1]
         } else {
             Mv::INVALID
@@ -1049,11 +957,7 @@ pub(crate) fn rav1d_refmvs_find(
                     cnt,
                     *rf.rp_proj.index(rbi + y * stride + x),
                     r#ref,
-                    if x | y == 0 {
-                        Some((&mut globalmv_ctx, &tgmv))
-                    } else {
-                        None
-                    },
+                    if x | y == 0 { Some((&mut globalmv_ctx, &tgmv)) } else { None },
                     frame_hdr,
                 );
             }
@@ -1333,11 +1237,7 @@ pub(crate) fn rav1d_refmvs_tile_sbrow_init(
     let rp_stride = rf.rp_stride as usize;
     let r_stride = rp_stride * 2;
     let rp_proj = 16 * rp_stride * tile_row_idx as usize;
-    let pass_off = if rf.n_frame_threads > 1 && pass == 2 {
-        35 * 2 * rf.n_blocks as usize
-    } else {
-        0
-    };
+    let pass_off = if rf.n_frame_threads > 1 && pass == 2 { 35 * 2 * rf.n_blocks as usize } else { 0 };
     let mut r = 35 * r_stride * tile_row_idx as usize + pass_off;
     let sbsz = rf.sbsz;
     let off = sbsz * sby & 16;
@@ -1365,14 +1265,8 @@ pub(crate) fn rav1d_refmvs_tile_sbrow_init(
     RefmvsTile {
         r: rr,
         rp_proj,
-        tile_col: RefmvsTileRange {
-            start: tile_col_start4,
-            end: cmp::min(tile_col_end4, rf.iw4),
-        },
-        tile_row: RefmvsTileRange {
-            start: tile_row_start4,
-            end: cmp::min(tile_row_end4, rf.ih4),
-        },
+        tile_col: RefmvsTileRange { start: tile_col_start4, end: cmp::min(tile_col_end4, rf.iw4) },
+        tile_row: RefmvsTileRange { start: tile_row_start4, end: cmp::min(tile_row_end4, rf.ih4) },
     }
 }
 
@@ -1394,16 +1288,7 @@ unsafe extern "C" fn load_tmvs_c(
     let rp_proj = unsafe { FFISafe::get(rp_proj) };
     // SAFETY: Was passed as `FFISafe::new(_)` in `load_tmvs::Fn::call`.
     let rp_ref = unsafe { FFISafe::get(rp_ref) };
-    load_tmvs_rust(
-        rf,
-        tile_row_idx,
-        col_start8,
-        col_end8,
-        row_start8,
-        row_end8,
-        rp_proj,
-        rp_ref,
-    )
+    load_tmvs_rust(rf, tile_row_idx, col_start8, col_end8, row_start8, row_end8, rp_proj, rp_ref)
 }
 
 fn load_tmvs_rust(
@@ -1428,9 +1313,7 @@ fn load_tmvs_rust(
     let rp_proj_offset = 16 * stride * tile_row_idx as usize;
     for y in row_start8..row_end8 {
         let offset = rp_proj_offset + (y & 15) as usize * stride;
-        for rp_proj in
-            &mut *rp_proj.index_mut(offset + col_start8 as usize..offset + col_end8 as usize)
-        {
+        for rp_proj in &mut *rp_proj.index_mut(offset + col_start8 as usize..offset + col_end8 as usize) {
             rp_proj.mv = Mv::INVALID;
         }
     }
@@ -1460,10 +1343,8 @@ fn load_tmvs_rust(
                     continue;
                 }
                 let offset = mv_projection(rb.mv, ref2cur, ref2ref);
-                let mut pos_x =
-                    x + apply_sign((offset.x as i32).abs() >> 6, offset.x as i32 ^ ref_sign);
-                let pos_y =
-                    y + apply_sign((offset.y as i32).abs() >> 6, offset.y as i32 ^ ref_sign);
+                let mut pos_x = x + apply_sign((offset.x as i32).abs() >> 6, offset.x as i32 ^ ref_sign);
+                let pos_y = y + apply_sign((offset.y as i32).abs() >> 6, offset.y as i32 ^ ref_sign);
                 if pos_y >= y_proj_start && pos_y < y_proj_end {
                     let pos = (pos_y & 15) as usize * stride;
                     loop {
@@ -1471,12 +1352,8 @@ fn load_tmvs_rust(
                         if pos_x >= cmp::max(x_sb_align - 8, col_start8)
                             && pos_x < cmp::min(x_sb_align + 16, col_end8)
                         {
-                            *rp_proj.index_mut(
-                                rp_proj_offset + (pos as isize + pos_x as isize) as usize,
-                            ) = RefMvsTemporalBlock {
-                                mv: rb.mv,
-                                r#ref: ref2ref as i8,
-                            };
+                            *rp_proj.index_mut(rp_proj_offset + (pos as isize + pos_x as isize) as usize) =
+                                RefMvsTemporalBlock { mv: rb.mv, r#ref: ref2ref as i8 };
                         }
                         x += 1;
                         if x >= col_end8i {
@@ -1534,9 +1411,7 @@ unsafe extern "C" fn save_tmvs_c(
     // SAFETY: Was passed as `FFISafe::new(_)` in `save_tmvs::Fn::call`.
     let rp = unsafe { FFISafe::get(rp) };
     let rp = &*rp.inner;
-    save_tmvs_rust(
-        stride, ref_sign, col_end8, row_end8, col_start8, row_start8, r, ri, rp,
-    )
+    save_tmvs_rust(stride, ref_sign, col_end8, row_end8, col_start8, row_start8, r, ri, rp)
 }
 
 fn save_tmvs_rust(
@@ -1559,8 +1434,7 @@ fn save_tmvs_rust(
             let block = |i: usize| {
                 let mv = cand_b.mv.mv[i];
                 let r#ref = cand_b.r#ref.r#ref[i];
-                if r#ref > 0 && ref_sign[r#ref as usize - 1] != 0 && mv.y.abs() | mv.x.abs() < 4096
-                {
+                if r#ref > 0 && ref_sign[r#ref as usize - 1] != 0 && mv.y.abs() | mv.x.abs() < 4096 {
                     Some(RefMvsTemporalBlock { mv, r#ref })
                 } else {
                     None
@@ -1585,11 +1459,7 @@ pub(crate) fn rav1d_refmvs_init_frame(
     n_frame_threads: u32,
 ) -> Rav1dResult {
     let rp_stride = ((frm_hdr.size.width[0] + 127 & !127) >> 3) as u32;
-    let n_tile_rows = if n_tile_threads > 1 {
-        frm_hdr.tiling.rows as u32
-    } else {
-        1
-    };
+    let n_tile_rows = if n_tile_threads > 1 { frm_hdr.tiling.rows as u32 } else { 1 };
     let n_blocks = rp_stride * n_tile_rows;
 
     rf.sbsz = 16 << seq_hdr.sb128;
@@ -1618,11 +1488,8 @@ pub(crate) fn rav1d_refmvs_init_frame(
         let poc_diff = get_poc_diff(seq_hdr.order_hint_n_bits, ref_poc[i] as i32, poc as i32);
         rf.sign_bias[i] = (poc_diff > 0) as u8;
         rf.mfmv_sign[i] = (poc_diff < 0) as u8;
-        rf.pocdiff[i] = iclip(
-            get_poc_diff(seq_hdr.order_hint_n_bits, poc as i32, ref_poc[i] as i32),
-            -31,
-            31,
-        ) as i8;
+        rf.pocdiff[i] =
+            iclip(get_poc_diff(seq_hdr.order_hint_n_bits, poc as i32, ref_poc[i] as i32), -31, 31) as i8;
     }
 
     // temporal MV setup
@@ -1635,32 +1502,20 @@ pub(crate) fn rav1d_refmvs_init_frame(
             total = 3;
         }
         if rp_ref[4].is_some()
-            && get_poc_diff(
-                seq_hdr.order_hint_n_bits,
-                ref_poc[4] as i32,
-                frm_hdr.frame_offset as i32,
-            ) > 0
+            && get_poc_diff(seq_hdr.order_hint_n_bits, ref_poc[4] as i32, frm_hdr.frame_offset as i32) > 0
         {
             rf.mfmv_ref[rf.n_mfmvs as usize] = 4; // bwd
             rf.n_mfmvs += 1;
         }
         if rp_ref[5].is_some()
-            && get_poc_diff(
-                seq_hdr.order_hint_n_bits,
-                ref_poc[5] as i32,
-                frm_hdr.frame_offset as i32,
-            ) > 0
+            && get_poc_diff(seq_hdr.order_hint_n_bits, ref_poc[5] as i32, frm_hdr.frame_offset as i32) > 0
         {
             rf.mfmv_ref[rf.n_mfmvs as usize] = 5; // altref2
             rf.n_mfmvs += 1;
         }
         if rf.n_mfmvs < total
             && rp_ref[6].is_some()
-            && get_poc_diff(
-                seq_hdr.order_hint_n_bits,
-                ref_poc[6] as i32,
-                frm_hdr.frame_offset as i32,
-            ) > 0
+            && get_poc_diff(seq_hdr.order_hint_n_bits, ref_poc[6] as i32, frm_hdr.frame_offset as i32) > 0
         {
             rf.mfmv_ref[rf.n_mfmvs as usize] = 6; // altref
             rf.n_mfmvs += 1;
@@ -1672,11 +1527,7 @@ pub(crate) fn rav1d_refmvs_init_frame(
 
         for n in 0..rf.n_mfmvs as usize {
             let rpoc = ref_poc[rf.mfmv_ref[n] as usize];
-            let diff1 = get_poc_diff(
-                seq_hdr.order_hint_n_bits,
-                rpoc as i32,
-                frm_hdr.frame_offset as i32,
-            );
+            let diff1 = get_poc_diff(seq_hdr.order_hint_n_bits, rpoc as i32, frm_hdr.frame_offset as i32);
             if diff1.abs() > 31 {
                 rf.mfmv_ref2cur[n] = i32::MIN;
             } else {

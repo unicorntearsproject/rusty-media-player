@@ -9,9 +9,7 @@ use windows::Storage::Streams::RandomAccessStreamReference;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::WinRT::ISystemMediaTransportControlsInterop;
 
-use crate::{
-    MediaControlEvent, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection,
-};
+use crate::{MediaControlEvent, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection};
 
 /// A handle to OS media controls.
 pub struct MediaControls {
@@ -50,25 +48,15 @@ impl From<WindowsError> for Error {
 impl MediaControls {
     /// Create media controls with the specified config.
     pub fn new(config: PlatformConfig) -> Result<Self, Error> {
-        let interop: ISystemMediaTransportControlsInterop = windows::core::factory::<
-            SystemMediaTransportControls,
-            ISystemMediaTransportControlsInterop,
-        >()?;
-        let hwnd = config
-            .hwnd
-            .expect("Windows media controls require an HWND in MediaControlsOptions.");
+        let interop: ISystemMediaTransportControlsInterop =
+            windows::core::factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()?;
+        let hwnd = config.hwnd.expect("Windows media controls require an HWND in MediaControlsOptions.");
 
-        let controls: SystemMediaTransportControls =
-            unsafe { interop.GetForWindow(HWND(hwnd as isize)) }?;
+        let controls: SystemMediaTransportControls = unsafe { interop.GetForWindow(HWND(hwnd as isize)) }?;
         let display_updater = controls.DisplayUpdater()?;
         let timeline_properties = SystemMediaTransportControlsTimelineProperties::new()?;
 
-        Ok(Self {
-            controls,
-            display_updater,
-            timeline_properties,
-            button_handler_token: None,
-        })
+        Ok(Self { controls, display_updater, timeline_properties, button_handler_token: None })
     }
 
     /// Attach the media control events to a handler.
@@ -94,8 +82,7 @@ impl MediaControls {
             let event_handler = event_handler.clone();
 
             move |_, args: &Option<_>| {
-                let args: &SystemMediaTransportControlsButtonPressedEventArgs =
-                    args.as_ref().unwrap();
+                let args: &SystemMediaTransportControlsButtonPressedEventArgs = args.as_ref().unwrap();
                 let button = args.Button()?;
 
                 let event = if button == SystemMediaTransportControlsButton::Play {
@@ -128,14 +115,11 @@ impl MediaControls {
                 let args: &PlaybackPositionChangeRequestedEventArgs = args.as_ref().unwrap();
                 let position = Duration::from(args.RequestedPlaybackPosition()?);
 
-                (event_handler.lock().unwrap())(MediaControlEvent::SetPosition(MediaPosition(
-                    position,
-                )));
+                (event_handler.lock().unwrap())(MediaControlEvent::SetPosition(MediaPosition(position)));
                 Ok(())
             }
         });
-        self.controls
-            .PlaybackPositionChangeRequested(&position_handler)?;
+        self.controls.PlaybackPositionChangeRequested(&position_handler)?;
 
         Ok(())
     }
@@ -156,22 +140,16 @@ impl MediaControls {
             MediaPlayback::Paused { .. } => SmtcPlayback::Paused as i32,
             MediaPlayback::Stopped => SmtcPlayback::Stopped as i32,
         };
-        self.controls
-            .SetPlaybackStatus(MediaPlaybackStatus(status))?;
+        self.controls.SetPlaybackStatus(MediaPlaybackStatus(status))?;
 
         let progress = match playback {
-            MediaPlayback::Playing {
-                progress: Some(progress),
-            }
-            | MediaPlayback::Paused {
-                progress: Some(progress),
-            } => TimeSpan::from(progress.0),
+            MediaPlayback::Playing { progress: Some(progress) }
+            | MediaPlayback::Paused { progress: Some(progress) } => TimeSpan::from(progress.0),
             _ => TimeSpan::default(),
         };
         self.timeline_properties.SetPosition(progress)?;
 
-        self.controls
-            .UpdateTimelineProperties(&self.timeline_properties)?;
+        self.controls.UpdateTimelineProperties(&self.timeline_properties)?;
         Ok(())
     }
 
@@ -192,8 +170,7 @@ impl MediaControls {
             let stream = if url.starts_with("file://") {
                 // url is a file, load it manually
                 let path = url.trim_start_matches("file://");
-                let loader =
-                    windows::Storage::StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?;
+                let loader = windows::Storage::StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?;
                 let results = loader.get()?;
                 loader.Close()?;
 
@@ -205,15 +182,11 @@ impl MediaControls {
         }
         let duration = metadata.duration.unwrap_or_default();
         self.timeline_properties.SetStartTime(TimeSpan::default())?;
-        self.timeline_properties
-            .SetMinSeekTime(TimeSpan::default())?;
-        self.timeline_properties
-            .SetEndTime(TimeSpan::from(duration))?;
-        self.timeline_properties
-            .SetMaxSeekTime(TimeSpan::from(duration))?;
+        self.timeline_properties.SetMinSeekTime(TimeSpan::default())?;
+        self.timeline_properties.SetEndTime(TimeSpan::from(duration))?;
+        self.timeline_properties.SetMaxSeekTime(TimeSpan::from(duration))?;
 
-        self.controls
-            .UpdateTimelineProperties(&self.timeline_properties)?;
+        self.controls.UpdateTimelineProperties(&self.timeline_properties)?;
         self.display_updater.Update()?;
         Ok(())
     }

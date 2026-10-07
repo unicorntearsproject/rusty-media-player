@@ -364,10 +364,7 @@ pub struct Mv {
 impl Mv {
     pub const ZERO: Self = Self { y: 0, x: 0 };
 
-    pub const INVALID: Self = Self {
-        y: i16::MIN,
-        x: i16::MIN,
-    };
+    pub const INVALID: Self = Self { y: i16::MIN, x: i16::MIN };
 
     pub fn is_invalid(self) -> bool {
         self == Self::INVALID
@@ -383,10 +380,7 @@ impl Neg for Mv {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Self {
-            y: -self.y,
-            x: -self.x,
-        }
+        Self { y: -self.y, x: -self.x }
     }
 }
 
@@ -493,10 +487,8 @@ pub struct Av1BlockInterNd {
 impl Av1BlockInterNd {
     pub fn two_d(&self) -> &Av1BlockInter2d {
         // These asserts ensure this is a no-op.
-        const _: () =
-            assert!(mem::size_of::<Av1BlockInter1d>() == mem::size_of::<Av1BlockInter2d>());
-        const _: () =
-            assert!(mem::align_of::<Av1BlockInter1d>() == mem::align_of::<Av1BlockInter2d>());
+        const _: () = assert!(mem::size_of::<Av1BlockInter1d>() == mem::size_of::<Av1BlockInter2d>());
+        const _: () = assert!(mem::align_of::<Av1BlockInter1d>() == mem::align_of::<Av1BlockInter2d>());
         FromBytes::ref_from(AsBytes::as_bytes(&self.one_d)).unwrap()
     }
 }
@@ -509,9 +501,7 @@ impl From<Av1BlockInter1d> for Av1BlockInterNd {
 
 impl From<Av1BlockInter2d> for Av1BlockInterNd {
     fn from(two_d: Av1BlockInter2d) -> Self {
-        let one_d = <Av1BlockInter1d as FromBytes>::ref_from(AsBytes::as_bytes(&two_d))
-            .unwrap()
-            .clone(); // Cheap 12-byte clone.
+        let one_d = <Av1BlockInter1d as FromBytes>::ref_from(AsBytes::as_bytes(&two_d)).unwrap().clone(); // Cheap 12-byte clone.
         Self { one_d }
     }
 }
@@ -565,9 +555,7 @@ impl SegmentId {
     pub const COUNT: usize = 8;
 
     pub fn new(id: u8) -> Option<Self> {
-        Some(Self {
-            id: InRange::new(id)?,
-        })
+        Some(Self { id: InRange::new(id)? })
     }
 
     pub fn get(&self) -> usize {

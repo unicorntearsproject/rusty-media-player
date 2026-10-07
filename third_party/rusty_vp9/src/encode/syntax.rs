@@ -39,12 +39,7 @@ pub fn write_intra_mode(enc: &mut BoolEncoder, mode: u8, probs: &[u8; 9]) {
 
 /// Inverse of [`read_selected_tx_size`](crate::block::read_selected_tx_size):
 /// the variable-depth TX-size tree (1..3 bits depending on `max_tx_size`).
-pub fn write_selected_tx_size(
-    enc: &mut BoolEncoder,
-    tx_size: u8,
-    tx_probs: &[u8],
-    max_tx_size: usize,
-) {
+pub fn write_selected_tx_size(enc: &mut BoolEncoder, tx_size: u8, tx_probs: &[u8], max_tx_size: usize) {
     let t = tx_size as usize;
     enc.write_bool((t >= 1) as u32, tx_probs[0]);
     if t >= 1 && max_tx_size >= 2 {
@@ -106,10 +101,7 @@ mod tests {
         write_partition(&mut enc, PARTITION_SPLIT, &probs, false, false);
         let bytes = enc.finish();
         let mut bd = BoolDecoder::new(&bytes).unwrap();
-        assert_eq!(
-            read_partition(&mut bd, &probs, false, false),
-            PARTITION_SPLIT
-        );
+        assert_eq!(read_partition(&mut bd, &probs, false, false), PARTITION_SPLIT);
     }
 
     #[test]

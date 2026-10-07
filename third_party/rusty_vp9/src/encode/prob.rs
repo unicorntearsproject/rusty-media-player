@@ -167,9 +167,8 @@ mod tests {
     #[test]
     fn diff_update_roundtrips_through_decoder() {
         let mut s = 0xabcd_1234_5678_9999u64;
-        let cases: Vec<(u8, u8)> = (0..4000)
-            .map(|_| ((1 + xs(&mut s) % 255) as u8, (1 + xs(&mut s) % 255) as u8))
-            .collect();
+        let cases: Vec<(u8, u8)> =
+            (0..4000).map(|_| ((1 + xs(&mut s) % 255) as u8, (1 + xs(&mut s) % 255) as u8)).collect();
         let mut enc = BoolEncoder::new();
         for &(old, new) in &cases {
             diff_update_encode(&mut enc, old, new);

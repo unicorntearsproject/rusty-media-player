@@ -16,13 +16,7 @@ pub struct GetBits<'a> {
 impl<'a> GetBits<'a> {
     pub const fn new(data: &'a [u8]) -> Self {
         assert!(!data.is_empty());
-        Self {
-            state: 0,
-            bits_left: 0,
-            error: 0,
-            index: 0,
-            data,
-        }
+        Self { state: 0, bits_left: 0, error: 0, index: 0, data }
     }
 
     pub const fn has_error(&self) -> c_int {

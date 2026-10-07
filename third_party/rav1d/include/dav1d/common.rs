@@ -52,50 +52,20 @@ pub(crate) struct Rav1dDataProps {
 
 impl Default for Rav1dDataProps {
     fn default() -> Self {
-        Self {
-            timestamp: i64::MIN,
-            duration: 0,
-            offset: -1,
-            size: 0,
-            user_data: Default::default(),
-        }
+        Self { timestamp: i64::MIN, duration: 0, offset: -1, size: 0, user_data: Default::default() }
     }
 }
 
 impl From<Dav1dDataProps> for Rav1dDataProps {
     fn from(value: Dav1dDataProps) -> Self {
-        let Dav1dDataProps {
-            timestamp,
-            duration,
-            offset,
-            size,
-            user_data,
-        } = value;
-        Self {
-            timestamp,
-            duration,
-            offset,
-            size,
-            user_data: user_data.into(),
-        }
+        let Dav1dDataProps { timestamp, duration, offset, size, user_data } = value;
+        Self { timestamp, duration, offset, size, user_data: user_data.into() }
     }
 }
 
 impl From<Rav1dDataProps> for Dav1dDataProps {
     fn from(value: Rav1dDataProps) -> Self {
-        let Rav1dDataProps {
-            timestamp,
-            duration,
-            offset,
-            size,
-            user_data,
-        } = value;
-        Self {
-            timestamp,
-            duration,
-            offset,
-            size,
-            user_data: user_data.into(),
-        }
+        let Rav1dDataProps { timestamp, duration, offset, size, user_data } = value;
+        Self { timestamp, duration, offset, size, user_data: user_data.into() }
     }
 }

@@ -11,9 +11,8 @@
 const MODE_MV_COUNT_SAT: u32 = 20;
 
 /// `count_to_update_factor[MODE_MV_COUNT_SAT + 1]` = 128 * count / 20.
-const COUNT_TO_UPDATE_FACTOR: [u32; 21] = [
-    0, 6, 12, 19, 25, 32, 38, 44, 51, 57, 64, 70, 76, 83, 89, 96, 102, 108, 115, 121, 128,
-];
+const COUNT_TO_UPDATE_FACTOR: [u32; 21] =
+    [0, 6, 12, 19, 25, 32, 38, 44, 51, 57, 64, 70, 76, 83, 89, 96, 102, 108, 115, 121, 128];
 
 #[inline]
 fn round_pow2(v: u32, n: u32) -> u32 {
@@ -74,17 +73,9 @@ pub fn mode_mv_merge_probs(pre: u8, ct: [u32; 2]) -> u8 {
 pub fn tree_merge_probs(tree: &[i8], pre: &[u8], counts: &[u32], probs: &mut [u8]) {
     fn rec(i: usize, tree: &[i8], pre: &[u8], counts: &[u32], probs: &mut [u8]) -> u32 {
         let l = tree[i];
-        let left = if l <= 0 {
-            counts[(-l) as usize]
-        } else {
-            rec(l as usize, tree, pre, counts, probs)
-        };
+        let left = if l <= 0 { counts[(-l) as usize] } else { rec(l as usize, tree, pre, counts, probs) };
         let r = tree[i + 1];
-        let right = if r <= 0 {
-            counts[(-r) as usize]
-        } else {
-            rec(r as usize, tree, pre, counts, probs)
-        };
+        let right = if r <= 0 { counts[(-r) as usize] } else { rec(r as usize, tree, pre, counts, probs) };
         probs[i >> 1] = mode_mv_merge_probs(pre[i >> 1], [left, right]);
         left + right
     }

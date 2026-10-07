@@ -37,10 +37,7 @@ use std::ptr;
 use std::slice;
 use to_method::To;
 
-#[cfg(all(
-    feature = "asm",
-    not(any(target_arch = "riscv64", target_arch = "riscv32"))
-))]
+#[cfg(all(feature = "asm", not(any(target_arch = "riscv64", target_arch = "riscv32"))))]
 use crate::include::common::bitdepth::bd_fn;
 
 #[cfg(all(feature = "asm", any(target_arch = "x86", target_arch = "x86_64")))]
@@ -140,11 +137,7 @@ fn filter_8tap<BD: BitDepth>(
 
 fn get_filter(m: usize, d: usize, filter_type: Rav1dFilterMode) -> Option<&'static [i8; 8]> {
     let m = m.checked_sub(1)?;
-    let i = if d > 4 {
-        filter_type as u8
-    } else {
-        3 + (filter_type as u8 & 1)
-    };
+    let i = if d > 4 { filter_type as u8 } else { 3 + (filter_type as u8 & 1) };
     Some(&dav1d_mc_subpel_filters[i as usize][m])
 }
 
@@ -163,7 +156,9 @@ impl<const N: usize> MidRows<N> {
     fn new() -> Self {
         Self {
             // SAFETY: an array of `MaybeUninit` is valid uninitialised.
-            rows: unsafe { mem::MaybeUninit::<[[mem::MaybeUninit<i16>; MID_STRIDE]; N]>::uninit().assume_init() },
+            rows: unsafe {
+                mem::MaybeUninit::<[[mem::MaybeUninit<i16>; MID_STRIDE]; N]>::uninit().assume_init()
+            },
         }
     }
 
@@ -263,8 +258,11 @@ fn pix_rows<'a, BD: BitDepth>(
     src: Rav1dPictureDataComponentOffset<'a>,
     y: usize,
     w: usize,
-) -> [crate::src::disjoint_mut::DisjointImmutGuard<'a, crate::include::dav1d::picture::Rav1dPictureDataComponentInner, [BD::Pixel]>; 8]
-{
+) -> [crate::src::disjoint_mut::DisjointImmutGuard<
+    'a,
+    crate::include::dav1d::picture::Rav1dPictureDataComponentInner,
+    [BD::Pixel],
+>; 8] {
     let stride = src.pixel_stride::<BD>();
     std::array::from_fn(|k| (src + (y as isize + k as isize - 3) * stride).slice::<BD>(w))
 }
@@ -354,9 +352,7 @@ fn put_8tap_scaled_rust<BD: BitDepth>(
         for x in 0..w {
             let fh = get_filter(imx >> 6, w, h_filter_type);
             mid[y][x] = match fh {
-                Some(fh) => filter_8tap::<BD>(src, ioff, fh, 1)
-                    .rnd(6 - intermediate_bits)
-                    .get(),
+                Some(fh) => filter_8tap::<BD>(src, ioff, fh, 1).rnd(6 - intermediate_bits).get(),
                 None => (*(src + ioff).index::<BD>()).as_::<i16>() << intermediate_bits,
             };
             imx += dx;
@@ -372,12 +368,8 @@ fn put_8tap_scaled_rust<BD: BitDepth>(
         let dst = &mut *dst.slice_mut::<BD>(w);
         for x in 0..w {
             dst[x] = match fv {
-                Some(fv) => filter_8tap_mid(mid, x, fv)
-                    .rnd(6 + intermediate_bits)
-                    .clip(bd),
-                None => {
-                    bd.iclip_pixel((i32::from(mid[3][x]) + intermediate_rnd) >> intermediate_bits)
-                }
+                Some(fv) => filter_8tap_mid(mid, x, fv).rnd(6 + intermediate_bits).clip(bd),
+                None => bd.iclip_pixel((i32::from(mid[3][x]) + intermediate_rnd) >> intermediate_bits),
             };
         }
 
@@ -465,9 +457,7 @@ fn prep_8tap_scaled_rust<BD: BitDepth>(
         for x in 0..w {
             let fh = get_filter(imx >> 6, w, h_filter_type);
             mid[y][x] = match fh {
-                Some(fh) => filter_8tap::<BD>(src, ioff, fh, 1)
-                    .rnd(6 - intermediate_bits)
-                    .get(),
+                Some(fh) => filter_8tap::<BD>(src, ioff, fh, 1).rnd(6 - intermediate_bits).get(),
                 None => (*(src + ioff).index::<BD>()).as_::<i16>() << intermediate_bits,
             };
             imx += dx;
@@ -483,9 +473,7 @@ fn prep_8tap_scaled_rust<BD: BitDepth>(
         for x in 0..w {
             tmp[x] = match fv {
                 Some(fv) => filter_8tap_mid(mid, x, fv).rnd(6),
-                None => FilterResult {
-                    pixel: mid[3][x].into(),
-                },
+                None => FilterResult { pixel: mid[3][x].into() },
             }
             .sub_prep_bias::<BD>()
         }
@@ -535,18 +523,14 @@ fn put_bilin_rust<BD: BitDepth>(
             for y in 0..tmp_h {
                 let src = src + y as isize * src.pixel_stride::<BD>();
                 for x in 0..w {
-                    mid[y][x] = filter_bilin::<BD>(src, x, mx, 1)
-                        .rnd(4 - intermediate_bits)
-                        .get();
+                    mid[y][x] = filter_bilin::<BD>(src, x, mx, 1).rnd(4 - intermediate_bits).get();
                 }
             }
             for y in 0..h {
                 let dst = dst + y as isize * dst.pixel_stride::<BD>();
                 let dst = &mut *dst.slice_mut::<BD>(w);
                 for x in 0..w {
-                    dst[x] = filter_bilin_mid(&mid[y..], x, my)
-                        .rnd(4 + intermediate_bits)
-                        .clip(bd)
+                    dst[x] = filter_bilin_mid(&mid[y..], x, my).rnd(4 + intermediate_bits).clip(bd)
                 }
             }
         } else {
@@ -568,9 +552,7 @@ fn put_bilin_rust<BD: BitDepth>(
             let dst = dst + y as isize * dst.pixel_stride::<BD>();
             let dst = &mut *dst.slice_mut::<BD>(w);
             for x in 0..w {
-                dst[x] = filter_bilin::<BD>(src, x, my, src.pixel_stride::<BD>())
-                    .rnd(4)
-                    .clip(bd)
+                dst[x] = filter_bilin::<BD>(src, x, my, src.pixel_stride::<BD>()).rnd(4).clip(bd)
             }
         }
     } else {
@@ -599,9 +581,7 @@ fn put_bilin_scaled_rust<BD: BitDepth>(
         let mut ioff = 0;
 
         for x in 0..w {
-            mid[y][x] = filter_bilin::<BD>(src, ioff, imx >> 6, 1)
-                .rnd(4 - intermediate_bits)
-                .get();
+            mid[y][x] = filter_bilin::<BD>(src, ioff, imx >> 6, 1).rnd(4 - intermediate_bits).get();
             imx += dx;
             ioff += imx >> 10;
             imx &= 0x3ff;
@@ -612,9 +592,7 @@ fn put_bilin_scaled_rust<BD: BitDepth>(
         let dst = dst + y as isize * dst.pixel_stride::<BD>();
         let dst = &mut *dst.slice_mut::<BD>(w);
         for x in 0..w {
-            dst[x] = filter_bilin_mid(mid, x, my >> 6)
-                .rnd(4 + intermediate_bits)
-                .clip(bd)
+            dst[x] = filter_bilin_mid(mid, x, my >> 6).rnd(4 + intermediate_bits).clip(bd)
         }
 
         my += dy;
@@ -641,17 +619,13 @@ fn prep_bilin_rust<BD: BitDepth>(
             for y in 0..tmp_h {
                 let src = src + y as isize * src.pixel_stride::<BD>();
                 for x in 0..w {
-                    mid[y][x] = filter_bilin::<BD>(src, x, mx, 1)
-                        .rnd(4 - intermediate_bits)
-                        .get();
+                    mid[y][x] = filter_bilin::<BD>(src, x, mx, 1).rnd(4 - intermediate_bits).get();
                 }
             }
             for y in 0..h {
                 let tmp = &mut tmp[y * w..][..w];
                 for x in 0..w {
-                    tmp[x] = filter_bilin_mid(&mid[y..], x, my)
-                        .rnd(4)
-                        .sub_prep_bias::<BD>()
+                    tmp[x] = filter_bilin_mid(&mid[y..], x, my).rnd(4).sub_prep_bias::<BD>()
                 }
             }
         } else {
@@ -659,9 +633,8 @@ fn prep_bilin_rust<BD: BitDepth>(
                 let src = src + y as isize * src.pixel_stride::<BD>();
                 let tmp = &mut tmp[y * w..][..w];
                 for x in 0..w {
-                    tmp[x] = filter_bilin::<BD>(src, x, mx, 1)
-                        .rnd(4 - intermediate_bits)
-                        .sub_prep_bias::<BD>()
+                    tmp[x] =
+                        filter_bilin::<BD>(src, x, mx, 1).rnd(4 - intermediate_bits).sub_prep_bias::<BD>()
                 }
             }
         }
@@ -701,9 +674,7 @@ fn prep_bilin_scaled_rust<BD: BitDepth>(
         let mut ioff = 0;
 
         for x in 0..w {
-            mid[y][x] = filter_bilin::<BD>(src, ioff, imx >> 6, 1)
-                .rnd(4 - intermediate_bits)
-                .get();
+            mid[y][x] = filter_bilin::<BD>(src, ioff, imx >> 6, 1).rnd(4 - intermediate_bits).get();
             imx += dx;
             ioff += imx >> 10;
             imx &= 0x3ff;
@@ -713,9 +684,7 @@ fn prep_bilin_scaled_rust<BD: BitDepth>(
     for y in 0..h {
         let tmp = &mut tmp[y * w..][..w];
         for x in 0..w {
-            tmp[x] = filter_bilin_mid(mid, x, my >> 6)
-                .rnd(4)
-                .sub_prep_bias::<BD>()
+            tmp[x] = filter_bilin_mid(mid, x, my >> 6).rnd(4).sub_prep_bias::<BD>()
         }
 
         my += dy;
@@ -876,31 +845,21 @@ fn w_mask_rust<BD: BitDepth>(
     let rnd = (32 << intermediate_bits) + i32::from(BD::PREP_BIAS) * 64;
     let mask_sh = bitdepth + intermediate_bits - 4;
     let mask_rnd = 1 << (mask_sh - 5);
-    for (h, (tmp1, tmp2)) in iter::zip(tmp1.chunks_exact(w), tmp2.chunks_exact(w))
-        .take(h)
-        .enumerate()
-    {
+    for (h, (tmp1, tmp2)) in iter::zip(tmp1.chunks_exact(w), tmp2.chunks_exact(w)).take(h).enumerate() {
         let dst_slice = &mut *dst.slice_mut::<BD>(w);
         let mut x = 0;
         while x < w {
-            let m = cmp::min(
-                38 + (tmp1[x].abs_diff(tmp2[x]).saturating_add(mask_rnd) >> mask_sh),
-                64,
-            ) as u8;
-            dst_slice[x] = bd.iclip_pixel(
-                (tmp1[x] as i32 * m as i32 + tmp2[x] as i32 * (64 - m as i32) + rnd) >> sh,
-            );
+            let m = cmp::min(38 + (tmp1[x].abs_diff(tmp2[x]).saturating_add(mask_rnd) >> mask_sh), 64) as u8;
+            dst_slice[x] =
+                bd.iclip_pixel((tmp1[x] as i32 * m as i32 + tmp2[x] as i32 * (64 - m as i32) + rnd) >> sh);
 
             if ss_hor {
                 x += 1;
 
-                let n = cmp::min(
-                    38 + (tmp1[x].abs_diff(tmp2[x]).saturating_add(mask_rnd) >> mask_sh),
-                    64,
-                ) as u8;
-                dst_slice[x] = bd.iclip_pixel(
-                    (tmp1[x] as i32 * n as i32 + tmp2[x] as i32 * (64 - n as i32) + rnd) >> sh,
-                );
+                let n =
+                    cmp::min(38 + (tmp1[x].abs_diff(tmp2[x]).saturating_add(mask_rnd) >> mask_sh), 64) as u8;
+                dst_slice[x] = bd
+                    .iclip_pixel((tmp1[x] as i32 * n as i32 + tmp2[x] as i32 * (64 - n as i32) + rnd) >> sh);
 
                 mask[x >> 1] = if h & ss_ver as usize != 0 {
                     (((m + n + 2 - sign) as u16 + mask[x >> 1] as u16) >> 2) as u8
@@ -944,9 +903,7 @@ fn warp_affine_8x8_rust<BD: BitDepth>(
             let filter = &dav1d_mc_warp_filter[(64 + (tmx + 512 >> 10)) as usize];
             let n = filter.len();
             let src = &*(src + x - 3usize).slice::<BD>(n);
-            mid[y][x] = ((0..n)
-                .map(|i| filter[i] as i32 * src[i].as_::<i32>())
-                .sum::<i32>()
+            mid[y][x] = ((0..n).map(|i| filter[i] as i32 * src[i].as_::<i32>()).sum::<i32>()
                 + (1 << 7 - intermediate_bits >> 1)
                 >> 7 - intermediate_bits) as i16;
         }
@@ -962,9 +919,7 @@ fn warp_affine_8x8_rust<BD: BitDepth>(
             let n = filter.len();
             let mid = &mid[y..][..n];
             dst[x] = bd.iclip_pixel(
-                (0..n)
-                    .map(|i| filter[i] as i32 * mid[i][x] as i32)
-                    .sum::<i32>()
+                (0..n).map(|i| filter[i] as i32 * mid[i][x] as i32).sum::<i32>()
                     + (1 << 7 + intermediate_bits >> 1)
                     >> 7 + intermediate_bits,
             );
@@ -995,9 +950,7 @@ fn warp_affine_8x8t_rust<BD: BitDepth>(
             let filter = &dav1d_mc_warp_filter[(64 + (tmx + 512 >> 10)) as usize];
             let n = filter.len();
             let src = &*(src + x - 3usize).slice::<BD>(n);
-            mid[y][x] = ((0..n)
-                .map(|i| filter[i] as i32 * src[i].as_::<i32>())
-                .sum::<i32>()
+            mid[y][x] = ((0..n).map(|i| filter[i] as i32 * src[i].as_::<i32>()).sum::<i32>()
                 + (1 << 7 - intermediate_bits >> 1)
                 >> 7 - intermediate_bits) as i16;
         }
@@ -1012,11 +965,7 @@ fn warp_affine_8x8t_rust<BD: BitDepth>(
             let n = filter.len();
             let mid = &mid[y..][..n];
             tmp[x] = BD::sub_prep_bias(
-                (0..n)
-                    .map(|i| filter[i] as i32 * mid[i][x] as i32)
-                    .sum::<i32>()
-                    + (1 << 7 >> 1)
-                    >> 7,
+                (0..n).map(|i| filter[i] as i32 * mid[i][x] as i32).sum::<i32>() + (1 << 7 >> 1) >> 7,
             );
         }
     }
@@ -1037,8 +986,7 @@ fn emu_edge_rust<BD: BitDepth>(
     let ref_stride = r#ref.pixel_stride::<BD>();
 
     // find offset in reference of visible block to copy
-    let mut r#ref =
-        r#ref.with_offset::<BD>() + (clip(y, 0, ih - 1) * ref_stride + clip(x, 0, iw - 1));
+    let mut r#ref = r#ref.with_offset::<BD>() + (clip(y, 0, ih - 1) * ref_stride + clip(x, 0, iw - 1));
 
     // number of pixels to extend (left, right, top, bottom)
     let left_ext = clip(-x, 0, bw - 1) as usize;
@@ -1056,11 +1004,7 @@ fn emu_edge_rust<BD: BitDepth>(
     let center_w = bw - left_ext - right_ext;
     let center_h = bh - top_ext - bottom_ext;
     for _ in 0..center_h {
-        BD::pixel_copy(
-            &mut dst[blk + left_ext..][..center_w],
-            &r#ref.slice::<BD>(center_w),
-            center_w,
-        );
+        BD::pixel_copy(&mut dst[blk + left_ext..][..center_w], &r#ref.slice::<BD>(center_w), center_w);
         // extend left edge for this line
         if left_ext != 0 {
             let val = dst[blk + left_ext];
@@ -1118,9 +1062,7 @@ fn resize_rust<BD: BitDepth>(
             let f = &dav1d_resize_filter[(mx >> 8) as usize];
             dst[dst_x] = bd.iclip_pixel(
                 -(0..f.len())
-                    .map(|i| {
-                        f[i] as i32 * src[iclip(src_x + i as i32, 0, max) as usize].to::<i32>()
-                    })
+                    .map(|i| f[i] as i32 * src[iclip(src_x + i as i32, 0, max) as usize].to::<i32>())
                     .sum::<i32>()
                     + 64
                     >> 7,
@@ -1165,11 +1107,7 @@ impl mc::Fn {
         let dst = FFISafe::new(&dst);
         let src = FFISafe::new(&src);
         // SAFETY: Fallbacks `fn put_{8tpap,bilin}_rust` are safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                dst_ptr, dst_stride, src_ptr, src_stride, w, h, mx, my, bd, dst, src,
-            )
-        }
+        unsafe { self.get()(dst_ptr, dst_stride, src_ptr, src_stride, w, h, mx, my, bd, dst, src) }
     }
 }
 
@@ -1210,11 +1148,7 @@ impl mc_scaled::Fn {
         let dst = FFISafe::new(&dst);
         let src = FFISafe::new(&src);
         // SAFETY: Fallbacks `fn put_{8tpap,bilin}_scaled_rust` are safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                dst_ptr, dst_stride, src_ptr, src_stride, w, h, mx, my, dx, dy, bd, dst, src,
-            )
-        }
+        unsafe { self.get()(dst_ptr, dst_stride, src_ptr, src_stride, w, h, mx, my, dx, dy, bd, dst, src) }
     }
 }
 
@@ -1249,11 +1183,7 @@ impl warp8x8::Fn {
         let dst = FFISafe::new(&dst);
         let src = FFISafe::new(&src);
         // SAFETY: Fallback `fn prep_c_rust` is safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                dst_ptr, dst_stride, src_ptr, src_stride, abcd, mx, my, bd, dst, src,
-            )
-        }
+        unsafe { self.get()(dst_ptr, dst_stride, src_ptr, src_stride, abcd, mx, my, bd, dst, src) }
     }
 }
 
@@ -1358,11 +1288,7 @@ impl warp8x8t::Fn {
         let bd = bd.into_c();
         let src = FFISafe::new(&src);
         // SAFETY: Fallback `fn warp_affine_8x8t_rust` is safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                tmp, tmp_stride, src_ptr, src_stride, abcd, mx, my, bd, tmp_len, src,
-            )
-        }
+        unsafe { self.get()(tmp, tmp_stride, src_ptr, src_stride, abcd, mx, my, bd, tmp_len, src) }
     }
 }
 
@@ -1583,11 +1509,7 @@ impl emu_edge::Fn {
         let src_stride = src.stride();
         let src = FFISafe::new(src);
         // SAFETY: Fallback `fn emu_edge_rust` is safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                bw, bh, iw, ih, x, y, dst, dst_stride, src_ptr, src_stride, src,
-            )
-        }
+        unsafe { self.get()(bw, bh, iw, ih, x, y, dst, dst_stride, src_ptr, src_stride, src) }
     }
 }
 
@@ -1629,11 +1551,7 @@ impl resize::Fn {
         let src = FFISafe::new(&src);
         let dst = FFISafe::new(&dst);
         // SAFETY: Fallback `fn resize_rust` is safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                dst_ptr, dst_stride, src_ptr, src_stride, dst_w, h, src_w, dx, mx, bd, src, dst,
-            )
-        }
+        unsafe { self.get()(dst_ptr, dst_stride, src_ptr, src_stride, dst_w, h, src_w, dx, mx, bd, src, dst) }
     }
 }
 

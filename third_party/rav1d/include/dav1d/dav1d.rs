@@ -48,14 +48,12 @@ impl From<Dav1dInloopFilterType> for Rav1dInloopFilterType {
 }
 
 pub type Dav1dDecodeFrameType = c_uint;
-pub const DAV1D_DECODEFRAMETYPE_ALL: Dav1dDecodeFrameType =
-    Rav1dDecodeFrameType::All as Dav1dDecodeFrameType;
+pub const DAV1D_DECODEFRAMETYPE_ALL: Dav1dDecodeFrameType = Rav1dDecodeFrameType::All as Dav1dDecodeFrameType;
 pub const DAV1D_DECODEFRAMETYPE_REFERENCE: Dav1dDecodeFrameType =
     Rav1dDecodeFrameType::Reference as Dav1dDecodeFrameType;
 pub const DAV1D_DECODEFRAMETYPE_INTRA: Dav1dDecodeFrameType =
     Rav1dDecodeFrameType::Intra as Dav1dDecodeFrameType;
-pub const DAV1D_DECODEFRAMETYPE_KEY: Dav1dDecodeFrameType =
-    Rav1dDecodeFrameType::Key as Dav1dDecodeFrameType;
+pub const DAV1D_DECODEFRAMETYPE_KEY: Dav1dDecodeFrameType = Rav1dDecodeFrameType::Key as Dav1dDecodeFrameType;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Default)]
 pub(crate) enum Rav1dDecodeFrameType {

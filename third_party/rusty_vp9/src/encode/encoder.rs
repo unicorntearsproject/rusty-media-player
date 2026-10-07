@@ -245,8 +245,7 @@ fn temporal_filter(
                 for dx in 0..BS {
                     let (ax, ay) = (bx + dx, by + dy);
                     if ax < cw && ay < ch {
-                        out[0][ay * cw + ax] =
-                            (acc[dy * BS + dx] / wsum[dy * BS + dx]).round() as u16;
+                        out[0][ay * cw + ax] = (acc[dy * BS + dx] / wsum[dy * BS + dx]).round() as u16;
                     }
                 }
             }
@@ -285,11 +284,7 @@ pub struct EncodedPacket {
 /// encoder emits profile 0, where they sit at bits 3..2 of byte 0).
 fn packet(data: Vec<u8>) -> EncodedPacket {
     let keyframe = data.first().is_some_and(|&b| b & 0x0c == 0);
-    EncodedPacket {
-        data,
-        pts: None,
-        keyframe,
-    }
+    EncodedPacket { data, pts: None, keyframe }
 }
 
 /// Configuration for [`Vp9Encoder::configure`] — the native mirror of the
@@ -441,10 +436,7 @@ impl Default for Vp9Encoder {
                 .unwrap_or(8.0),
             // 0.5 = the ARF q-boost (measured -8.87% BD vs plain IPPP on 1080p
             // motion). 1.0 restores the old un-boosted, net-loss ARF.
-            arf_qscale: std::env::var("VP9_ARF_QSCALE")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0.5),
+            arf_qscale: std::env::var("VP9_ARF_QSCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5),
             dispatch_budget_us: std::env::var("VP9_DISPATCH_BUDGET")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
@@ -486,10 +478,7 @@ impl Vp9Encoder {
         // The per-frame budget needs a frame rate; honour `fps`, else assume 30.
         if let Some(bps) = cfg.bitrate_bps {
             let fps = cfg.fps.filter(|&f| f > 0.0).unwrap_or(30.0);
-            self.rc = Some(RateCtl {
-                target_per_frame: bps / fps,
-                q: self.qindex as f64,
-            });
+            self.rc = Some(RateCtl { target_per_frame: bps / fps, q: self.qindex as f64 });
         }
         // `lag` (aka lag-in-frames) turns on ALT-REF lookahead with a group size of
         // `N` (each group is coded key/P… + one hidden future ALT-REF shown last).
@@ -506,11 +495,7 @@ impl Vp9Encoder {
         // that caps encode time on complex content while easy content stays full-RD.
         // 0/absent = off. Overrides the `VP9_DISPATCH_BUDGET` env default.
         if let Some(ms) = cfg.dispatch_budget_ms {
-            self.dispatch_budget_us = if ms > 0.0 {
-                Some((ms * 1000.0) as u64)
-            } else {
-                None
-            };
+            self.dispatch_budget_us = if ms > 0.0 { Some((ms * 1000.0) as u64) } else { None };
         }
         // Two-pass: ffmpeg's `-pass 2` (`-pass 1` is a discardable analysis pass we
         // fold into pass 2 internally) or an explicit `twopass=1`. Needs a bitrate.
@@ -679,11 +664,7 @@ impl Vp9Encoder {
         let chaining = self.chain && ((self.lag == 0 && !self.twopass) || self.pass2_chaining);
         if chaining && !is_key {
             if let Some(c) = &self.companion {
-                let mvs = if self.chain_prev_p {
-                    c.prev_mvs.clone()
-                } else {
-                    None
-                };
+                let mvs = if self.chain_prev_p { c.prev_mvs.clone() } else { None };
                 enc.set_chain(c.frame_contexts[0].clone(), mvs);
             }
         }
@@ -700,13 +681,8 @@ impl Vp9Encoder {
         let bytes = enc.encode_frame();
         self.budget_update(&enc, is_key);
         if chaining {
-            let comp = self
-                .companion
-                .get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
-            let ok = comp
-                .push(&bytes, None)
-                .and_then(|_| comp.next_frame())
-                .is_ok();
+            let comp = self.companion.get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
+            let ok = comp.push(&bytes, None).and_then(|_| comp.next_frame()).is_ok();
             if ok {
                 self.chain_prev_p = !is_key;
             } else {
@@ -751,15 +727,10 @@ impl Vp9Encoder {
         match expect {
             Some(r) => self.recon_check(bytes, r, w, h),
             None => {
-                let dec = self
-                    .recon_check_dec
-                    .get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
+                let dec = self.recon_check_dec.get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
                 let _ = dec.push(bytes, None);
                 while dec.next_frame().is_ok() {}
-                eprintln!(
-                    "RECON_CHECK frame {}: hidden (fed, not compared)",
-                    self.recon_check_n
-                );
+                eprintln!("RECON_CHECK frame {}: hidden (fed, not compared)", self.recon_check_n);
                 self.recon_check_n += 1;
             }
         }
@@ -771,13 +742,8 @@ impl Vp9Encoder {
         // PERSISTENT across frames. A fresh decoder per frame holds no reference
         // buffers, so every inter frame decodes to garbage and the check reports a
         // 100% mismatch that says nothing about the encoder.
-        let dec = self
-            .recon_check_dec
-            .get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
-        let got = dec
-            .push(bytes, None)
-            .ok()
-            .and_then(|_| dec.next_frame().ok());
+        let dec = self.recon_check_dec.get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
+        let got = dec.push(bytes, None).ok().and_then(|_| dec.next_frame().ok());
         let Some(vf) = got else {
             eprintln!("RECON_CHECK frame {}: DECODE FAILED", self.recon_check_n);
             self.recon_check_n += 1;
@@ -797,10 +763,7 @@ impl Vp9Encoder {
             for y in 0..ph {
                 for x in 0..pw {
                     let e = recon[p].get(y * cw + x).copied().unwrap_or(0) as u8;
-                    let d = vf.planes[p]
-                        .get(y * vf.strides[p] + x)
-                        .copied()
-                        .unwrap_or(0);
+                    let d = vf.planes[p].get(y * vf.strides[p] + x).copied().unwrap_or(0);
                     if e != d {
                         bad += 1;
                         if first.is_none() {
@@ -826,19 +789,13 @@ impl Vp9Encoder {
                 for yy in 0..ph {
                     for xx in 0..pw {
                         let e = recon[0].get(yy * cw + xx).copied().unwrap_or(0) as u8;
-                        let dv = vf.planes[0]
-                            .get(yy * vf.strides[0] + xx)
-                            .copied()
-                            .unwrap_or(0);
+                        let dv = vf.planes[0].get(yy * vf.strides[0] + xx).copied().unwrap_or(0);
                         if e != dv {
                             map[(yy / 64) * sbx + xx / 64] += 1;
                         }
                     }
                 }
-                eprintln!(
-                    "  SB map ({}x{} superblocks, '.'=clean, #=count/410):",
-                    sbx, sby
-                );
+                eprintln!("  SB map ({}x{} superblocks, '.'=clean, #=count/410):", sbx, sby);
                 for r in 0..sby {
                     let row: String = (0..sbx)
                         .map(|c| match map[r * sbx + c] {
@@ -929,17 +886,10 @@ impl Vp9Encoder {
     /// Chain args for the next group frame from the persistent companion decoder.
     fn chain_args(
         &self,
-    ) -> Option<(
-        crate::decode::FrameContext,
-        Option<std::sync::Arc<Vec<crate::mv::MvRef>>>,
-    )> {
+    ) -> Option<(crate::decode::FrameContext, Option<std::sync::Arc<Vec<crate::mv::MvRef>>>)> {
         let c = self.companion.as_ref()?;
         let temporal_ok = !c.last_intra_only && c.last_show_frame && !c.last_frame_key;
-        let mvs = if temporal_ok {
-            c.prev_mvs.clone()
-        } else {
-            None
-        };
+        let mvs = if temporal_ok { c.prev_mvs.clone() } else { None };
         Some((c.frame_contexts[0].clone(), mvs))
     }
 
@@ -951,9 +901,7 @@ impl Vp9Encoder {
         if !self.group_chain {
             return;
         }
-        let comp = self
-            .companion
-            .get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
+        let comp = self.companion.get_or_insert_with(|| Box::new(crate::Vp9Decoder::default()));
         if comp.push(bytes, None).is_err() {
             self.group_chain = false;
             self.chain = false;
@@ -1024,8 +972,7 @@ impl Vp9Encoder {
         let (aw, ah) = (frames[n - 1].1, frames[n - 1].2);
         let carf = if self.tf_strength > 0.0 {
             let window = (n - 1).saturating_sub(4).max(i0);
-            let neighbors: Vec<&[Vec<u16>; 3]> =
-                frames[window..n - 1].iter().map(|f| &f.0).collect();
+            let neighbors: Vec<&[Vec<u16>; 3]> = frames[window..n - 1].iter().map(|f| &f.0).collect();
             let cw = (aw as usize).div_ceil(8) * 8;
             let ch = (ah as usize).div_ceil(8) * 8;
             temporal_filter(&frames[n - 1].0, &neighbors, cw, ch, self.tf_strength)
@@ -1130,13 +1077,7 @@ impl Vp9Encoder {
 
     /// Shown P frame: predicts from LAST(slot0)/GOLDEN(golden_slot)/ALTREF(arf_slot when
     /// `with_altref`), refreshes LAST(slot0). Returns the coded bytes.
-    fn code_p_slotted(
-        &mut self,
-        coded: [Vec<u16>; 3],
-        w: u32,
-        h: u32,
-        with_altref: bool,
-    ) -> Vec<u8> {
+    fn code_p_slotted(&mut self, coded: [Vec<u16>; 3], w: u32, h: u32, with_altref: bool) -> Vec<u8> {
         let q = self.next_qindex();
         let idx = [0, self.golden_slot, self.arf_slot];
         let mut enc = FrameEncoder::new(w, h, q, coded, self.slots[0].clone());

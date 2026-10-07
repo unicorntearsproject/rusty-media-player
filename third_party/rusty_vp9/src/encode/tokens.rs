@@ -15,8 +15,8 @@ use std::sync::OnceLock;
 
 use super::bitwriter::BoolEncoder;
 use crate::prob_tables::{
-    CAT1_PROB, CAT2_PROB, CAT3_PROB, CAT4_PROB, CAT5_PROB, CAT6_PROB, CAT6_PROB_HIGH10,
-    CAT6_PROB_HIGH12, PARETO8_FULL,
+    CAT1_PROB, CAT2_PROB, CAT3_PROB, CAT4_PROB, CAT5_PROB, CAT6_PROB, CAT6_PROB_HIGH10, CAT6_PROB_HIGH12,
+    PARETO8_FULL,
 };
 use crate::scan_tables::{COEFBAND_4X4, COEFBAND_8X8PLUS};
 use crate::token::get_coef_context;
@@ -76,9 +76,7 @@ pub(crate) fn cost_bit(prob: u8, bit: u32) -> u64 {
 pub(crate) fn tree_bit_cost(tree: &[i8], probs: &[u8], symbol: i32) -> u64 {
     let mut path: Vec<(usize, u32)> = Vec::new();
     super::bitwriter::find_tree_path(tree, 0, symbol, &mut path);
-    path.iter()
-        .map(|&(node, bit)| cost_bit(probs[node >> 1], bit))
-        .sum()
+    path.iter().map(|&(node, bit)| cost_bit(probs[node >> 1], bit)).sum()
 }
 
 /// Energy class of a magnitude — mirrors `code_magnitude`'s returns.
@@ -158,13 +156,7 @@ fn code_extra<S: BitSink>(sink: &mut S, value: u32, probs: &[u8], n: usize) {
 /// tree (inverse of `decode_coefs`'s token branch). `prob2` is the model pivot
 /// node, which also indexes the Pareto tail. Returns the energy class to store
 /// in the token cache (matching the decoder).
-fn code_magnitude<S: BitSink>(
-    sink: &mut S,
-    aval: u32,
-    prob2: u8,
-    cat6: &[u8],
-    cat6_bits: usize,
-) -> u8 {
+fn code_magnitude<S: BitSink>(sink: &mut S, aval: u32, prob2: u8, cat6: &[u8], cat6_bits: usize) -> u8 {
     if aval == 1 {
         sink.put(0, prob2); // ONE
         return 1;
@@ -238,11 +230,7 @@ fn code_block<S: BitSink, const COUNTS: bool>(
     bit_depth: u32,
 ) {
     let max_eob = 16usize << (tx_size << 1);
-    let band_translate: &[u8] = if tx_size == 0 {
-        &COEFBAND_4X4
-    } else {
-        &COEFBAND_8X8PLUS
-    };
+    let band_translate: &[u8] = if tx_size == 0 { &COEFBAND_4X4 } else { &COEFBAND_8X8PLUS };
     let (cat6, cat6_bits): (&[u8], usize) = match bit_depth {
         10 => (&CAT6_PROB_HIGH10, 16),
         12 => (&CAT6_PROB_HIGH12, 18),
@@ -395,11 +383,7 @@ impl<'a> RateTracker<'a> {
         pcost: &'a mut [u64],
         bctx: &'a mut [u8],
     ) -> Self {
-        let band: &[u8] = if tx_size == 0 {
-            &COEFBAND_4X4
-        } else {
-            &COEFBAND_8X8PLUS
-        };
+        let band: &[u8] = if tx_size == 0 { &COEFBAND_4X4 } else { &COEFBAND_8X8PLUS };
         let (cat6, cat6_bits): (&[u8], usize) = match bit_depth {
             10 => (&CAT6_PROB_HIGH10, 16),
             12 => (&CAT6_PROB_HIGH12, 18),
@@ -449,16 +433,8 @@ impl<'a> RateTracker<'a> {
         }
         let a = self.nb[2 * c] as usize;
         let b = self.nb[2 * c + 1] as usize;
-        let ca = if a == ovr_pos {
-            ovr_class
-        } else {
-            self.cache[a]
-        };
-        let cb = if b == ovr_pos {
-            ovr_class
-        } else {
-            self.cache[b]
-        };
+        let ca = if a == ovr_pos { ovr_class } else { self.cache[a] };
+        let cb = if b == ovr_pos { ovr_class } else { self.cache[b] };
         (1 + ca as usize + cb as usize) >> 1
     }
 
@@ -467,14 +443,7 @@ impl<'a> RateTracker<'a> {
     /// non-zero) plus this position's ZERO / (non-zero + magnitude + sign) tokens.
     /// Exactly mirrors `code_block`'s per-position emission.
     #[inline]
-    fn recost(
-        &self,
-        c: usize,
-        levels: &[i32],
-        eob: usize,
-        ovr_pos: usize,
-        ovr_class: u8,
-    ) -> (u64, u8) {
+    fn recost(&self, c: usize, levels: &[i32], eob: usize, ovr_pos: usize, ovr_class: u8) -> (u64, u8) {
         let band = self.band[c] as usize;
         let ctx = self.ctx_at(c, ovr_pos, ovr_class);
         let mut cost = 0u64;
@@ -493,12 +462,8 @@ impl<'a> RateTracker<'a> {
         } else {
             cost += cost_bit(self.probs[band][ctx][1], 1);
             let mut sink = CostSink(0);
-            let class = sink.put_magnitude(
-                lvl.unsigned_abs(),
-                self.probs[band][ctx][2],
-                self.cat6,
-                self.cat6_bits,
-            );
+            let class =
+                sink.put_magnitude(lvl.unsigned_abs(), self.probs[band][ctx][2], self.cat6, self.cat6_bits);
             cost += sink.0;
             cost += cost_bit(128, (lvl < 0) as u32);
             (cost, class)
@@ -611,9 +576,7 @@ impl<'a> RateTracker<'a> {
         self.p_costs[0] = (i, new_i);
         let mut pn = 1;
         for &d in &buf[..m] {
-            let nc = self
-                .recost(d, levels, ne, self.scan[i] as usize, new_class)
-                .0;
+            let nc = self.recost(d, levels, ne, self.scan[i] as usize, new_class).0;
             delta += nc as i64 - self.pcost[d] as i64;
             self.p_costs[pn] = (d, nc);
             pn += 1;
@@ -806,8 +769,8 @@ mod tests {
                 let mut cc_e = [[[0u32; 4]; 6]; 6];
                 let mut ec_e = [[0u32; 6]; 6];
                 encode_coefs(
-                    &mut enc, &levels, scan, nb, eob, coef_probs, tx_size, ctx0, &mut tc_e,
-                    &mut cc_e, &mut ec_e, 8,
+                    &mut enc, &levels, scan, nb, eob, coef_probs, tx_size, ctx0, &mut tc_e, &mut cc_e,
+                    &mut ec_e, 8,
                 );
                 let bytes = enc.finish();
 
@@ -859,12 +822,7 @@ mod tests {
         // B2: the summed cost (without emitting) must predict the bits the bool
         // coder actually spends. Encode many blocks into one stream and compare
         // the predicted total to the real output size.
-        let cases = [
-            (0usize, TxType::DctDct),
-            (1, TxType::DctDct),
-            (2, TxType::DctDct),
-            (3, TxType::DctDct),
-        ];
+        let cases = [(0usize, TxType::DctDct), (1, TxType::DctDct), (2, TxType::DctDct), (3, TxType::DctDct)];
         let mut s = 0x2024_0a0b_0c0d_0e0fu64;
         let mut enc = BoolEncoder::new();
         let mut total_cost_q8 = 0u64;
@@ -877,15 +835,13 @@ mod tests {
                 let (levels, eob) = gen_block(&mut s, scan, n, max_eob);
                 let ctx0 = (xs(&mut s) % 3) as usize;
                 let mut tc = vec![0u8; max_eob];
-                total_cost_q8 += coef_cost(
-                    &levels, scan, nb, eob, coef_probs, tx_size, ctx0, &mut tc, 8,
-                );
+                total_cost_q8 += coef_cost(&levels, scan, nb, eob, coef_probs, tx_size, ctx0, &mut tc, 8);
                 let mut tc2 = vec![0u8; max_eob];
                 let mut cc = [[[0u32; 4]; 6]; 6];
                 let mut ec = [[0u32; 6]; 6];
                 encode_coefs(
-                    &mut enc, &levels, scan, nb, eob, coef_probs, tx_size, ctx0, &mut tc2, &mut cc,
-                    &mut ec, 8,
+                    &mut enc, &levels, scan, nb, eob, coef_probs, tx_size, ctx0, &mut tc2, &mut cc, &mut ec,
+                    8,
                 );
             }
         }
@@ -950,14 +906,10 @@ mod tests {
                 let mut pbuf = vec![0u64; max_eob + 1];
                 let mut bbuf = vec![0u8; max_eob];
                 let mut tr = RateTracker::new(
-                    &levels, scan, nb, eob0, coef_probs, tx_size, tx as u8, ctx0, 8, &mut cbuf,
-                    &mut pbuf, &mut bbuf,
+                    &levels, scan, nb, eob0, coef_probs, tx_size, tx as u8, ctx0, 8, &mut cbuf, &mut pbuf,
+                    &mut bbuf,
                 );
-                assert_eq!(
-                    tr.total(),
-                    cc(&levels, eob0, &mut tc),
-                    "baseline {tx_size} {tx:?}"
-                );
+                assert_eq!(tr.total(), cc(&levels, eob0, &mut tc), "baseline {tx_size} {tx:?}");
                 let mut eob = eob0;
 
                 // EOB-tail drop pass (mirror trellis_eob): repeatedly zero scan[eob-1].
@@ -969,11 +921,7 @@ mod tests {
                         ne -= 1;
                     }
                     let want = cc(&levels, ne, &mut tc);
-                    assert_eq!(
-                        tr.probe(&levels, eob - 1, ne),
-                        want,
-                        "drop {tx_size} {tx:?} eob={eob}"
-                    );
+                    assert_eq!(tr.probe(&levels, eob - 1, ne), want, "drop {tx_size} {tx:?} eob={eob}");
                     tr.commit(&levels, eob - 1, ne);
                     assert_eq!(tr.total(), want, "drop commit {tx_size} {tx:?}");
                     eob = ne;
@@ -1009,11 +957,7 @@ mod tests {
                         assert_eq!(tr.total(), want, "lower commit {tx_size} {tx:?}");
                     } else {
                         levels[pos] = saved;
-                        assert_eq!(
-                            tr.total(),
-                            cc(&levels, eob, &mut tc),
-                            "lower reject {tx_size} {tx:?}"
-                        );
+                        assert_eq!(tr.total(), cc(&levels, eob, &mut tc), "lower reject {tx_size} {tx:?}");
                     }
                 }
             }

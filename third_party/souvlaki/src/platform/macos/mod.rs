@@ -98,12 +98,8 @@ unsafe fn set_playback_status(playback: MediaPlayback) {
         MediaPlayback::Playing { .. } => MPNowPlayingPlaybackStatePlaying,
     };
     let _: () = msg_send!(media_center, setPlaybackState: state);
-    if let MediaPlayback::Paused {
-        progress: Some(progress),
-    }
-    | MediaPlayback::Playing {
-        progress: Some(progress),
-    } = playback
+    if let MediaPlayback::Paused { progress: Some(progress) }
+    | MediaPlayback::Playing { progress: Some(progress) } = playback
     {
         set_playback_progress(progress.0);
     }
@@ -242,9 +238,7 @@ unsafe fn attach_command_handlers(handler: Arc<dyn Fn(MediaControlEvent)>) {
         // event of type MPChangePlaybackPositionCommandEvent
         move |event: id| -> NSInteger {
             let position = *event.as_ref().unwrap().get_ivar::<f64>("_positionTime");
-            (handler)(MediaControlEvent::SetPosition(MediaPosition(
-                Duration::from_secs_f64(position),
-            )));
+            (handler)(MediaControlEvent::SetPosition(MediaPosition(Duration::from_secs_f64(position))));
             MPRemoteCommandHandlerStatusSuccess
         }
     })

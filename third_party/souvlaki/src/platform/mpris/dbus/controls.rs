@@ -62,13 +62,7 @@ pub fn create_metadata_dict(metadata: &OwnedMetadata) -> HashMap<String, Variant
 
     let mut insert = |k: &str, v| dict.insert(k.to_string(), Variant(v));
 
-    let OwnedMetadata {
-        ref title,
-        ref album,
-        ref artist,
-        ref cover_url,
-        ref duration,
-    } = metadata;
+    let OwnedMetadata { ref title, ref album, ref artist, ref cover_url, ref duration } = metadata;
 
     // TODO: this is just a workaround to enable SetPosition.
     let path = Path::new("/").unwrap();
@@ -122,17 +116,9 @@ impl From<MediaMetadata<'_>> for OwnedMetadata {
 impl MediaControls {
     /// Create media controls with the specified config.
     pub fn new(config: PlatformConfig) -> Result<Self, Error> {
-        let PlatformConfig {
-            dbus_name,
-            display_name,
-            ..
-        } = config;
+        let PlatformConfig { dbus_name, display_name, .. } = config;
 
-        Ok(Self {
-            thread: None,
-            dbus_name: dbus_name.to_string(),
-            friendly_name: display_name.to_string(),
-        })
+        Ok(Self { thread: None, dbus_name: dbus_name.to_string(), friendly_name: display_name.to_string() })
     }
 
     /// Attach the media control events to a handler.
@@ -160,11 +146,7 @@ impl MediaControls {
 
     /// Detach the event handler.
     pub fn detach(&mut self) -> Result<(), Error> {
-        if let Some(ServiceThreadHandle {
-            event_channel,
-            thread,
-        }) = self.thread.take()
-        {
+        if let Some(ServiceThreadHandle { event_channel, thread }) = self.thread.take() {
             // We don't care about the result of this event, since we immedieately
             // check if the thread has panicked on the next line.
             event_channel.send(InternalEvent::Kill).ok();
@@ -192,10 +174,7 @@ impl MediaControls {
 
     fn send_internal_event(&mut self, event: InternalEvent) -> Result<(), Error> {
         let thread = &self.thread.as_ref().ok_or(Error::ThreadNotRunning)?;
-        thread
-            .event_channel
-            .send(event)
-            .map_err(|_| Error::ThreadPanicked)
+        thread.event_channel.send(event).map_err(|_| Error::ThreadPanicked)
     }
 }
 
@@ -217,8 +196,7 @@ where
     let event_handler = Arc::new(Mutex::new(event_handler));
     let seeked_signal = Arc::new(Mutex::new(None));
 
-    let mut cr =
-        super::interfaces::register_methods(&state, &event_handler, friendly_name, seeked_signal);
+    let mut cr = super::interfaces::register_methods(&state, &event_handler, friendly_name, seeked_signal);
 
     conn.start_receive(
         dbus::message::MatchRule::new_method_call(),
@@ -241,10 +219,8 @@ where
                 InternalEvent::ChangeMetadata(metadata) => {
                     let mut state = state.lock().unwrap();
                     state.set_metadata(metadata);
-                    changed_properties.insert(
-                        "Metadata".to_owned(),
-                        Variant(state.metadata_dict.box_clone()),
-                    );
+                    changed_properties
+                        .insert("Metadata".to_owned(), Variant(state.metadata_dict.box_clone()));
                 }
                 InternalEvent::ChangePlayback(playback) => {
                     let mut state = state.lock().unwrap();
@@ -268,10 +244,8 @@ where
                 invalidated_properties: Vec::new(),
             };
 
-            conn.send(
-                properties_changed.to_emit_message(&Path::new("/org/mpris/MediaPlayer2").unwrap()),
-            )
-            .ok();
+            conn.send(properties_changed.to_emit_message(&Path::new("/org/mpris/MediaPlayer2").unwrap()))
+                .ok();
         }
         // Was 1000 ms: a state change queued by `set_playback` waited that long for the loop to come back around, so `playerctl
         // status` read the previous state. 20 ms keeps the service responsive for a negligible cost.

@@ -14,9 +14,8 @@ const DCT_CONST_BITS: i64 = 14;
 /// are the exact VP9 transform constants; the `cospi_constants_match_formula`
 /// test asserts each against the generating formula.
 pub(crate) const COSPI: [i64; 32] = [
-    0, 16364, 16305, 16207, 16069, 15893, 15679, 15426, 15137, 14811, 14449, 14053, 13623, 13160,
-    12665, 12140, 11585, 11003, 10394, 9760, 9102, 8423, 7723, 7005, 6270, 5520, 4756, 3981, 3196,
-    2404, 1606, 804,
+    0, 16364, 16305, 16207, 16069, 15893, 15679, 15426, 15137, 14811, 14449, 14053, 13623, 13160, 12665,
+    12140, 11585, 11003, 10394, 9760, 9102, 8423, 7723, 7005, 6270, 5520, 4756, 3981, 3196, 2404, 1606, 804,
 ];
 const COSPI_8_64: i64 = COSPI[8];
 const COSPI_16_64: i64 = COSPI[16];
@@ -30,20 +29,12 @@ fn round_shift(x: i64) -> i32 {
 /// Butterfly helper: `(a·c0 ∓ b·c1)` rounded — the two outputs of a rotation.
 #[inline]
 fn rot(a: i32, b: i32, c0: i64, c1: i64) -> (i32, i32) {
-    (
-        round_shift(a as i64 * c0 - b as i64 * c1),
-        round_shift(a as i64 * c1 + b as i64 * c0),
-    )
+    (round_shift(a as i64 * c0 - b as i64 * c1), round_shift(a as i64 * c1 + b as i64 * c0))
 }
 
 /// 4-point inverse DCT (one dimension).
 pub fn idct4(input: &[i32; 4], output: &mut [i32; 4]) {
-    let (i0, i1, i2, i3) = (
-        input[0] as i64,
-        input[1] as i64,
-        input[2] as i64,
-        input[3] as i64,
-    );
+    let (i0, i1, i2, i3) = (input[0] as i64, input[1] as i64, input[2] as i64, input[3] as i64);
     let s0 = round_shift((i0 + i2) * COSPI_16_64);
     let s1 = round_shift((i0 - i2) * COSPI_16_64);
     let s2 = round_shift(i1 * COSPI_24_64 - i3 * COSPI_8_64);
@@ -105,8 +96,8 @@ pub fn idct16(input: &[i32; 16], output: &mut [i32; 16]) {
     let rs = round_shift;
     // stage 1 (reorder)
     let s1 = [
-        input[0], input[8], input[4], input[12], input[2], input[10], input[6], input[14],
-        input[1], input[9], input[5], input[13], input[3], input[11], input[7], input[15],
+        input[0], input[8], input[4], input[12], input[2], input[10], input[6], input[14], input[1],
+        input[9], input[5], input[13], input[3], input[11], input[7], input[15],
     ];
     // stage 2
     let mut s = [0i32; 16];
@@ -232,16 +223,7 @@ pub fn idct32(input: &[i32; 32], output: &mut [i32; 32]) {
     s2[13] = p(s1[10], s1[13], c(10), c(22));
     s2[11] = m(s1[11], s1[12], c(6), c(26));
     s2[12] = p(s1[11], s1[12], c(26), c(6));
-    for (a, sgn) in [
-        (16, 1),
-        (18, -1),
-        (20, 1),
-        (22, -1),
-        (24, 1),
-        (26, -1),
-        (28, 1),
-        (30, -1),
-    ] {
+    for (a, sgn) in [(16, 1), (18, -1), (20, 1), (22, -1), (24, 1), (26, -1), (28, 1), (30, -1)] {
         s2[a] = sgn * s1[a] + s1[a + 1];
         s2[a + 1] = s1[a] - sgn * s1[a + 1];
     }
@@ -403,12 +385,7 @@ pub(crate) const SINPI: [i64; 5] = [0, 5283, 9929, 13377, 15212];
 
 /// 4-point inverse ADST (ISO/VP9 §8.7.1.2), one dimension.
 pub fn iadst4(input: &[i32; 4], output: &mut [i32; 4]) {
-    let (x0, x1, x2, x3) = (
-        input[0] as i64,
-        input[1] as i64,
-        input[2] as i64,
-        input[3] as i64,
-    );
+    let (x0, x1, x2, x3) = (input[0] as i64, input[1] as i64, input[2] as i64, input[3] as i64);
     let s0 = SINPI[1] * x0;
     let s1 = SINPI[2] * x0;
     let s2 = SINPI[3] * x1;
@@ -450,30 +427,15 @@ pub fn iadst8(input: &[i32; 8], output: &mut [i32; 8]) {
     let s5 = x4 * c(14) - x5 * c(18);
     let s6 = x6 * c(26) + x7 * c(6);
     let s7 = x6 * c(6) - x7 * c(26);
-    let (x0, x1, x2, x3) = (
-        rs(s0 + s4) as i64,
-        rs(s1 + s5) as i64,
-        rs(s2 + s6) as i64,
-        rs(s3 + s7) as i64,
-    );
-    let (x4, x5, x6, x7) = (
-        rs(s0 - s4) as i64,
-        rs(s1 - s5) as i64,
-        rs(s2 - s6) as i64,
-        rs(s3 - s7) as i64,
-    );
+    let (x0, x1, x2, x3) = (rs(s0 + s4) as i64, rs(s1 + s5) as i64, rs(s2 + s6) as i64, rs(s3 + s7) as i64);
+    let (x4, x5, x6, x7) = (rs(s0 - s4) as i64, rs(s1 - s5) as i64, rs(s2 - s6) as i64, rs(s3 - s7) as i64);
     // stage 2
     let s4 = x4 * c(8) + x5 * c(24);
     let s5 = x4 * c(24) - x5 * c(8);
     let s6 = -x6 * c(24) + x7 * c(8);
     let s7 = x6 * c(8) + x7 * c(24);
     let (x0, x1, x2, x3) = (x0 + x2, x1 + x3, x0 - x2, x1 - x3);
-    let (x4, x5, x6, x7) = (
-        rs(s4 + s6) as i64,
-        rs(s5 + s7) as i64,
-        rs(s4 - s6) as i64,
-        rs(s5 - s7) as i64,
-    );
+    let (x4, x5, x6, x7) = (rs(s4 + s6) as i64, rs(s5 + s7) as i64, rs(s4 - s6) as i64, rs(s5 - s7) as i64);
     // stage 3
     let x2r = rs((x2 + x3) * c(16)) as i64;
     let x3r = rs((x2 - x3) * c(16)) as i64;
@@ -493,10 +455,8 @@ pub fn iadst8(input: &[i32; 8], output: &mut [i32; 8]) {
 pub fn iadst16(input: &[i32; 16], output: &mut [i32; 16]) {
     let c = |i: usize| COSPI[i];
     let rs = round_shift;
-    let x: Vec<i64> = [15, 0, 13, 2, 11, 4, 9, 6, 7, 8, 5, 10, 3, 12, 1, 14]
-        .iter()
-        .map(|&i| input[i] as i64)
-        .collect();
+    let x: Vec<i64> =
+        [15, 0, 13, 2, 11, 4, 9, 6, 7, 8, 5, 10, 3, 12, 1, 14].iter().map(|&i| input[i] as i64).collect();
     // stage 1
     let s = [
         x[0] * c(1) + x[1] * c(31),
@@ -517,13 +477,7 @@ pub fn iadst16(input: &[i32; 16], output: &mut [i32; 16]) {
         x[14] * c(3) - x[15] * c(29),
     ];
     let x: Vec<i64> = (0..16)
-        .map(|i| {
-            if i < 8 {
-                rs(s[i] + s[i + 8]) as i64
-            } else {
-                rs(s[i - 8] - s[i]) as i64
-            }
-        })
+        .map(|i| if i < 8 { rs(s[i] + s[i + 8]) as i64 } else { rs(s[i - 8] - s[i]) as i64 })
         .collect();
     // stage 2
     let s8 = x[8] * c(4) + x[9] * c(28);
@@ -588,9 +542,7 @@ pub fn iadst16(input: &[i32; 16], output: &mut [i32; 16]) {
     let x11 = rs(c(16) * (-x[10] + x[11])) as i64;
     let x14 = rs(-c(16) * (x[14] + x[15])) as i64;
     let x15 = rs(c(16) * (x[14] - x[15])) as i64;
-    let o = [
-        x[0], -x[8], x[12], -x[4], x6, x14, x10, x2, x3, x11, x15, x7, x[5], -x[13], x[9], -x[1],
-    ];
+    let o = [x[0], -x[8], x[12], -x[4], x6, x14, x10, x2, x3, x11, x15, x7, x[5], -x[13], x[9], -x[1]];
     for i in 0..16 {
         output[i] = o[i] as i32;
     }
@@ -623,12 +575,8 @@ pub fn iwht4(input: &[i32; 4], output: &mut [i32; 4]) {
 pub fn inverse_wht_add(coeffs: &[i32], dest: &mut [u16], stride: usize, max: i32) {
     let mut tmp = [0i32; 16];
     for r in 0..4 {
-        let inp = [
-            coeffs[r * 4] >> 2,
-            coeffs[r * 4 + 1] >> 2,
-            coeffs[r * 4 + 2] >> 2,
-            coeffs[r * 4 + 3] >> 2,
-        ];
+        let inp =
+            [coeffs[r * 4] >> 2, coeffs[r * 4 + 1] >> 2, coeffs[r * 4 + 2] >> 2, coeffs[r * 4 + 3] >> 2];
         let mut out = [0i32; 4];
         iwht4(&inp, &mut out);
         tmp[r * 4..r * 4 + 4].copy_from_slice(&out);
@@ -706,22 +654,10 @@ pub fn inv_basis_normsq_1d(n: usize, adst: bool) -> [f64; 32] {
 
 fn idct_1d(input: &[i32], output: &mut [i32]) {
     match input.len() {
-        4 => idct4(
-            input.try_into().unwrap(),
-            (&mut output[..4]).try_into().unwrap(),
-        ),
-        8 => idct8(
-            input.try_into().unwrap(),
-            (&mut output[..8]).try_into().unwrap(),
-        ),
-        16 => idct16(
-            input.try_into().unwrap(),
-            (&mut output[..16]).try_into().unwrap(),
-        ),
-        32 => idct32(
-            input.try_into().unwrap(),
-            (&mut output[..32]).try_into().unwrap(),
-        ),
+        4 => idct4(input.try_into().unwrap(), (&mut output[..4]).try_into().unwrap()),
+        8 => idct8(input.try_into().unwrap(), (&mut output[..8]).try_into().unwrap()),
+        16 => idct16(input.try_into().unwrap(), (&mut output[..16]).try_into().unwrap()),
+        32 => idct32(input.try_into().unwrap(), (&mut output[..32]).try_into().unwrap()),
         _ => unreachable!(),
     }
 }
@@ -729,18 +665,9 @@ fn idct_1d(input: &[i32], output: &mut [i32]) {
 /// Apply the size-`n` inverse ADST to a row/column slice (n ∈ {4,8,16}).
 fn iadst_1d(input: &[i32], output: &mut [i32]) {
     match input.len() {
-        4 => iadst4(
-            input.try_into().unwrap(),
-            (&mut output[..4]).try_into().unwrap(),
-        ),
-        8 => iadst8(
-            input.try_into().unwrap(),
-            (&mut output[..8]).try_into().unwrap(),
-        ),
-        16 => iadst16(
-            input.try_into().unwrap(),
-            (&mut output[..16]).try_into().unwrap(),
-        ),
+        4 => iadst4(input.try_into().unwrap(), (&mut output[..4]).try_into().unwrap()),
+        8 => iadst8(input.try_into().unwrap(), (&mut output[..8]).try_into().unwrap()),
+        16 => iadst16(input.try_into().unwrap(), (&mut output[..16]).try_into().unwrap()),
         _ => unreachable!(),
     }
 }
@@ -894,11 +821,7 @@ pub fn inverse_transform_add_rows(
     if n == 16 && !col_adst && std::env::var_os("VP9_GATEPROBE").is_some() {
         use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
         pub static G: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
-        let cmax = coeffs[..16 * nz_rows]
-            .iter()
-            .map(|v| v.unsigned_abs())
-            .max()
-            .unwrap_or(0);
+        let cmax = coeffs[..16 * nz_rows].iter().map(|v| v.unsigned_abs()).max().unwrap_or(0);
         G[0].fetch_add(1, Relaxed);
         if cmax > 1024 {
             G[1].fetch_add(1, Relaxed);
@@ -912,11 +835,7 @@ pub fn inverse_transform_add_rows(
         for r in 0..nz_rows {
             idct_1d(&coeffs[r * 16..r * 16 + 16], &mut t[r * 16..r * 16 + 16]);
         }
-        let tmax = t[..16 * nz_rows]
-            .iter()
-            .map(|v| v.unsigned_abs())
-            .max()
-            .unwrap_or(0);
+        let tmax = t[..16 * nz_rows].iter().map(|v| v.unsigned_abs()).max().unwrap_or(0);
         if tmax > 12288 {
             G[3].fetch_add(1, Relaxed);
         }
@@ -939,9 +858,7 @@ pub fn inverse_transform_add_rows(
         && tx_type == TxType::DctDct
         && !no_tx4_avx2()
         && std::is_x86_feature_detected!("avx2")
-        && coeffs[..4 * nz_rows]
-            .iter()
-            .all(|&v| v.unsigned_abs() <= IDCT4_AVX2_MAX_COEF as u32)
+        && coeffs[..4 * nz_rows].iter().all(|&v| v.unsigned_abs() <= IDCT4_AVX2_MAX_COEF as u32)
     {
         // SAFETY: AVX2 confirmed; coeffs has 16 i32 and dest covers 4 rows of 4
         // at `stride` (the scalar path makes the same accesses).
@@ -954,9 +871,7 @@ pub fn inverse_transform_add_rows(
     if n == 8
         && tx_type == TxType::DctDct
         && std::is_x86_feature_detected!("avx2")
-        && coeffs[..8 * nz_rows]
-            .iter()
-            .all(|&v| v.unsigned_abs() <= IDCT8_AVX2_MAX_COEF as u32)
+        && coeffs[..8 * nz_rows].iter().all(|&v| v.unsigned_abs() <= IDCT8_AVX2_MAX_COEF as u32)
     {
         // SAFETY: AVX2 confirmed; coeffs has 64 i32 and dest covers 8 rows of 8
         // at `stride` (the scalar path makes the same accesses).
@@ -1010,11 +925,7 @@ pub fn inverse_transform_add_rows(
             && nz_rows > 1
             && !no_tx32_avx2()
             && std::is_x86_feature_detected!("avx2")
-            && tmp[..32 * nz_rows]
-                .iter()
-                .map(|v| v.unsigned_abs())
-                .max()
-                .unwrap_or(0)
+            && tmp[..32 * nz_rows].iter().map(|v| v.unsigned_abs()).max().unwrap_or(0)
                 <= IDCT32_VEC_MAX_IN as u32;
         #[cfg(not(target_arch = "x86_64"))]
         let vec_cols32 = false;
@@ -1228,8 +1139,8 @@ mod idct_avx2 {
         let neg = |a| _mm_sub_epi32(_mm_setzero_si128(), a);
         // stage 1 (reorder)
         let s1 = [
-            input[0], input[8], input[4], input[12], input[2], input[10], input[6], input[14],
-            input[1], input[9], input[5], input[13], input[3], input[11], input[7], input[15],
+            input[0], input[8], input[4], input[12], input[2], input[10], input[6], input[14], input[1],
+            input[9], input[5], input[13], input[3], input[11], input[7], input[15],
         ];
         // stage 2
         let mut s = s1;
@@ -1348,16 +1259,7 @@ mod idct_avx2 {
         }
         // stage 2
         let mut u = t;
-        for (j, sgn) in [
-            (0, 1i32),
-            (2, -1),
-            (4, 1),
-            (6, -1),
-            (8, 1),
-            (10, -1),
-            (12, 1),
-            (14, -1),
-        ] {
+        for (j, sgn) in [(0, 1i32), (2, -1), (4, 1), (6, -1), (8, 1), (10, -1), (12, 1), (14, -1)] {
             let (x, y) = (t[j], t[j + 1]);
             if sgn == 1 {
                 u[j] = add(x, y);
@@ -1454,9 +1356,8 @@ mod idct_avx2 {
         let round = _mm_set1_epi32(1 << (SHIFT - 1));
         for g in 0..8 {
             let base = g * 4;
-            let v: [__m128i; 32] = std::array::from_fn(|r| {
-                _mm_loadu_si128(tmp.as_ptr().add(r * 32 + base) as *const __m128i)
-            });
+            let v: [__m128i; 32] =
+                std::array::from_fn(|r| _mm_loadu_si128(tmp.as_ptr().add(r * 32 + base) as *const __m128i));
             let out = bfly32(&v);
             for (r, val) in out.iter().enumerate() {
                 let p = dest.as_mut_ptr().add(r * stride + base);
@@ -1494,9 +1395,8 @@ mod idct_avx2 {
         let round = _mm_set1_epi32(1 << (SHIFT - 1));
         for g in 0..4 {
             let base = g * 4;
-            let v: [__m128i; 16] = std::array::from_fn(|r| {
-                _mm_loadu_si128(tmp.as_ptr().add(r * 16 + base) as *const __m128i)
-            });
+            let v: [__m128i; 16] =
+                std::array::from_fn(|r| _mm_loadu_si128(tmp.as_ptr().add(r * 16 + base) as *const __m128i));
             let out = bfly16(&v);
             for (r, val) in out.iter().enumerate() {
                 let p = dest.as_mut_ptr().add(r * stride + base);
@@ -1531,12 +1431,7 @@ mod idct_avx2 {
         let s1 = rs4(mul4(_mm_sub_epi32(v[0], v[2]), c(16)));
         let s2 = rs4(_mm_sub_epi32(mul4(v[1], c(24)), mul4(v[3], c(8))));
         let s3 = rs4(_mm_add_epi32(mul4(v[1], c(8)), mul4(v[3], c(24))));
-        [
-            _mm_add_epi32(s0, s3),
-            _mm_add_epi32(s1, s2),
-            _mm_sub_epi32(s1, s2),
-            _mm_sub_epi32(s0, s3),
-        ]
+        [_mm_add_epi32(s0, s3), _mm_add_epi32(s1, s2), _mm_sub_epi32(s1, s2), _mm_sub_epi32(s0, s3)]
     }
 
     /// 4×4 i32 transpose.
@@ -1587,16 +1482,11 @@ mod idct_avx2 {
         let round = _mm_set1_epi32(1 << 3);
         let maxv = _mm_set1_epi32(max);
         for (r, val) in v.iter().enumerate() {
-            let d = _mm_cvtepu16_epi32(_mm_loadl_epi64(
-                dest.as_ptr().add(r * stride) as *const __m128i
-            ));
+            let d = _mm_cvtepu16_epi32(_mm_loadl_epi64(dest.as_ptr().add(r * stride) as *const __m128i));
             let add = _mm_srai_epi32::<4>(_mm_add_epi32(*val, round));
             let s = _mm_add_epi32(d, add);
             let s = _mm_min_epi32(_mm_max_epi32(s, zero), maxv);
-            _mm_storel_epi64(
-                dest.as_mut_ptr().add(r * stride) as *mut __m128i,
-                _mm_packus_epi32(s, s),
-            );
+            _mm_storel_epi64(dest.as_mut_ptr().add(r * stride) as *mut __m128i, _mm_packus_epi32(s, s));
         }
     }
 
@@ -1625,18 +1515,13 @@ mod idct_avx2 {
         let round = _mm256_set1_epi32(1 << 4);
         let maxv = _mm256_set1_epi32(max);
         for (r, val) in v.iter().enumerate() {
-            let d = _mm256_cvtepu16_epi32(_mm_loadu_si128(
-                dest.as_ptr().add(r * stride) as *const __m128i
-            ));
+            let d = _mm256_cvtepu16_epi32(_mm_loadu_si128(dest.as_ptr().add(r * stride) as *const __m128i));
             let add = _mm256_srai_epi32::<5>(_mm256_add_epi32(*val, round));
             let s = _mm256_add_epi32(d, add);
             let s = _mm256_min_epi32(_mm256_max_epi32(s, zero), maxv);
             let packed = _mm256_packus_epi32(s, s);
             let perm = _mm256_permute4x64_epi64::<0x08>(packed);
-            _mm_storeu_si128(
-                dest.as_mut_ptr().add(r * stride) as *mut __m128i,
-                _mm256_castsi256_si128(perm),
-            );
+            _mm_storeu_si128(dest.as_mut_ptr().add(r * stride) as *mut __m128i, _mm256_castsi256_si128(perm));
         }
     }
 }
@@ -1678,16 +1563,7 @@ mod tests {
             let d1 = b0 + b2;
             let d5 = check(b6 + b5, c(16));
             let d6 = check(b5 + b6, c(16));
-            [
-                d0 + b7,
-                d1 + d6,
-                d1 + d5,
-                d0 + b4,
-                d0 + b4,
-                d1 + d5,
-                d1 + d6,
-                d0 + b7,
-            ]
+            [d0 + b7, d1 + d6, d1 + d5, d0 + b4, d0 + b4, d1 + d5, d1 + d6, d0 + b7]
         };
         let row_out = pass([b; 8]);
         let _ = pass(row_out); // column pass must also be product-safe
@@ -1713,9 +1589,8 @@ mod tests {
         for &max in &[255i32, 1023, 4095] {
             for _ in 0..3000 {
                 let bound = IDCT8_AVX2_MAX_COEF as u64;
-                let coeffs: Vec<i32> = (0..64)
-                    .map(|_| (xs() % (2 * bound + 1)) as i32 - bound as i32)
-                    .collect();
+                let coeffs: Vec<i32> =
+                    (0..64).map(|_| (xs() % (2 * bound + 1)) as i32 - bound as i32).collect();
                 let nz_rows = 1 + (xs() % 8) as usize;
                 let mut coeffs = coeffs;
                 for v in &mut coeffs[nz_rows * 8..] {
@@ -1789,11 +1664,7 @@ mod tests {
         let scale = yd[0] as f64 / 64.0;
         for i in 0..4 {
             let recovered = y[i] as f64 / scale;
-            assert!(
-                (recovered - x[i] as f64).abs() < 1.5,
-                "coef {i}: recovered {recovered:.2} vs {}",
-                x[i]
-            );
+            assert!((recovered - x[i] as f64).abs() < 1.5, "coef {i}: recovered {recovered:.2} vs {}", x[i]);
         }
     }
 
@@ -1817,11 +1688,8 @@ mod tests {
             .map(|i| {
                 (0..n)
                     .map(|k| {
-                        let basis = if k == 0 {
-                            dc
-                        } else {
-                            (PI * ((2 * i + 1) * k) as f64 / (2 * n) as f64).cos()
-                        };
+                        let basis =
+                            if k == 0 { dc } else { (PI * ((2 * i + 1) * k) as f64 / (2 * n) as f64).cos() };
                         x[k] as f64 * basis
                     })
                     .sum()
@@ -1839,12 +1707,7 @@ mod tests {
             idct8(&x, &mut out);
             let r = float_idct(&x);
             for n in 0..8 {
-                assert!(
-                    (out[n] as f64 - r[n]).abs() < 2.0,
-                    "k={k} n={n}: {} vs {:.2}",
-                    out[n],
-                    r[n]
-                );
+                assert!((out[n] as f64 - r[n]).abs() < 2.0, "k={k} n={n}: {} vs {:.2}", out[n], r[n]);
             }
         }
     }
@@ -1858,12 +1721,7 @@ mod tests {
             idct16(&x, &mut out);
             let r = float_idct(&x);
             for n in 0..16 {
-                assert!(
-                    (out[n] as f64 - r[n]).abs() < 3.0,
-                    "k={k} n={n}: {} vs {:.2}",
-                    out[n],
-                    r[n]
-                );
+                assert!((out[n] as f64 - r[n]).abs() < 3.0, "k={k} n={n}: {} vs {:.2}", out[n], r[n]);
             }
         }
     }
@@ -1877,12 +1735,7 @@ mod tests {
             idct32(&x, &mut out);
             let r = float_idct(&x);
             for n in 0..32 {
-                assert!(
-                    (out[n] as f64 - r[n]).abs() < 4.0,
-                    "k={k} n={n}: {} vs {:.2}",
-                    out[n],
-                    r[n]
-                );
+                assert!((out[n] as f64 - r[n]).abs() < 4.0, "k={k} n={n}: {} vs {:.2}", out[n], r[n]);
             }
         }
     }
@@ -1895,10 +1748,7 @@ mod tests {
         (0..n)
             .map(|m| {
                 (0..n)
-                    .map(|k| {
-                        x[k] as f64
-                            * (PI * ((2 * k + 1) * (m + 1)) as f64 / (2 * n + 1) as f64).sin()
-                    })
+                    .map(|k| x[k] as f64 * (PI * ((2 * k + 1) * (m + 1)) as f64 / (2 * n + 1) as f64).sin())
                     .sum()
             })
             .collect()
@@ -1909,18 +1759,9 @@ mod tests {
         let num: f64 = out.iter().zip(r).map(|(o, r)| *o as f64 * r).sum();
         let den: f64 = r.iter().map(|r| r * r).sum::<f64>() + 1e-9;
         let s = num / den;
-        let resid: f64 = out
-            .iter()
-            .zip(r)
-            .map(|(o, r)| (*o as f64 - s * r).powi(2))
-            .sum::<f64>()
-            .sqrt();
+        let resid: f64 = out.iter().zip(r).map(|(o, r)| (*o as f64 - s * r).powi(2)).sum::<f64>().sqrt();
         let norm: f64 = (out.iter().map(|o| (*o as f64).powi(2)).sum::<f64>()).sqrt() + 1e-9;
-        assert!(
-            resid / norm < 0.02,
-            "ADST residual {:.4} (scale {s:.3})",
-            resid / norm
-        );
+        assert!(resid / norm < 0.02, "ADST residual {:.4} (scale {s:.3})", resid / norm);
     }
 
     #[test]
@@ -1934,11 +1775,7 @@ mod tests {
 
     fn energy_ratio(out: &[i32], inp: &[i32]) -> f64 {
         let eo: f64 = out.iter().map(|v| (*v as f64).powi(2)).sum();
-        let ei: f64 = inp
-            .iter()
-            .map(|v| (*v as f64).powi(2))
-            .sum::<f64>()
-            .max(1.0);
+        let ei: f64 = inp.iter().map(|v| (*v as f64).powi(2)).sum::<f64>().max(1.0);
         eo / ei
     }
 
@@ -1961,14 +1798,8 @@ mod tests {
             })
             .collect();
         let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
-        assert!(
-            (mean - gain).abs() < 0.05 * gain,
-            "gain {mean:.3} vs {gain}"
-        );
-        assert!(
-            ratios.iter().all(|r| (r - mean).abs() < 0.05 * mean),
-            "not orthogonal: {ratios:?}"
-        );
+        assert!((mean - gain).abs() < 0.05 * gain, "gain {mean:.3} vs {gain}");
+        assert!(ratios.iter().all(|r| (r - mean).abs() < 0.05 * mean), "not orthogonal: {ratios:?}");
     }
 
     #[test]
@@ -2059,11 +1890,7 @@ mod tests {
                         }
                     }
                 }
-                let max_row = (0..n * n)
-                    .filter(|&p| co[p] != 0)
-                    .map(|p| p / n)
-                    .max()
-                    .unwrap_or(0);
+                let max_row = (0..n * n).filter(|&p| co[p] != 0).map(|p| p / n).max().unwrap_or(0);
                 let (mut a, mut b) = (vec![128u16; n * n], vec![128u16; n * n]);
                 inverse_transform_add_rows(&co, n, tx, &mut a, n, 4095, max_row + 1);
                 inverse_transform_add_rows(&co, n, tx, &mut b, n, 4095, n); // full
@@ -2104,12 +1931,8 @@ mod tests {
         fn libvpx4x4(co: &[i32]) -> Vec<i64> {
             let mut out = [[0i64; 4]; 4];
             for r in 0..4 {
-                let row = [
-                    co[r * 4] as i64,
-                    co[r * 4 + 1] as i64,
-                    co[r * 4 + 2] as i64,
-                    co[r * 4 + 3] as i64,
-                ];
+                let row =
+                    [co[r * 4] as i64, co[r * 4 + 1] as i64, co[r * 4 + 2] as i64, co[r * 4 + 3] as i64];
                 out[r] = idct4(&row);
             }
             let mut dst = vec![0i64; 16];
@@ -2142,10 +1965,7 @@ mod tests {
             for i in 0..16 {
                 if ours[i] as i64 != want[i] {
                     if bad < 8 {
-                        eprintln!(
-                            "MISMATCH co={co:?} pos {i}: ours={} libvpx={}",
-                            ours[i], want[i]
-                        );
+                        eprintln!("MISMATCH co={co:?} pos {i}: ours={} libvpx={}", ours[i], want[i]);
                     }
                     bad += 1;
                     break;
@@ -2332,15 +2152,12 @@ mod idct16_avx2_tests {
         // One 1-D idct16 over per-index magnitude bounds; asserts each product fits.
         let pass = |inb: [i64; 16]| -> [i64; 16] {
             let rot = |v: i64, k: i64| -> i64 {
-                assert!(
-                    v * k < i32::MAX as i64,
-                    "product {v}·{k} overflows i32 in the vector butterfly"
-                );
+                assert!(v * k < i32::MAX as i64, "product {v}·{k} overflows i32 in the vector butterfly");
                 (v * k + (1 << 13)) >> 14
             };
             let s1 = [
-                inb[0], inb[8], inb[4], inb[12], inb[2], inb[10], inb[6], inb[14], inb[1], inb[9],
-                inb[5], inb[13], inb[3], inb[11], inb[7], inb[15],
+                inb[0], inb[8], inb[4], inb[12], inb[2], inb[10], inb[6], inb[14], inb[1], inb[9], inb[5],
+                inb[13], inb[3], inb[11], inb[7], inb[15],
             ];
             let mut s = s1;
             s[8] = rot(s1[8], c(30)) + rot(s1[15], c(2));
@@ -2642,8 +2459,8 @@ mod idct32_bound_proof {
         // ---- even half: the idct16 magnitude pass ----
         let idct16_bound = |inb: [i64; 16]| -> [i64; 16] {
             let s1 = [
-                inb[0], inb[8], inb[4], inb[12], inb[2], inb[10], inb[6], inb[14], inb[1], inb[9],
-                inb[5], inb[13], inb[3], inb[11], inb[7], inb[15],
+                inb[0], inb[8], inb[4], inb[12], inb[2], inb[10], inb[6], inb[14], inb[1], inb[9], inb[5],
+                inb[13], inb[3], inb[11], inb[7], inb[15],
             ];
             let mut s = s1;
             s[8] = rot(s1[8], c(30)) + rot(s1[15], c(2));
@@ -2711,16 +2528,8 @@ mod idct32_bound_proof {
         let lo = idct16_bound([t_in; 16]);
         // ---- odd half ----
         let mut t = [0i64; 16];
-        const ODD: [(usize, usize); 8] = [
-            (31, 1),
-            (15, 17),
-            (23, 9),
-            (7, 25),
-            (27, 5),
-            (11, 21),
-            (19, 13),
-            (3, 29),
-        ];
+        const ODD: [(usize, usize); 8] =
+            [(31, 1), (15, 17), (23, 9), (7, 25), (27, 5), (11, 21), (19, 13), (3, 29)];
         for (i, &(ca, cb)) in ODD.iter().enumerate() {
             t[i] = rot(t_in, c(ca)) + rot(t_in, c(cb));
             t[15 - i] = rot(t_in, c(cb)) + rot(t_in, c(ca));
@@ -2741,16 +2550,7 @@ mod idct32_bound_proof {
         v[6] = rot(u[6], c(12)) + rot(u[9], c(20));
         v[9] = rot(u[6], c(20)) + rot(u[9], c(12));
         let mut w = v;
-        for (a, b) in [
-            (0usize, 3usize),
-            (1, 2),
-            (4, 7),
-            (5, 6),
-            (8, 11),
-            (9, 10),
-            (12, 15),
-            (13, 14),
-        ] {
+        for (a, b) in [(0usize, 3usize), (1, 2), (4, 7), (5, 6), (8, 11), (9, 10), (12, 15), (13, 14)] {
             let m = v[a] + v[b];
             w[a] = m;
             w[b] = m;

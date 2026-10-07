@@ -23,12 +23,7 @@ pub struct BoolEncoder {
 
 impl BoolEncoder {
     pub fn new() -> BoolEncoder {
-        let mut e = BoolEncoder {
-            low: 0,
-            range: 255,
-            count: -24,
-            out: Vec::new(),
-        };
+        let mut e = BoolEncoder { low: 0, range: 255, count: -24, out: Vec::new() };
         // Marker bool — the decoder consumes a matching 0 in `BoolDecoder::new`.
         e.write_bool(0, 128);
         e
@@ -66,8 +61,7 @@ impl BoolEncoder {
                     self.out[x as usize] += 1;
                 }
             }
-            self.out
-                .push(((low >> ((24 - offset) as u32)) & 0xff) as u8);
+            self.out.push(((low >> ((24 - offset) as u32)) & 0xff) as u8);
             low <<= offset as u32;
             shift = count;
             low &= 0x00ff_ffff;
@@ -118,12 +112,7 @@ impl Default for BoolEncoder {
 /// Depth-first search for the path from `node` to the leaf encoding `symbol`,
 /// recording `(node_index, bit)` for each branch taken. Returns whether the
 /// symbol was found (it always is for a well-formed tree).
-pub(crate) fn find_tree_path(
-    tree: &[i8],
-    node: usize,
-    symbol: i32,
-    path: &mut Vec<(usize, u32)>,
-) -> bool {
+pub(crate) fn find_tree_path(tree: &[i8], node: usize, symbol: i32, path: &mut Vec<(usize, u32)>) -> bool {
     for bit in 0..2u32 {
         let next = tree[node + bit as usize];
         path.push((node, bit));
@@ -205,9 +194,8 @@ mod tests {
         let mut s = 0x1234_5678_9abc_def0u64;
         for _ in 0..300 {
             let n = 50 + (xs(&mut s) % 500) as usize;
-            let pairs: Vec<(u32, u8)> = (0..n)
-                .map(|_| ((xs(&mut s) & 1) as u32, (1 + xs(&mut s) % 255) as u8))
-                .collect();
+            let pairs: Vec<(u32, u8)> =
+                (0..n).map(|_| ((xs(&mut s) & 1) as u32, (1 + xs(&mut s) % 255) as u8)).collect();
             let mut enc = BoolEncoder::new();
             for &(b, p) in &pairs {
                 enc.write_bool(b, p);
@@ -271,10 +259,7 @@ mod tests {
         let bytes = enc.finish();
         let mut dec = BoolDecoder::new(&bytes).unwrap();
         for sym in syms {
-            assert_eq!(
-                crate::token::read_tree(&mut dec, &PARTITION_TREE, &probs),
-                sym
-            );
+            assert_eq!(crate::token::read_tree(&mut dec, &PARTITION_TREE, &probs), sym);
         }
     }
 

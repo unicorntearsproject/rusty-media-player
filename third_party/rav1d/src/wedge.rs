@@ -27,11 +27,7 @@ struct WedgeCodeType {
 
 impl WedgeCodeType {
     const fn new(x_offset: u8, y_offset: u8, direction: WedgeDirectionType) -> Self {
-        Self {
-            direction,
-            x_offset,
-            y_offset,
-        }
+        Self { direction, x_offset, y_offset }
     }
 }
 
@@ -124,12 +120,7 @@ impl WedgeCodeBook {
     }
 }
 
-const fn insert_border(
-    mut dst: [[u8; 64]; 64],
-    y: usize,
-    src: &[u8; 8],
-    ctr: usize,
-) -> [[u8; 64]; 64] {
+const fn insert_border(mut dst: [[u8; 64]; 64], y: usize, src: &[u8; 8], ctr: usize) -> [[u8; 64]; 64] {
     {
         if ctr > 4 {
             const_for!(i in 0..ctr - 4 => {
@@ -245,9 +236,7 @@ struct WedgeMasks<const LEN_444: usize, const LEN_422: usize, const LEN_420: usi
     signs: u16,
 }
 
-impl<const LEN_444: usize, const LEN_422: usize, const LEN_420: usize>
-    WedgeMasks<LEN_444, LEN_422, LEN_420>
-{
+impl<const LEN_444: usize, const LEN_422: usize, const LEN_420: usize> WedgeMasks<LEN_444, LEN_422, LEN_420> {
     const fn fill2d_16x2(
         w: usize,
         h: usize,
@@ -330,11 +319,8 @@ const fn build_master() -> [[[u8; 64]; 64]; WedgeDirectionType::COUNT] {
         Vert,
     }
 
-    const wedge_master_border: [[u8; 8]; WedgeMasterLineType::COUNT] = [
-        [1, 2, 6, 18, 37, 53, 60, 63],
-        [1, 4, 11, 27, 46, 58, 62, 63],
-        [0, 2, 7, 21, 43, 57, 62, 64],
-    ];
+    const wedge_master_border: [[u8; 8]; WedgeMasterLineType::COUNT] =
+        [[1, 2, 6, 18, 37, 53, 60, 63], [1, 4, 11, 27, 46, 58, 62, 63], [0, 2, 7, 21, 43, 57, 62, 64]];
     let mut master = [[[0; 64]; 64]; WedgeDirectionType::COUNT];
 
     // create master templates
@@ -366,10 +352,8 @@ const fn build_master() -> [[[u8; 64]; 64]; WedgeDirectionType::COUNT] {
         transposed(&master[WedgeDirectionType::Oblique63 as usize]);
     master[WedgeDirectionType::Horizontal as usize] =
         transposed(&master[WedgeDirectionType::Vertical as usize]);
-    master[WedgeDirectionType::Oblique117 as usize] =
-        hflip(&master[WedgeDirectionType::Oblique63 as usize]);
-    master[WedgeDirectionType::Oblique153 as usize] =
-        hflip(&master[WedgeDirectionType::Oblique27 as usize]);
+    master[WedgeDirectionType::Oblique117 as usize] = hflip(&master[WedgeDirectionType::Oblique63 as usize]);
+    master[WedgeDirectionType::Oblique153 as usize] = hflip(&master[WedgeDirectionType::Oblique27 as usize]);
 
     master
 }
@@ -384,11 +368,8 @@ pub static dav1d_wedge_masks: [[[[&'static [u8]; 16]; 2]; 3]; BlockSize::COUNT] 
 
     macro_rules! fill {
         ($w:literal x $h:literal, $signs:expr) => {{
-            static wedge_masks: WedgeMasks<
-                { $w * $h },
-                { ($w / 2) * $h },
-                { ($w / 2) * ($h / 2) },
-            > = WedgeMasks::fill2d_16x2($w, $h, &master, wedge_codebook_16.get($w, $h), $signs);
+            static wedge_masks: WedgeMasks<{ $w * $h }, { ($w / 2) * $h }, { ($w / 2) * ($h / 2) }> =
+                WedgeMasks::fill2d_16x2($w, $h, &master, wedge_codebook_16.get($w, $h), $signs);
             paste! {
                 masks[[<Bs $w x $h>] as usize] = wedge_masks.slice();
             }
@@ -412,16 +393,12 @@ static ii_dc_mask: Align64<[u8; 32 * 32]> = Align64([32; 32 * 32]);
 
 const N_II_PRED_MODES: usize = InterIntraPredMode::COUNT - 1;
 
-const fn build_nondc_ii_masks<const N: usize>(
-    w: usize,
-    h: usize,
-    step: usize,
-) -> [[u8; N]; N_II_PRED_MODES] {
+const fn build_nondc_ii_masks<const N: usize>(w: usize, h: usize, step: usize) -> [[u8; N]; N_II_PRED_MODES] {
     use InterIntraPredMode::*;
 
     const ii_weights_1d: [u8; 32] = [
-        60, 52, 45, 39, 34, 30, 26, 22, 19, 17, 15, 13, 11, 10, 8, 7, 6, 6, 5, 4, 4, 3, 3, 2, 2, 2,
-        2, 1, 1, 1, 1, 1,
+        60, 52, 45, 39, 34, 30, 26, 22, 19, 17, 15, 13, 11, 10, 8, 7, 6, 6, 5, 4, 4, 3, 3, 2, 2, 2, 2, 1, 1,
+        1, 1, 1,
     ];
 
     let mut masks = [[0; N]; N_II_PRED_MODES];
@@ -446,18 +423,12 @@ static ii_nondc_mask_16x32: Align64<[[u8; 16 * 32]; N_II_PRED_MODES]> =
     Align64(build_nondc_ii_masks(16, 32, 1));
 static ii_nondc_mask_16x16: Align64<[[u8; 16 * 16]; N_II_PRED_MODES]> =
     Align64(build_nondc_ii_masks(16, 16, 2));
-static ii_nondc_mask_8x32: Align64<[[u8; 8 * 32]; N_II_PRED_MODES]> =
-    Align64(build_nondc_ii_masks(8, 32, 1));
-static ii_nondc_mask_8x16: Align64<[[u8; 8 * 16]; N_II_PRED_MODES]> =
-    Align64(build_nondc_ii_masks(8, 16, 2));
-static ii_nondc_mask_8x8: Align64<[[u8; 8 * 8]; N_II_PRED_MODES]> =
-    Align64(build_nondc_ii_masks(8, 8, 4));
-static ii_nondc_mask_4x16: Align64<[[u8; 4 * 16]; N_II_PRED_MODES]> =
-    Align64(build_nondc_ii_masks(4, 16, 2));
-static ii_nondc_mask_4x8: Align32<[[u8; 4 * 8]; N_II_PRED_MODES]> =
-    Align32(build_nondc_ii_masks(4, 8, 4));
-static ii_nondc_mask_4x4: Align16<[[u8; 4 * 4]; N_II_PRED_MODES]> =
-    Align16(build_nondc_ii_masks(4, 4, 8));
+static ii_nondc_mask_8x32: Align64<[[u8; 8 * 32]; N_II_PRED_MODES]> = Align64(build_nondc_ii_masks(8, 32, 1));
+static ii_nondc_mask_8x16: Align64<[[u8; 8 * 16]; N_II_PRED_MODES]> = Align64(build_nondc_ii_masks(8, 16, 2));
+static ii_nondc_mask_8x8: Align64<[[u8; 8 * 8]; N_II_PRED_MODES]> = Align64(build_nondc_ii_masks(8, 8, 4));
+static ii_nondc_mask_4x16: Align64<[[u8; 4 * 16]; N_II_PRED_MODES]> = Align64(build_nondc_ii_masks(4, 16, 2));
+static ii_nondc_mask_4x8: Align32<[[u8; 4 * 8]; N_II_PRED_MODES]> = Align32(build_nondc_ii_masks(4, 8, 4));
+static ii_nondc_mask_4x4: Align16<[[u8; 4 * 4]; N_II_PRED_MODES]> = Align16(build_nondc_ii_masks(4, 4, 8));
 
 pub static dav1d_ii_masks: [[[&'static [u8]; InterIntraPredMode::COUNT]; 3]; BlockSize::COUNT] = {
     use BlockSize::*;

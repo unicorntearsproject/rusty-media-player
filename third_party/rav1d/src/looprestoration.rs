@@ -8,6 +8,7 @@ use crate::include::common::bitdepth::ToPrimitive;
 use crate::include::common::bitdepth::BPC;
 use crate::include::common::intops::iclip;
 use crate::include::dav1d::picture::Rav1dPictureDataComponentOffset;
+use crate::libc::ptrdiff_t;
 use crate::src::align::AlignedVec64;
 use crate::src::cpu::CpuFlags;
 use crate::src::cursor::CursorMut;
@@ -17,7 +18,6 @@ use crate::src::strided::Strided as _;
 use crate::src::tables::dav1d_sgr_x_by_x;
 use crate::src::wrap_fn_ptr::wrap_fn_ptr;
 use bitflags::bitflags;
-use crate::libc::ptrdiff_t;
 use std::cmp;
 use std::ffi::c_int;
 use std::ffi::c_uint;
@@ -30,10 +30,7 @@ use zerocopy::AsBytes;
 use zerocopy::FromBytes;
 use zerocopy::FromZeroes;
 
-#[cfg(all(
-    feature = "asm",
-    any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
-))]
+#[cfg(all(feature = "asm", any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::include::common::bitdepth::bd_fn;
 
 #[cfg(all(feature = "asm", any(target_arch = "x86", target_arch = "x86_64")))]
@@ -87,23 +84,19 @@ pub struct LooprestorationParams {
 impl LooprestorationParams {
     pub fn sgr(&self) -> &LooprestorationParamsSgr {
         // These asserts ensure this is a no-op.
-        const _: () = assert!(
-            mem::size_of::<LooprestorationParams>() >= mem::size_of::<LooprestorationParamsSgr>()
-        );
-        let _: () = assert!(
-            mem::align_of::<LooprestorationParams>() >= mem::align_of::<LooprestorationParamsSgr>()
-        );
+        const _: () =
+            assert!(mem::size_of::<LooprestorationParams>() >= mem::size_of::<LooprestorationParamsSgr>());
+        let _: () =
+            assert!(mem::align_of::<LooprestorationParams>() >= mem::align_of::<LooprestorationParamsSgr>());
         FromBytes::ref_from_prefix(AsBytes::as_bytes(&self.filter)).unwrap()
     }
 
     pub fn sgr_mut(&mut self) -> &mut LooprestorationParamsSgr {
         // These asserts ensure this is a no-op.
-        const _: () = assert!(
-            mem::size_of::<LooprestorationParams>() >= mem::size_of::<LooprestorationParamsSgr>()
-        );
-        const _: () = assert!(
-            mem::align_of::<LooprestorationParams>() >= mem::align_of::<LooprestorationParamsSgr>()
-        );
+        const _: () =
+            assert!(mem::size_of::<LooprestorationParams>() >= mem::size_of::<LooprestorationParamsSgr>());
+        const _: () =
+            assert!(mem::align_of::<LooprestorationParams>() >= mem::align_of::<LooprestorationParamsSgr>());
         FromBytes::mut_from_prefix(AsBytes::as_bytes_mut(&mut self.filter)).unwrap()
     }
 }
@@ -153,20 +146,12 @@ impl loop_restoration_filter::Fn {
         // needed since `.offset` requires the pointer to be in bounds, which
         // `.wrapping_offset` does not, and delays that requirement to when the
         // pointer is dereferenced.
-        let lpf_ptr = lpf
-            .as_mut_ptr()
-            .cast::<BD::Pixel>()
-            .wrapping_offset(lpf_off)
-            .cast();
+        let lpf_ptr = lpf.as_mut_ptr().cast::<BD::Pixel>().wrapping_offset(lpf_off).cast();
         let bd = bd.into_c();
         let dst = FFISafe::new(&dst);
         let lpf = FFISafe::new(lpf);
         // SAFETY: Fallbacks `fn wiener_rust`, `fn sgr_{3x3,5x5,mix}_rust` are safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                dst_ptr, dst_stride, left, lpf_ptr, w, h, params, edges, bd, dst, lpf,
-            )
-        }
+        unsafe { self.get()(dst_ptr, dst_stride, left, lpf_ptr, w, h, params, edges, bd, dst, lpf) }
     }
 }
 
@@ -194,13 +179,9 @@ fn padding<BD: BitDepth>(
     assert!(stripe_h > 0);
     let stride = p.pixel_stride::<BD>();
 
-    let [have_left, have_right, have_top, have_bottom] = [
-        LrEdgeFlags::LEFT,
-        LrEdgeFlags::RIGHT,
-        LrEdgeFlags::TOP,
-        LrEdgeFlags::BOTTOM,
-    ]
-    .map(|lr_have| edges.contains(lr_have));
+    let [have_left, have_right, have_top, have_bottom] =
+        [LrEdgeFlags::LEFT, LrEdgeFlags::RIGHT, LrEdgeFlags::TOP, LrEdgeFlags::BOTTOM]
+            .map(|lr_have| edges.contains(lr_have));
     let [have_left_3, have_right_3] = [have_left, have_right].map(|have| 3 * have as usize);
 
     // Copy more pixels if we don't have to pad them
@@ -214,8 +195,7 @@ fn padding<BD: BitDepth>(
         // Copy previous loop filtered rows
         let lpf_guard;
         let (above_1, above_2) = if stride < 0 {
-            lpf_guard = lpf
-                .slice_as::<_, BD::Pixel>(((lpf_off + stride) as usize.., ..abs_stride + unit_w));
+            lpf_guard = lpf.slice_as::<_, BD::Pixel>(((lpf_off + stride) as usize.., ..abs_stride + unit_w));
             let above_2 = &*lpf_guard;
             let above_1 = &above_2[abs_stride..];
             (above_1, above_2)
@@ -247,50 +227,23 @@ fn padding<BD: BitDepth>(
         // Copy next loop filtered rows
         let offset = lpf_off + (6 + if stride < 0 { 1 } else { 0 }) * stride;
         let lpf = &*lpf.slice_as((offset as usize.., ..abs_stride + unit_w));
-        let (below_1, below_2) = if stride < 0 {
-            (&lpf[abs_stride..], lpf)
-        } else {
-            (lpf, &lpf[abs_stride..])
-        };
+        let (below_1, below_2) =
+            if stride < 0 { (&lpf[abs_stride..], lpf) } else { (lpf, &lpf[abs_stride..]) };
         BD::pixel_copy(&mut dst_tl[stripe_h * REST_UNIT_STRIDE..], below_1, unit_w);
-        BD::pixel_copy(
-            &mut dst_tl[(stripe_h + 1) * REST_UNIT_STRIDE..],
-            below_2,
-            unit_w,
-        );
-        BD::pixel_copy(
-            &mut dst_tl[(stripe_h + 2) * REST_UNIT_STRIDE..],
-            below_2,
-            unit_w,
-        );
+        BD::pixel_copy(&mut dst_tl[(stripe_h + 1) * REST_UNIT_STRIDE..], below_2, unit_w);
+        BD::pixel_copy(&mut dst_tl[(stripe_h + 2) * REST_UNIT_STRIDE..], below_2, unit_w);
     } else {
         // Pad with last row
         let src = p + ((stripe_h - 1) as isize * stride);
         let src = &*src.slice::<BD>(unit_w);
         BD::pixel_copy(&mut dst_tl[stripe_h * REST_UNIT_STRIDE..], src, unit_w);
-        BD::pixel_copy(
-            &mut dst_tl[(stripe_h + 1) * REST_UNIT_STRIDE..],
-            src,
-            unit_w,
-        );
-        BD::pixel_copy(
-            &mut dst_tl[(stripe_h + 2) * REST_UNIT_STRIDE..],
-            src,
-            unit_w,
-        );
+        BD::pixel_copy(&mut dst_tl[(stripe_h + 1) * REST_UNIT_STRIDE..], src, unit_w);
+        BD::pixel_copy(&mut dst_tl[(stripe_h + 2) * REST_UNIT_STRIDE..], src, unit_w);
         if have_left {
             let left = &left[stripe_h - 1][1..];
             BD::pixel_copy(&mut dst_tl[stripe_h * REST_UNIT_STRIDE..], left, left.len());
-            BD::pixel_copy(
-                &mut dst_tl[(stripe_h + 1) * REST_UNIT_STRIDE..],
-                left,
-                left.len(),
-            );
-            BD::pixel_copy(
-                &mut dst_tl[(stripe_h + 2) * REST_UNIT_STRIDE..],
-                left,
-                left.len(),
-            );
+            BD::pixel_copy(&mut dst_tl[(stripe_h + 1) * REST_UNIT_STRIDE..], left, left.len());
+            BD::pixel_copy(&mut dst_tl[(stripe_h + 2) * REST_UNIT_STRIDE..], left, left.len());
         }
     }
 
@@ -298,11 +251,7 @@ fn padding<BD: BitDepth>(
     let len = unit_w - have_left_3;
     for j in 0..stripe_h {
         let p = p + have_left_3 + (j as isize * stride);
-        BD::pixel_copy(
-            &mut dst_tl[j * REST_UNIT_STRIDE + have_left_3..],
-            &p.slice::<BD>(len),
-            len,
-        );
+        BD::pixel_copy(&mut dst_tl[j * REST_UNIT_STRIDE + have_left_3..], &p.slice::<BD>(len), len);
     }
 
     if !have_right {
@@ -341,10 +290,7 @@ fn padding<BD: BitDepth>(
 /// [`offset_from`].
 ///
 /// [`offset_from`]: https://doc.rust-lang.org/stable/std/primitive.pointer.html#method.offset_from
-fn reconstruct_lpf_offset<BD: BitDepth>(
-    lpf: &DisjointMut<AlignedVec64<u8>>,
-    ptr: *const BD::Pixel,
-) -> isize {
+fn reconstruct_lpf_offset<BD: BitDepth>(lpf: &DisjointMut<AlignedVec64<u8>>, ptr: *const BD::Pixel) -> isize {
     let base = lpf.as_mut_ptr().cast::<BD::Pixel>();
     (ptr as isize - base as isize) / (mem::size_of::<BD::Pixel>() as isize)
 }
@@ -411,10 +357,8 @@ fn wiener_rust<BD: BitDepth>(
     let round_bits_h = 3 + (bitdepth == 12) as c_int * 2;
     let rounding_off_h = 1 << round_bits_h - 1;
     let clip_limit = 1 << bitdepth + 1 + 7 - round_bits_h;
-    for (tmp, hor) in tmp
-        .chunks_exact(REST_UNIT_STRIDE)
-        .zip(hor.chunks_exact_mut(REST_UNIT_STRIDE))
-        .take(h + 6)
+    for (tmp, hor) in
+        tmp.chunks_exact(REST_UNIT_STRIDE).zip(hor.chunks_exact_mut(REST_UNIT_STRIDE)).take(h + 6)
     {
         for i in 0..w {
             let mut sum = 1 << bitdepth + 6;
@@ -444,8 +388,7 @@ fn wiener_rust<BD: BitDepth>(
             }
 
             let p = p + (j as isize * p.pixel_stride::<BD>()) + i;
-            *p.index_mut::<BD>() =
-                iclip(sum + rounding_off_v >> round_bits_v, 0, bd.into_c()).as_();
+            *p.index_mut::<BD>() = iclip(sum + rounding_off_v >> round_bits_v, 0, bd.into_c()).as_();
         }
     }
 }
@@ -697,8 +640,7 @@ fn selfguided_filter<BD: BitDepth>(
     {
         let stride = REST_UNIT_STRIDE as isize;
         (p[i - stride] + p[i + stride]).as_::<c_int>() * 6
-            + (p[i - 1 - stride] + p[i - 1 + stride] + p[i + 1 - stride] + p[i + 1 + stride])
-                .as_::<c_int>()
+            + (p[i - 1 - stride] + p[i - 1 + stride] + p[i + 1 - stride] + p[i + 1 + stride]).as_::<c_int>()
                 * 5
     }
 
@@ -708,8 +650,7 @@ fn selfguided_filter<BD: BitDepth>(
     {
         let stride = REST_UNIT_STRIDE as isize;
         (p[i] + p[i - 1] + p[i + 1] + p[i - stride] + p[i + stride]).as_::<c_int>() * 4
-            + (p[i - 1 - stride] + p[i - 1 + stride] + p[i + 1 - stride] + p[i + 1 + stride])
-                .as_::<c_int>()
+            + (p[i - 1 - stride] + p[i - 1 + stride] + p[i + 1 - stride] + p[i + 1 + stride]).as_::<c_int>()
                 * 3
     }
 
@@ -751,10 +692,7 @@ fn selfguided_filter<BD: BitDepth>(
     } else {
         for _ in 0..h {
             for i in 0..w {
-                let (a, b) = (
-                    eight_neighbors(&b, i as isize),
-                    eight_neighbors(&a, i as isize),
-                );
+                let (a, b) = (eight_neighbors(&b, i as isize), eight_neighbors(&a, i as isize));
                 dst[i] = (b - a * src[i].as_::<c_int>() + (1 << 8) >> 9).as_();
             }
             dst = &mut dst[384..];
@@ -962,8 +900,8 @@ mod neon {
     use super::*;
 
     use crate::include::common::bitdepth::bd_fn;
-    use crate::src::align::Align16;
     use crate::libc::intptr_t;
+    use crate::src::align::Align16;
     use std::ptr;
 
     wrap_fn_ptr!(unsafe extern "C" fn wiener_filter_h(
@@ -1149,9 +1087,7 @@ mod neon {
         ) {
             let sumsq = sumsq.as_mut_ptr();
             let sum = sum.as_mut_ptr();
-            let left = left
-                .map(|left| left.as_ptr().cast())
-                .unwrap_or_else(ptr::null);
+            let left = left.map(|left| left.as_ptr().cast()).unwrap_or_else(ptr::null);
             let src = src.cast();
             // SAFETY: asm should be safe.
             unsafe { self.get()(sumsq, sum, left, src, stride, w, h, edges) }
@@ -1289,16 +1225,7 @@ mod neon {
             edges,
         );
         if edges.contains(LrEdgeFlags::TOP) {
-            sgr_box3_h::Fn::neon::<BD>().call::<BD>(
-                sumsq,
-                sum,
-                None,
-                lpf,
-                src.stride(),
-                w,
-                2,
-                edges,
-            );
+            sgr_box3_h::Fn::neon::<BD>().call::<BD>(sumsq, sum, None, lpf, src.stride(), w, 2, edges);
         }
         if edges.contains(LrEdgeFlags::BOTTOM) {
             let h = h as usize;
@@ -1314,13 +1241,7 @@ mod neon {
                 edges,
             );
         }
-        sgr_box_v::Fn::neon3().call(
-            &mut sumsq[2 * STRIDE..],
-            &mut sum[2 * STRIDE..],
-            w,
-            h,
-            edges,
-        );
+        sgr_box_v::Fn::neon3().call(&mut sumsq[2 * STRIDE..], &mut sum[2 * STRIDE..], w, h, edges);
         let a = &mut sumsq[2 * STRIDE..];
         let b = &mut sum[2 * STRIDE..];
         sgr_calc_ab::Fn::neon1().call(a, b, w, h, strength, bd);
@@ -1352,9 +1273,7 @@ mod neon {
         ) {
             let sumsq = sumsq.as_mut_ptr();
             let sum = sum.as_mut_ptr();
-            let left = left
-                .map(|left| left.as_ptr().cast())
-                .unwrap_or_else(ptr::null);
+            let left = left.map(|left| left.as_ptr().cast()).unwrap_or_else(ptr::null);
             let src = src.cast();
             // SAFETY: asm should be safe.
             unsafe { self.get()(sumsq, sum, left, src, stride, w, h, edges) }
@@ -1394,16 +1313,7 @@ mod neon {
             edges,
         );
         if edges.contains(LrEdgeFlags::TOP) {
-            sgr_box5_h::Fn::neon::<BD>().call::<BD>(
-                sumsq,
-                sum,
-                None,
-                lpf,
-                src.stride(),
-                w,
-                2,
-                edges,
-            );
+            sgr_box5_h::Fn::neon::<BD>().call::<BD>(sumsq, sum, None, lpf, src.stride(), w, 2, edges);
         }
         if edges.contains(LrEdgeFlags::BOTTOM) {
             let h = h as usize;
@@ -1419,13 +1329,7 @@ mod neon {
                 edges,
             );
         }
-        sgr_box_v::Fn::neon5().call(
-            &mut sumsq[2 * STRIDE..],
-            &mut sum[2 * STRIDE..],
-            w,
-            h,
-            edges,
-        );
+        sgr_box_v::Fn::neon5().call(&mut sumsq[2 * STRIDE..], &mut sum[2 * STRIDE..], w, h, edges);
         let a = &mut sumsq[2 * STRIDE..];
         let b = &mut sum[2 * STRIDE..];
         sgr_calc_ab::Fn::neon2().call(a, b, w, h, strength, bd);
@@ -1501,11 +1405,7 @@ mod neon {
             let src_stride = src.stride();
             let bd = bd.into_c();
             // SAFETY: asm should be safe.
-            unsafe {
-                self.get()(
-                    dst_ptr, dst_stride, src_ptr, src_stride, t1, t2, w, h, wt, bd,
-                )
-            }
+            unsafe { self.get()(dst_ptr, dst_stride, src_ptr, src_stride, t1, t2, w, h, wt, bd) }
         }
 
         const fn neon<BD: BitDepth>() -> Self {
@@ -1580,10 +1480,7 @@ mod neon {
     use std::array;
     use std::ptr;
 
-    fn rotate<const LEN: usize, const MID: usize>(
-        a: &mut [*mut i32; LEN],
-        b: &mut [*mut i16; LEN],
-    ) {
+    fn rotate<const LEN: usize, const MID: usize>(a: &mut [*mut i32; LEN], b: &mut [*mut i16; LEN]) {
         a.rotate_left(MID);
         b.rotate_left(MID);
     }
@@ -1609,9 +1506,7 @@ mod neon {
             edges: LrEdgeFlags,
             bd: BD,
         ) {
-            let left = left
-                .map(|left| left.as_ptr().cast())
-                .unwrap_or_else(ptr::null);
+            let left = left.map(|left| left.as_ptr().cast()).unwrap_or_else(ptr::null);
             let src = src.cast();
             let bd = bd.into_c();
             // SAFETY: asm should be safe.
@@ -1652,9 +1547,7 @@ mod neon {
             edges: LrEdgeFlags,
             bd: BD,
         ) {
-            let left = left
-                .map(|left| left.as_ptr().cast())
-                .unwrap_or_else(ptr::null);
+            let left = left.map(|left| left.as_ptr().cast()).unwrap_or_else(ptr::null);
             let src = src.cast();
             let bd = bd.into_c();
             // SAFETY: asm should be safe.
@@ -1758,12 +1651,7 @@ mod neon {
         }
 
         const fn neon<BD: BitDepth>() -> Self {
-            bd_fn!(
-                sgr_finish_weighted1::decl_fn,
-                BD,
-                sgr_finish_weighted1,
-                neon
-            )
+            bd_fn!(sgr_finish_weighted1::decl_fn, BD, sgr_finish_weighted1, neon)
         }
     }
 
@@ -1799,12 +1687,7 @@ mod neon {
         }
 
         const fn neon<BD: BitDepth>() -> Self {
-            bd_fn!(
-                sgr_finish_weighted2::decl_fn,
-                BD,
-                sgr_finish_weighted2,
-                neon
-            )
+            bd_fn!(sgr_finish_weighted2::decl_fn, BD, sgr_finish_weighted2, neon)
         }
     }
 
@@ -1842,21 +1725,11 @@ mod neon {
         }
 
         const fn neon1<BD: BitDepth>() -> Self {
-            bd_fn!(
-                sgr_finish_filter_2rows::decl_fn,
-                BD,
-                sgr_finish_filter1_2rows,
-                neon
-            )
+            bd_fn!(sgr_finish_filter_2rows::decl_fn, BD, sgr_finish_filter1_2rows, neon)
         }
 
         const fn neon2<BD: BitDepth>() -> Self {
-            bd_fn!(
-                sgr_finish_filter_2rows::decl_fn,
-                BD,
-                sgr_finish_filter2_2rows,
-                neon
-            )
+            bd_fn!(sgr_finish_filter_2rows::decl_fn, BD, sgr_finish_filter2_2rows, neon)
         }
     }
 
@@ -1957,10 +1830,8 @@ mod neon {
         let mut tmp5 = Align16([0; 2 * FILTER_OUT_STRIDE]);
         let mut tmp3 = Align16([0; 2 * FILTER_OUT_STRIDE]);
 
-        sgr_finish_filter_2rows::Fn::neon2::<BD>()
-            .call(&mut tmp5, *dst, a5_ptrs, b5_ptrs, w, h, bd);
-        sgr_finish_filter_2rows::Fn::neon1::<BD>()
-            .call(&mut tmp3, *dst, a3_ptrs, b3_ptrs, w, h, bd);
+        sgr_finish_filter_2rows::Fn::neon2::<BD>().call(&mut tmp5, *dst, a5_ptrs, b5_ptrs, w, h, bd);
+        sgr_finish_filter_2rows::Fn::neon1::<BD>().call(&mut tmp3, *dst, a3_ptrs, b3_ptrs, w, h, bd);
 
         let wt = [w0 as i16, w1 as i16];
         sgr_weighted2::Fn::neon::<BD>().call(*dst, &tmp5, &tmp3, w, h, &wt, bd);
@@ -1992,8 +1863,7 @@ mod neon {
 
         let mut sumsq_ptrs;
         let mut sum_ptrs;
-        let sumsq_rows =
-            array::from_fn(|i| sumsq_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
+        let sumsq_rows = array::from_fn(|i| sumsq_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
         let sum_rows = array::from_fn(|i| sum_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
 
         let mut a_buf = Align16([0; BUF_STRIDE * 3 + 16]);
@@ -2020,26 +1890,10 @@ mod neon {
             sumsq_ptrs = sumsq_rows;
             sum_ptrs = sum_rows;
 
-            sgr_box_row_h::Fn::neon3::<BD>().call(
-                sumsq_rows[0],
-                sum_rows[0],
-                None,
-                lpf,
-                w,
-                edges,
-                bd,
-            );
+            sgr_box_row_h::Fn::neon3::<BD>().call(sumsq_rows[0], sum_rows[0], None, lpf, w, edges, bd);
             // `lpf` may be negatively out of bounds.
             lpf = lpf.wrapping_offset(stride);
-            sgr_box_row_h::Fn::neon3::<BD>().call(
-                sumsq_rows[1],
-                sum_rows[1],
-                None,
-                lpf,
-                w,
-                edges,
-                bd,
-            );
+            sgr_box_row_h::Fn::neon3::<BD>().call(sumsq_rows[1], sum_rows[1], None, lpf, w, edges, bd);
 
             sgr_box3_hv_neon(
                 &mut sumsq_ptrs,
@@ -2099,15 +1953,7 @@ mod neon {
             left = &left[1..];
             src += stride;
 
-            sgr_box3_vert_neon(
-                &mut sumsq_ptrs,
-                &mut sum_ptrs,
-                a_ptrs[2],
-                b_ptrs[2],
-                w,
-                sgr.s1 as c_int,
-                bd,
-            );
+            sgr_box3_vert_neon(&mut sumsq_ptrs, &mut sum_ptrs, a_ptrs[2], b_ptrs[2], w, sgr.s1 as c_int, bd);
             rotate::<3, 1>(&mut a_ptrs, &mut b_ptrs);
 
             h -= 1;
@@ -2237,15 +2083,7 @@ mod neon {
         if track != Track::Main {
             sumsq_ptrs[2] = sumsq_ptrs[1];
             sum_ptrs[2] = sum_ptrs[1];
-            sgr_box3_vert_neon(
-                &mut sumsq_ptrs,
-                &mut sum_ptrs,
-                a_ptrs[2],
-                b_ptrs[2],
-                w,
-                sgr.s1 as c_int,
-                bd,
-            );
+            sgr_box3_vert_neon(&mut sumsq_ptrs, &mut sum_ptrs, a_ptrs[2], b_ptrs[2], w, sgr.s1 as c_int, bd);
 
             sgr_finish1_neon(&mut dst, &mut a_ptrs, &mut b_ptrs, w, sgr.w1 as c_int, bd);
         }
@@ -2273,10 +2111,8 @@ mod neon {
 
         let mut sumsq_ptrs;
         let mut sum_ptrs;
-        let sumsq_rows: [_; 5] =
-            array::from_fn(|i| sumsq_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
-        let sum_rows: [_; 5] =
-            array::from_fn(|i| sum_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
+        let sumsq_rows: [_; 5] = array::from_fn(|i| sumsq_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
+        let sum_rows: [_; 5] = array::from_fn(|i| sum_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
 
         let mut a_buf = Align16([0; BUF_STRIDE * 2 + 16]);
         let mut b_buf = Align16([0; BUF_STRIDE * 2 + 16]);
@@ -2303,26 +2139,10 @@ mod neon {
             sumsq_ptrs = array::from_fn(|i| sumsq_rows[if i > 0 { i - 1 } else { 0 }]);
             sum_ptrs = array::from_fn(|i| sum_rows[if i > 0 { i - 1 } else { 0 }]);
 
-            sgr_box_row_h::Fn::neon5::<BD>().call(
-                sumsq_rows[0],
-                sum_rows[0],
-                None,
-                lpf,
-                w,
-                edges,
-                bd,
-            );
+            sgr_box_row_h::Fn::neon5::<BD>().call(sumsq_rows[0], sum_rows[0], None, lpf, w, edges, bd);
             // `lpf` may be negatively out of bounds.
             lpf = lpf.wrapping_offset(stride);
-            sgr_box_row_h::Fn::neon5::<BD>().call(
-                sumsq_rows[1],
-                sum_rows[1],
-                None,
-                lpf,
-                w,
-                edges,
-                bd,
-            );
+            sgr_box_row_h::Fn::neon5::<BD>().call(sumsq_rows[1], sum_rows[1], None, lpf, w, edges, bd);
 
             sgr_box_row_h::Fn::neon5::<BD>().call(
                 sumsq_rows[2],
@@ -2466,15 +2286,7 @@ mod neon {
                             bd,
                         );
 
-                        sgr_finish2_neon(
-                            &mut dst,
-                            &mut a_ptrs,
-                            &mut b_ptrs,
-                            w,
-                            2,
-                            sgr.w0 as c_int,
-                            bd,
-                        );
+                        sgr_finish2_neon(&mut dst, &mut a_ptrs, &mut b_ptrs, w, 2, sgr.w0 as c_int, bd);
 
                         h -= 1;
                         if h <= 0 {
@@ -2530,15 +2342,7 @@ mod neon {
                     sgr.s0 as c_int,
                     bd,
                 );
-                sgr_finish2_neon(
-                    &mut dst,
-                    &mut a_ptrs,
-                    &mut b_ptrs,
-                    w,
-                    2,
-                    sgr.w0 as c_int,
-                    bd,
-                );
+                sgr_finish2_neon(&mut dst, &mut a_ptrs, &mut b_ptrs, w, 2, sgr.w0 as c_int, bd);
                 h -= 1;
             }
         }
@@ -2606,15 +2410,7 @@ mod neon {
                     sgr.s0 as c_int,
                     bd,
                 );
-                sgr_finish2_neon(
-                    &mut dst,
-                    &mut a_ptrs,
-                    &mut b_ptrs,
-                    w,
-                    2,
-                    sgr.w0 as c_int,
-                    bd,
-                );
+                sgr_finish2_neon(&mut dst, &mut a_ptrs, &mut b_ptrs, w, 2, sgr.w0 as c_int, bd);
             }
         }
 
@@ -2629,15 +2425,7 @@ mod neon {
                     sgr.s0 as c_int,
                     bd,
                 );
-                sgr_finish2_neon(
-                    &mut dst,
-                    &mut a_ptrs,
-                    &mut b_ptrs,
-                    w,
-                    2,
-                    sgr.w0 as c_int,
-                    bd,
-                );
+                sgr_finish2_neon(&mut dst, &mut a_ptrs, &mut b_ptrs, w, 2, sgr.w0 as c_int, bd);
             }
             Track::Odd | Track::Vert1 => {
                 // Duplicate the last row twice more
@@ -2655,15 +2443,7 @@ mod neon {
                     sgr.s0 as c_int,
                     bd,
                 );
-                sgr_finish2_neon(
-                    &mut dst,
-                    &mut a_ptrs,
-                    &mut b_ptrs,
-                    w,
-                    1,
-                    sgr.w0 as c_int,
-                    bd,
-                );
+                sgr_finish2_neon(&mut dst, &mut a_ptrs, &mut b_ptrs, w, 1, sgr.w0 as c_int, bd);
             }
         }
     }
@@ -2690,16 +2470,14 @@ mod neon {
 
         let sumsq5_rows: [_; 5] =
             array::from_fn(|i| sumsq5_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
-        let sum5_rows: [_; 5] =
-            array::from_fn(|i| sum5_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
+        let sum5_rows: [_; 5] = array::from_fn(|i| sum5_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
 
         let mut sumsq3_buf = Align16([0; BUF_STRIDE * 3 + 16]);
         let mut sum3_buf = Align16([0; BUF_STRIDE * 3 + 16]);
 
         let sumsq3_rows: [_; 3] =
             array::from_fn(|i| sumsq3_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
-        let sum3_rows: [_; 3] =
-            array::from_fn(|i| sum3_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
+        let sum3_rows: [_; 3] = array::from_fn(|i| sum3_buf.0[i * BUF_STRIDE..][..BUF_STRIDE].as_mut_ptr());
 
         let mut a5_buf = Align16([0; BUF_STRIDE * 2 + 16]);
         let mut b5_buf = Align16([0; BUF_STRIDE * 2 + 16]);
@@ -2731,10 +2509,8 @@ mod neon {
         let mut sumsq3_ptrs = array::from_fn(|i| sumsq3_rows[if lr_have_top { i } else { 0 }]);
         let mut sum3_ptrs = array::from_fn(|i| sum3_rows[if lr_have_top { i } else { 0 }]);
 
-        let mut sumsq5_ptrs =
-            array::from_fn(|i| sumsq5_rows[if lr_have_top && i > 0 { i - 1 } else { 0 }]);
-        let mut sum5_ptrs =
-            array::from_fn(|i| sum5_rows[if lr_have_top && i > 0 { i - 1 } else { 0 }]);
+        let mut sumsq5_ptrs = array::from_fn(|i| sumsq5_rows[if lr_have_top && i > 0 { i - 1 } else { 0 }]);
+        let mut sum5_ptrs = array::from_fn(|i| sum5_rows[if lr_have_top && i > 0 { i - 1 } else { 0 }]);
 
         let sgr = params.sgr();
 
@@ -3457,12 +3233,7 @@ impl Rav1dLoopRestorationDSPContext {
                 return self;
             }
 
-            self.wiener[0] = bd_fn!(
-                loop_restoration_filter::decl_fn,
-                BD,
-                wiener_filter7,
-                avx512icl
-            );
+            self.wiener[0] = bd_fn!(loop_restoration_filter::decl_fn, BD, wiener_filter7, avx512icl);
             self.wiener[1] = match BD::BPC {
                 // With VNNI we don't need a 5-tap version.
                 BPC::BPC8 => self.wiener[0],
@@ -3472,24 +3243,9 @@ impl Rav1dLoopRestorationDSPContext {
             };
 
             if matches!(BD::BPC, BPC::BPC8) || bpc == 10 {
-                self.sgr[0] = bd_fn!(
-                    loop_restoration_filter::decl_fn,
-                    BD,
-                    sgr_filter_5x5,
-                    avx512icl
-                );
-                self.sgr[1] = bd_fn!(
-                    loop_restoration_filter::decl_fn,
-                    BD,
-                    sgr_filter_3x3,
-                    avx512icl
-                );
-                self.sgr[2] = bd_fn!(
-                    loop_restoration_filter::decl_fn,
-                    BD,
-                    sgr_filter_mix,
-                    avx512icl
-                );
+                self.sgr[0] = bd_fn!(loop_restoration_filter::decl_fn, BD, sgr_filter_5x5, avx512icl);
+                self.sgr[1] = bd_fn!(loop_restoration_filter::decl_fn, BD, sgr_filter_3x3, avx512icl);
+                self.sgr[2] = bd_fn!(loop_restoration_filter::decl_fn, BD, sgr_filter_mix, avx512icl);
             }
         }
 

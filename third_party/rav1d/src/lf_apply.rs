@@ -61,19 +61,14 @@ fn backup_lpf<BD: BitDepth>(
             // Copy the top part of the stored loop filtered pixels from the
             // previous sb row needed above the first stripe of this sb row.
             let (dst_idx, src_idx) = if dst.stride() < 0 {
-                (
-                    dst.offset - 3 * px_abs_stride,
-                    dst.offset - top_size - 3 * px_abs_stride,
-                )
+                (dst.offset - 3 * px_abs_stride, dst.offset - top_size - 3 * px_abs_stride)
             } else {
                 (dst.offset, dst.offset + top_size)
             };
 
             for i in 0..4 {
                 BD::pixel_copy(
-                    &mut dst
-                        .data
-                        .mut_slice_as((dst_idx + i * px_abs_stride.., ..dst_w)),
+                    &mut dst.data.mut_slice_as((dst_idx + i * px_abs_stride.., ..dst_w)),
                     &dst.data.slice_as((src_idx + i * px_abs_stride.., ..dst_w)),
                     dst_w,
                 );
@@ -164,8 +159,7 @@ pub(crate) fn rav1d_copy_lpf<BD: BitDepth>(
     let sr_cur_data = &f.sr_cur.p.data.as_ref().unwrap().data;
     let dst = array::from_fn::<_, 3, _>(|i| {
         let data = &sr_cur_data[i];
-        let offset =
-            f.lf.lr_lpf_line[i].wrapping_add_signed(tt_off as isize * data.pixel_stride::<BD>());
+        let offset = f.lf.lr_lpf_line[i].wrapping_add_signed(tt_off as isize * data.pixel_stride::<BD>());
         Rav1dPictureDataComponentOffset { data, offset }
     });
 
@@ -181,10 +175,7 @@ pub(crate) fn rav1d_copy_lpf<BD: BitDepth>(
             backup_lpf::<BD>(
                 c,
                 WithOffset {
-                    data: WithStride {
-                        buf: &f.lf.lr_line_buf,
-                        stride: dst[0].stride(),
-                    },
+                    data: WithStride { buf: &f.lf.lr_line_buf, stride: dst[0].stride() },
                     offset: dst[0].offset,
                 },
                 src[0] - (offset_y as isize * src[0].pixel_stride::<BD>()),
@@ -211,10 +202,7 @@ pub(crate) fn rav1d_copy_lpf<BD: BitDepth>(
             backup_lpf::<BD>(
                 c,
                 WithOffset {
-                    data: WithStride {
-                        buf: &f.lf.cdef_line_buf,
-                        stride: src[0].stride(),
-                    },
+                    data: WithStride { buf: &f.lf.cdef_line_buf, stride: src[0].stride() },
                     offset: cdef_line_start + (cdef_off_y - cmp::min(y_span, 0)) as usize,
                 },
                 src[0] - (offset_y as isize * src[0].pixel_stride::<BD>()),
@@ -250,10 +238,7 @@ pub(crate) fn rav1d_copy_lpf<BD: BitDepth>(
                 backup_lpf::<BD>(
                     c,
                     WithOffset {
-                        data: WithStride {
-                            buf: &f.lf.lr_line_buf,
-                            stride: dst[1].stride(),
-                        },
+                        data: WithStride { buf: &f.lf.lr_line_buf, stride: dst[1].stride() },
                         offset: dst[1].offset,
                     },
                     src[1] - (offset_uv as isize * src[1].pixel_stride::<BD>()),
@@ -275,15 +260,11 @@ pub(crate) fn rav1d_copy_lpf<BD: BitDepth>(
             if have_tt != 0 && resize != 0 {
                 let cdef_plane_uv_sz = 4 * f.sbh as isize * src[1].pixel_stride::<BD>();
                 let uv_span = cdef_plane_uv_sz - src[1].pixel_stride::<BD>();
-                let cdef_line_start =
-                    (f.lf.cdef_lpf_line[1] as isize + cmp::min(uv_span, 0)) as usize;
+                let cdef_line_start = (f.lf.cdef_lpf_line[1] as isize + cmp::min(uv_span, 0)) as usize;
                 backup_lpf::<BD>(
                     c,
                     WithOffset {
-                        data: WithStride {
-                            buf: &f.lf.cdef_line_buf,
-                            stride: src[1].stride(),
-                        },
+                        data: WithStride { buf: &f.lf.cdef_line_buf, stride: src[1].stride() },
                         offset: cdef_line_start + (cdef_off_uv - cmp::min(uv_span, 0)) as usize,
                     },
                     src[1] - (offset_uv as isize * src[1].pixel_stride::<BD>()),
@@ -308,10 +289,7 @@ pub(crate) fn rav1d_copy_lpf<BD: BitDepth>(
                 backup_lpf::<BD>(
                     c,
                     WithOffset {
-                        data: WithStride {
-                            buf: &f.lf.lr_line_buf,
-                            stride: dst[2].stride(),
-                        },
+                        data: WithStride { buf: &f.lf.lr_line_buf, stride: dst[2].stride() },
                         offset: dst[2].offset,
                     },
                     src[2] - (offset_uv as isize * src[2].pixel_stride::<BD>()),
@@ -333,15 +311,11 @@ pub(crate) fn rav1d_copy_lpf<BD: BitDepth>(
             if have_tt != 0 && resize != 0 {
                 let cdef_plane_uv_sz = 4 * f.sbh as isize * src[2].pixel_stride::<BD>();
                 let uv_span = cdef_plane_uv_sz - src[2].pixel_stride::<BD>();
-                let cdef_line_start =
-                    (f.lf.cdef_lpf_line[2] as isize + cmp::min(uv_span, 0)) as usize;
+                let cdef_line_start = (f.lf.cdef_lpf_line[2] as isize + cmp::min(uv_span, 0)) as usize;
                 backup_lpf::<BD>(
                     c,
                     WithOffset {
-                        data: WithStride {
-                            buf: &f.lf.cdef_line_buf,
-                            stride: src[2].stride(),
-                        },
+                        data: WithStride { buf: &f.lf.cdef_line_buf, stride: src[2].stride() },
                         offset: cdef_line_start + (cdef_off_uv - cmp::min(uv_span, 0)) as usize,
                     },
                     src[2] - (offset_uv as isize * src[2].pixel_stride::<BD>()),
@@ -388,8 +362,7 @@ fn filter_plane_cols_y<BD: BitDepth>(
         let mask = &mask[x];
         let hmask = if starty4 == 0 {
             if endy4 > 16 {
-                mask.each_ref()
-                    .map(|[a, b]| a.get() as u32 | ((b.get() as u32) << 16))
+                mask.each_ref().map(|[a, b]| a.get() as u32 | ((b.get() as u32) << 16))
             } else {
                 mask.each_ref().map(|[a, _]| a.get() as u32)
             }
@@ -461,8 +434,7 @@ fn filter_plane_cols_uv<BD: BitDepth>(
         let mask = &mask[x];
         let hmask = if starty4 == 0 {
             if endy4 > 16 >> ss_ver {
-                mask.each_ref()
-                    .map(|[a, b]| a.get() as u32 | ((b.get() as u32) << (16 >> ss_ver)))
+                mask.each_ref().map(|[a, b]| a.get() as u32 | ((b.get() as u32) << (16 >> ss_ver)))
             } else {
                 mask.each_ref().map(|[a, _]| a.get() as u32)
             }
@@ -565,8 +537,7 @@ pub(crate) fn rav1d_loopfilter_sbrow_cols<BD: BitDepth>(
             y_hmask[2][sidx].update(|it| it & !smask);
             y_hmask[1][sidx].update(|it| it & !smask);
             y_hmask[0][sidx].update(|it| it & !smask);
-            y_hmask[cmp::min(idx, lpf_y[(y - starty4) as usize] as usize)][sidx]
-                .update(|it| it | smask);
+            y_hmask[cmp::min(idx, lpf_y[(y - starty4) as usize] as usize)][sidx].update(|it| it | smask);
         }
         if f.cur.p.layout != Rav1dPixelLayout::I400 {
             let uv_hmask = &lflvl[x as usize].filter_uv[0][cbx4 as usize];
@@ -622,10 +593,7 @@ pub(crate) fn rav1d_loopfilter_sbrow_cols<BD: BitDepth>(
         }
     }
     let lflvl = &f.lf.mask[lflvl_offset..];
-    let lvl = WithOffset {
-        data: &f.lf.level,
-        offset: 4 * f.b4_stride as usize * (sby * sbsz) as usize,
-    };
+    let lvl = WithOffset { data: &f.lf.level, offset: 4 * f.b4_stride as usize * (sby * sbsz) as usize };
     have_left = false;
     for x in 0..f.sb128w as usize {
         filter_plane_cols_y::<BD>(
@@ -643,10 +611,8 @@ pub(crate) fn rav1d_loopfilter_sbrow_cols<BD: BitDepth>(
     if frame_hdr.loopfilter.level_u == 0 && frame_hdr.loopfilter.level_v == 0 {
         return;
     }
-    let lvl = WithOffset {
-        data: &f.lf.level,
-        offset: 4 * f.b4_stride as usize * (sby * sbsz >> ss_ver) as usize,
-    };
+    let lvl =
+        WithOffset { data: &f.lf.level, offset: 4 * f.b4_stride as usize * (sby * sbsz >> ss_ver) as usize };
     have_left = false;
     for x in 0..f.sb128w as usize {
         filter_plane_cols_uv::<BD>(
@@ -684,10 +650,7 @@ pub(crate) fn rav1d_loopfilter_sbrow_rows<BD: BitDepth>(
     let endy4: c_uint = (starty4 + cmp::min(f.h4 - sby * sbsz, sbsz)) as c_uint;
     let uv_endy4: c_uint = endy4.wrapping_add(ss_ver as c_uint) >> ss_ver;
 
-    let lvl = WithOffset {
-        data: &f.lf.level,
-        offset: 4 * f.b4_stride as usize * (sby * sbsz) as usize,
-    };
+    let lvl = WithOffset { data: &f.lf.level, offset: 4 * f.b4_stride as usize * (sby * sbsz) as usize };
     for x in 0..f.sb128w as usize {
         filter_plane_rows_y::<BD>(
             f,
@@ -707,10 +670,8 @@ pub(crate) fn rav1d_loopfilter_sbrow_rows<BD: BitDepth>(
         return;
     }
 
-    let lvl = WithOffset {
-        data: &f.lf.level,
-        offset: 4 * f.b4_stride as usize * (sby * sbsz >> ss_ver) as usize,
-    };
+    let lvl =
+        WithOffset { data: &f.lf.level, offset: 4 * f.b4_stride as usize * (sby * sbsz >> ss_ver) as usize };
     let [_, pu, pv] = p;
     for x in 0..f.sb128w as usize {
         filter_plane_rows_uv::<BD>(

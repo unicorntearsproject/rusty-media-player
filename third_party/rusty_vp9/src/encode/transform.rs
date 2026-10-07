@@ -34,12 +34,8 @@ fn fdct4x4(residual: &[i32], out: &mut [i32]) {
     let mut inter = [0i32; 16];
     // Columns: pre-scale ×16; libvpx nudges the DC of column 0 up by 1.
     for col in 0..4 {
-        let mut cin = [
-            residual[col] * 16,
-            residual[4 + col] * 16,
-            residual[8 + col] * 16,
-            residual[12 + col] * 16,
-        ];
+        let mut cin =
+            [residual[col] * 16, residual[4 + col] * 16, residual[8 + col] * 16, residual[12 + col] * 16];
         if col == 0 && cin[0] != 0 {
             cin[0] += 1;
         }
@@ -51,12 +47,7 @@ fn fdct4x4(residual: &[i32], out: &mut [i32]) {
     }
     // Rows: butterfly, then the final round-shift down by 2.
     for r in 0..4 {
-        let rin = [
-            inter[r * 4],
-            inter[r * 4 + 1],
-            inter[r * 4 + 2],
-            inter[r * 4 + 3],
-        ];
+        let rin = [inter[r * 4], inter[r * 4 + 1], inter[r * 4 + 2], inter[r * 4 + 3]];
         let mut rout = [0i32; 4];
         fdct4(&rin, &mut rout);
         for c in 0..4 {
@@ -202,9 +193,7 @@ mod fdct_avx2 {
         debug_assert!(residual.iter().all(|&r| r.unsigned_abs() <= 1023));
         // Column pass: rows as vectors (lane = column), inputs pre-scaled ×4.
         let mut r: [__m256i; 8] = std::array::from_fn(|i| {
-            _mm256_slli_epi32::<2>(_mm256_loadu_si256(
-                residual.as_ptr().add(i * 8) as *const __m256i
-            ))
+            _mm256_slli_epi32::<2>(_mm256_loadu_si256(residual.as_ptr().add(i * 8) as *const __m256i))
         });
         r = bfly(r); // r[k] now = inter row k (coefficient k of every column)
                      // Row pass: transpose so lanes become rows, butterfly, transpose back.
@@ -276,12 +265,8 @@ fn fdct8x8_scalar(residual: &[i32], out: &mut [i32]) {
 pub fn fwht4x4(residual: &[i32], out: &mut [i32]) {
     let mut inter = [0i32; 16];
     for col in 0..4 {
-        let (mut a, mut b, mut c, mut d) = (
-            residual[col],
-            residual[4 + col],
-            residual[8 + col],
-            residual[12 + col],
-        );
+        let (mut a, mut b, mut c, mut d) =
+            (residual[col], residual[4 + col], residual[8 + col], residual[12 + col]);
         a += b;
         d -= c;
         let e = (a - d) >> 1;
@@ -295,12 +280,8 @@ pub fn fwht4x4(residual: &[i32], out: &mut [i32]) {
         inter[12 + col] = b;
     }
     for r in 0..4 {
-        let (mut a, mut b, mut c, mut d) = (
-            inter[r * 4],
-            inter[r * 4 + 1],
-            inter[r * 4 + 2],
-            inter[r * 4 + 3],
-        );
+        let (mut a, mut b, mut c, mut d) =
+            (inter[r * 4], inter[r * 4 + 1], inter[r * 4 + 2], inter[r * 4 + 3]);
         a += b;
         d -= c;
         let e = (a - d) >> 1;
@@ -738,20 +719,11 @@ fn inv_1d(inp: &[i32], out: &mut [i32], adst: bool) {
     match (inp.len(), adst) {
         (4, false) => idct4(inp.try_into().unwrap(), (&mut out[..4]).try_into().unwrap()),
         (8, false) => idct8(inp.try_into().unwrap(), (&mut out[..8]).try_into().unwrap()),
-        (16, false) => idct16(
-            inp.try_into().unwrap(),
-            (&mut out[..16]).try_into().unwrap(),
-        ),
-        (32, false) => idct32(
-            inp.try_into().unwrap(),
-            (&mut out[..32]).try_into().unwrap(),
-        ),
+        (16, false) => idct16(inp.try_into().unwrap(), (&mut out[..16]).try_into().unwrap()),
+        (32, false) => idct32(inp.try_into().unwrap(), (&mut out[..32]).try_into().unwrap()),
         (4, true) => iadst4(inp.try_into().unwrap(), (&mut out[..4]).try_into().unwrap()),
         (8, true) => iadst8(inp.try_into().unwrap(), (&mut out[..8]).try_into().unwrap()),
-        (16, true) => iadst16(
-            inp.try_into().unwrap(),
-            (&mut out[..16]).try_into().unwrap(),
-        ),
+        (16, true) => iadst16(inp.try_into().unwrap(), (&mut out[..16]).try_into().unwrap()),
         _ => unreachable!("no inverse 1-D for {} adst={adst}", inp.len()),
     }
 }
@@ -920,9 +892,8 @@ mod tests {
             return;
         }
         let mut s = 0x1111_2222_3333_4444u64;
-        let blocks: Vec<[i32; 64]> = (0..1000)
-            .map(|_| std::array::from_fn(|_| (xs(&mut s) % 511) as i32 - 255))
-            .collect();
+        let blocks: Vec<[i32; 64]> =
+            (0..1000).map(|_| std::array::from_fn(|_| (xs(&mut s) % 511) as i32 - 255)).collect();
         let mut out = [0i32; 64];
         let mut sink = 0i64;
         for (name, use_avx) in [("scalar", false), ("avx2", true)] {
@@ -962,9 +933,8 @@ mod tests {
         };
         for &range in &[255i32, 1023] {
             for _ in 0..2000 {
-                let r: Vec<i32> = (0..64)
-                    .map(|_| (xs(&mut s) % (2 * range as u64 + 1)) as i32 - range)
-                    .collect();
+                let r: Vec<i32> =
+                    (0..64).map(|_| (xs(&mut s) % (2 * range as u64 + 1)) as i32 - range).collect();
                 check(&r);
             }
             check(&[range; 64]);
@@ -1026,10 +996,7 @@ mod tests {
             let mut coeffs = [0i32; 16];
             forward_transform(&residual, 4, TxType::DctDct, &mut coeffs);
             assert_eq!(coeffs[0], 32 * v, "DC for v={v}");
-            assert!(
-                coeffs[1..].iter().all(|&c| c == 0),
-                "AC must be zero, v={v}"
-            );
+            assert!(coeffs[1..].iter().all(|&c| c == 0), "AC must be zero, v={v}");
         }
     }
 }

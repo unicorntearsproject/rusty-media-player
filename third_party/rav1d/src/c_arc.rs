@@ -91,8 +91,7 @@ impl<T: ?Sized> AsRef<T> for CArc<T> {
             // Cast through `*const ()` to remove any fat ptr metadata.
             // Use arithmetic on the addresses (similar to `.wrapping_*` methods),
             // as they don't have safety conditions (which we're checking here).
-            let [real_address, stable_address] =
-                [real_ptr, stable_ptr].map(|ptr| ptr.cast::<()>() as isize);
+            let [real_address, stable_address] = [real_ptr, stable_ptr].map(|ptr| ptr.cast::<()>() as isize);
             let offset = stable_address - real_address;
             let len = mem::size_of_val(real_ref);
             if offset < 0 || offset > len as isize {

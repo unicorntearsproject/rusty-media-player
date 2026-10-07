@@ -35,10 +35,7 @@ pub struct Var {
 impl Var {
     #[inline]
     fn add(self, o: Var) -> Var {
-        Var {
-            sum: self.sum + o.sum,
-            sum_sq: self.sum_sq + o.sum_sq,
-        }
+        Var { sum: self.sum + o.sum, sum_sq: self.sum_sq + o.sum_sq }
     }
     /// libvpx `get_variance`: `256 · (SSE − sum²/count) >> log2_count`, i.e. the
     /// per-sample variance scaled by 256. `log2_count` = log2 of the sample count.
@@ -190,8 +187,7 @@ mod tests {
         for y in 0..h {
             for x in 0..w {
                 // A gradient + a higher-frequency ripple so variances differ per region.
-                src[y * w + x] =
-                    ((x * 3 + y * 5) as u16 & 0xff) ^ (((x / 4 + y / 4) as u16 * 17) & 0x3f);
+                src[y * w + x] = ((x * 3 + y * 5) as u16 & 0xff) ^ (((x / 4 + y / 4) as u16 * 17) & 0x3f);
             }
         }
         let vt = VarTree::build(&src, w, None, 0, 0, w, h);
@@ -203,11 +199,7 @@ mod tests {
                 for c in 0..g {
                     let got = vt.variance(level, r, c);
                     let want = brute(&src, w, c * sz, r * sz, sz);
-                    assert_eq!(
-                        got, want,
-                        "variance mismatch level={} r={} c={}",
-                        level, r, c
-                    );
+                    assert_eq!(got, want, "variance mismatch level={} r={} c={}", level, r, c);
                 }
             }
         }

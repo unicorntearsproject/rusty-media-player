@@ -122,12 +122,7 @@ fn write_mv_probs(enc: &mut BoolEncoder, pre: &NmvContext, t: &NmvContext, allow
 /// Serialize the compressed header — the inverse of
 /// [`parse_compressed_header`](crate::decode::parse_compressed_header). `pre` is
 /// the loaded frame context; `t` (target) is the encoder's adapted context.
-pub fn write_compressed_header(
-    enc: &mut BoolEncoder,
-    pre: &FrameContext,
-    t: &FrameContext,
-    h: &FrameHeader,
-) {
+pub fn write_compressed_header(enc: &mut BoolEncoder, pre: &FrameContext, t: &FrameContext, h: &FrameHeader) {
     write_tx_mode(enc, t.tx_mode, h.lossless);
     if t.tx_mode == TX_MODE_SELECT {
         write_tx_mode_probs(enc, pre, t);
@@ -147,11 +142,7 @@ pub fn write_compressed_header(
     }
     if h.interp_filter == 4 {
         for j in 0..4 {
-            diff_update_slice(
-                enc,
-                &pre.switchable_interp_prob[j],
-                &t.switchable_interp_prob[j],
-            );
+            diff_update_slice(enc, &pre.switchable_interp_prob[j], &t.switchable_interp_prob[j]);
         }
     }
     diff_update_slice(enc, &pre.intra_inter_prob, &t.intra_inter_prob);
@@ -239,8 +230,7 @@ mod tests {
                         let nctx = if k == 0 { 3 } else { 6 };
                         for l in 0..nctx {
                             for m in 0..3 {
-                                t.coef_probs[tx][i][j][k][l][m] =
-                                    pert(s, pre.coef_probs[tx][i][j][k][l][m]);
+                                t.coef_probs[tx][i][j][k][l][m] = pert(s, pre.coef_probs[tx][i][j][k][l][m]);
                             }
                         }
                     }
@@ -294,11 +284,7 @@ mod tests {
                         pert_slice(&mut s, &p, &mut t.tx_p32x32[i]);
                     }
                 }
-                let h = FrameHeader {
-                    key_frame: true,
-                    lossless: false,
-                    ..Default::default()
-                };
+                let h = FrameHeader { key_frame: true, lossless: false, ..Default::default() };
                 roundtrip(&pre, &t, &h);
             }
         }
@@ -333,11 +319,7 @@ mod tests {
                     let p = pre.switchable_interp_prob[j];
                     pert_slice(&mut s, &p, &mut t.switchable_interp_prob[j]);
                 }
-                pert_slice(
-                    &mut s,
-                    &pre.intra_inter_prob.to_vec(),
-                    &mut t.intra_inter_prob,
-                );
+                pert_slice(&mut s, &pre.intra_inter_prob.to_vec(), &mut t.intra_inter_prob);
                 t.reference_mode = ref_mode;
                 if ref_mode != 0 {
                     // setup_compound_reference_mode for this sign bias.
@@ -345,11 +327,7 @@ mod tests {
                     t.comp_var_ref = [1, 3];
                 }
                 if ref_mode == 2 {
-                    pert_slice(
-                        &mut s,
-                        &pre.comp_inter_prob.to_vec(),
-                        &mut t.comp_inter_prob,
-                    );
+                    pert_slice(&mut s, &pre.comp_inter_prob.to_vec(), &mut t.comp_inter_prob);
                 }
                 if ref_mode != 1 {
                     for i in 0..5 {

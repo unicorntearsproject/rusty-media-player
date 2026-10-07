@@ -24,13 +24,8 @@ pub fn assemble_tiles(tiles: &[Vec<u8>]) -> Vec<u8> {
 /// Concatenate a full VP9 frame: the uncompressed header, the compressed header
 /// (whose byte length is the uncompressed header's `header_size`), then the
 /// assembled tile data.
-pub fn assemble_frame(
-    uncompressed_header: &[u8],
-    compressed_header: &[u8],
-    tile_data: &[u8],
-) -> Vec<u8> {
-    let mut out =
-        Vec::with_capacity(uncompressed_header.len() + compressed_header.len() + tile_data.len());
+pub fn assemble_frame(uncompressed_header: &[u8], compressed_header: &[u8], tile_data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(uncompressed_header.len() + compressed_header.len() + tile_data.len());
     out.extend_from_slice(uncompressed_header);
     out.extend_from_slice(compressed_header);
     out.extend_from_slice(tile_data);
@@ -52,8 +47,7 @@ mod tests {
                 out.push(data[off..].to_vec());
             } else {
                 let sz =
-                    u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
-                        as usize;
+                    u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]) as usize;
                 off += 4;
                 out.push(data[off..off + sz].to_vec());
                 off += sz;
@@ -69,9 +63,8 @@ mod tests {
             let mut expected = Vec::new();
             for ti in 0..n {
                 let mut enc = BoolEncoder::new();
-                let bools: Vec<(u32, u8)> = (0..50 + ti * 7)
-                    .map(|k| ((k & 1) as u32, (1 + (k * 13) % 255) as u8))
-                    .collect();
+                let bools: Vec<(u32, u8)> =
+                    (0..50 + ti * 7).map(|k| ((k & 1) as u32, (1 + (k * 13) % 255) as u8)).collect();
                 for &(b, p) in &bools {
                     enc.write_bool(b, p);
                 }

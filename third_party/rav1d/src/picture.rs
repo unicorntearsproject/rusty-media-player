@@ -17,6 +17,7 @@ use crate::include::dav1d::picture::Rav1dPicAllocator;
 use crate::include::dav1d::picture::Rav1dPicture;
 use crate::include::dav1d::picture::Rav1dPictureParameters;
 use crate::include::dav1d::picture::RAV1D_PICTURE_ALIGNMENT;
+use crate::libc::ptrdiff_t;
 use crate::src::error::Dav1dResult;
 use crate::src::error::Rav1dError::EGeneric;
 use crate::src::error::Rav1dResult;
@@ -27,7 +28,6 @@ use crate::src::log::Rav1dLogger;
 use crate::src::mem::MemPool;
 use crate::src::send_sync_non_null::SendSyncNonNull;
 use bitflags::bitflags;
-use crate::libc::ptrdiff_t;
 use parking_lot::Mutex;
 use std::ffi::c_int;
 use std::ffi::c_void;
@@ -141,13 +141,16 @@ unsafe extern "C" fn dav1d_default_picture_alloc(
     // Note that `data[1]` and `data[2]`
     // were previously null instead of an empty slice when `!has_chroma`,
     // but this way is simpler and more uniform, especially when we move to slices.
-    let data = [data0, data1, data2].map(|data| {
-        if data.is_empty() {
-            ptr::null_mut()
-        } else {
-            data.as_mut_ptr().cast()
-        }
-    });
+    let data =
+        [data0, data1, data2].map(
+            |data| {
+                if data.is_empty() {
+                    ptr::null_mut()
+                } else {
+                    data.as_mut_ptr().cast()
+                }
+            },
+        );
 
     // SAFETY: Guaranteed by safety preconditions.
     let p_c = unsafe { &mut *p_c };
@@ -200,10 +203,7 @@ impl Rav1dPicAllocator {
         let alloc = fn_addr_eq(
             self.alloc_picture_callback,
             dav1d_default_picture_alloc
-                as unsafe extern "C" fn(
-                    *mut Dav1dPicture,
-                    Option<SendSyncNonNull<c_void>>,
-                ) -> Dav1dResult,
+                as unsafe extern "C" fn(*mut Dav1dPicture, Option<SendSyncNonNull<c_void>>) -> Dav1dResult,
         );
         let release = fn_addr_eq(
             self.release_picture_callback,
@@ -288,22 +288,17 @@ pub(crate) fn rav1d_thread_picture_alloc(
 
     // Don't clear these flags from `c.frame_flags` if the frame is not going to be output.
     // This way they will be added to the next visible frame too.
-    let flags_mask = if (frame_hdr.show_frame != 0 || output_invisible_frames)
-        && max_spatial_id == frame_hdr.spatial_id
-    {
-        PictureFlags::empty()
-    } else {
-        PictureFlags::NEW_SEQUENCE | PictureFlags::NEW_OP_PARAMS_INFO
-    };
+    let flags_mask =
+        if (frame_hdr.show_frame != 0 || output_invisible_frames) && max_spatial_id == frame_hdr.spatial_id {
+            PictureFlags::empty()
+        } else {
+            PictureFlags::NEW_SEQUENCE | PictureFlags::NEW_OP_PARAMS_INFO
+        };
     p.flags = *frame_flags;
     *frame_flags &= flags_mask;
     p.visible = frame_hdr.show_frame != 0;
     p.showable = frame_hdr.showable_frame != 0;
-    p.progress = if have_frame_mt {
-        Some(Default::default())
-    } else {
-        None
-    };
+    p.progress = if have_frame_mt { Some(Default::default()) } else { None };
     Ok(())
 }
 

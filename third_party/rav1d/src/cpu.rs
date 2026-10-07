@@ -232,8 +232,7 @@ static rav1d_cpu_flags_mask: AtomicU32 = AtomicU32::new(!0);
 
 #[inline(always)]
 pub(crate) fn rav1d_get_cpu_flags() -> CpuFlags {
-    let flags =
-        rav1d_cpu_flags.load(Ordering::SeqCst) & rav1d_cpu_flags_mask.load(Ordering::SeqCst);
+    let flags = rav1d_cpu_flags.load(Ordering::SeqCst) & rav1d_cpu_flags_mask.load(Ordering::SeqCst);
     // Note that `bitflags!` `struct`s are `#[repr(transparent)]`.
     CpuFlags::from_bits_truncate(flags) | CpuFlags::compile_time_detect()
 }

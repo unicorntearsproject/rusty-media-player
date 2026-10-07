@@ -108,9 +108,7 @@ static av1_intra_prediction_edges: [Av1IntraPredictionEdge; N_IMPL_INTRA_PRED_MO
     a[PAETH_PRED as usize] = all([LEFT, TOP, TOP_LEFT]);
     a[FILTER_PRED as usize] = all([LEFT, TOP, TOP_LEFT]);
 
-    let mut b = [Av1IntraPredictionEdge {
-        needs: Needs::empty(),
-    }; N_IMPL_INTRA_PRED_MODES];
+    let mut b = [Av1IntraPredictionEdge { needs: Needs::empty() }; N_IMPL_INTRA_PRED_MODES];
     const_for!(i in 0..N_IMPL_INTRA_PRED_MODES => {
         b[i].needs = a[i];
     });
@@ -191,19 +189,11 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
         VERT_PRED..=VERT_LEFT_PRED => {
             *angle = av1_mode_to_angle_map[(mode - VERT_PRED) as usize] as c_int + 3 * *angle;
             if *angle <= 90 {
-                mode = if *angle < 90 && have_top {
-                    Z1_PRED
-                } else {
-                    VERT_PRED
-                };
+                mode = if *angle < 90 && have_top { Z1_PRED } else { VERT_PRED };
             } else if *angle < 180 {
                 mode = Z2_PRED;
             } else {
-                mode = if *angle > 180 && have_left {
-                    Z3_PRED
-                } else {
-                    HOR_PRED
-                };
+                mode = if *angle > 180 && have_left { Z3_PRED } else { HOR_PRED };
             }
         }
         DC_PRED | PAETH_PRED => {
@@ -214,16 +204,9 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
 
     // `dst_top` starts with either the top or top-left sample depending on whether have_left is true
     let dst_top = if have_top
-        && (av1_intra_prediction_edges[mode as usize]
-            .needs
-            .contains(Needs::TOP)
-            || av1_intra_prediction_edges[mode as usize]
-                .needs
-                .contains(Needs::TOP_LEFT)
-            || av1_intra_prediction_edges[mode as usize]
-                .needs
-                .contains(Needs::LEFT)
-                && !have_left)
+        && (av1_intra_prediction_edges[mode as usize].needs.contains(Needs::TOP)
+            || av1_intra_prediction_edges[mode as usize].needs.contains(Needs::TOP_LEFT)
+            || av1_intra_prediction_edges[mode as usize].needs.contains(Needs::LEFT) && !have_left)
     {
         let px_have = cmp::min(8 * tw, 4 * (w - x)) as usize;
         let n = px_have + have_left as usize;
@@ -237,10 +220,7 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
         &[]
     };
 
-    if av1_intra_prediction_edges[mode as usize]
-        .needs
-        .contains(Needs::LEFT)
-    {
+    if av1_intra_prediction_edges[mode as usize].needs.contains(Needs::LEFT) {
         let sz = 4 * th as usize;
         let left = &mut topleft_out[topleft_out_offset - sz..];
         if have_left {
@@ -262,10 +242,7 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
                 sz,
             );
         }
-        if av1_intra_prediction_edges[mode as usize]
-            .needs
-            .contains(Needs::BOTTOM_LEFT)
-        {
+        if av1_intra_prediction_edges[mode as usize].needs.contains(Needs::BOTTOM_LEFT) {
             let bottom_left = &mut topleft_out[topleft_out_offset - 2 * sz..];
             let have_bottomleft = if !have_left || y + th >= h {
                 false
@@ -275,8 +252,7 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
             if have_bottomleft {
                 let px_have = cmp::min(sz, (h - y - th << 2) as usize);
                 for i in 0..px_have {
-                    bottom_left[sz - 1 - i] =
-                        *(dst + ((sz + i) as isize * stride - 1)).index::<BD>();
+                    bottom_left[sz - 1 - i] = *(dst + ((sz + i) as isize * stride - 1)).index::<BD>();
                 }
                 if px_have < sz {
                     BD::pixel_set(bottom_left, bottom_left[sz - px_have], sz - px_have);
@@ -286,10 +262,7 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
             }
         }
     }
-    if av1_intra_prediction_edges[mode as usize]
-        .needs
-        .contains(Needs::TOP)
-    {
+    if av1_intra_prediction_edges[mode as usize].needs.contains(Needs::TOP) {
         let sz = 4 * tw as usize;
         let top = &mut topleft_out[topleft_out_offset + 1..];
         if have_top {
@@ -310,10 +283,7 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
                 sz,
             );
         }
-        if av1_intra_prediction_edges[mode as usize]
-            .needs
-            .contains(Needs::TOP_RIGHT)
-        {
+        if av1_intra_prediction_edges[mode as usize].needs.contains(Needs::TOP_RIGHT) {
             let have_topright = if !have_top || x + tw >= w {
                 false
             } else {
@@ -333,13 +303,9 @@ pub fn rav1d_prepare_intra_edges<BD: BitDepth>(
             }
         }
     }
-    if av1_intra_prediction_edges[mode as usize]
-        .needs
-        .contains(Needs::TOP_LEFT)
-    {
+    if av1_intra_prediction_edges[mode as usize].needs.contains(Needs::TOP_LEFT) {
         // top-left sample and immediate neighbours
-        let corner =
-            <&mut [_; 3]>::try_from(&mut topleft_out[topleft_out_offset - 1..][..3]).unwrap();
+        let corner = <&mut [_; 3]>::try_from(&mut topleft_out[topleft_out_offset - 1..][..3]).unwrap();
         corner[1] = if have_top {
             dst_top[0]
         } else if have_left {

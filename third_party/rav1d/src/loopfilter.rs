@@ -5,6 +5,7 @@ use crate::include::common::bitdepth::BitDepth;
 use crate::include::common::bitdepth::DynPixel;
 use crate::include::common::intops::iclip;
 use crate::include::dav1d::picture::Rav1dPictureDataComponentOffset;
+use crate::libc::ptrdiff_t;
 use crate::src::align::Align16;
 use crate::src::cpu::CpuFlags;
 use crate::src::disjoint_mut::DisjointMut;
@@ -14,15 +15,11 @@ use crate::src::lf_mask::Av1FilterLUT;
 use crate::src::strided::Strided as _;
 use crate::src::with_offset::WithOffset;
 use crate::src::wrap_fn_ptr::wrap_fn_ptr;
-use crate::libc::ptrdiff_t;
 use std::cmp;
 use std::ffi::c_int;
 use strum::FromRepr;
 
-#[cfg(all(
-    feature = "asm",
-    not(any(target_arch = "riscv64", target_arch = "riscv32"))
-))]
+#[cfg(all(feature = "asm", not(any(target_arch = "riscv64", target_arch = "riscv32"))))]
 use crate::include::common::bitdepth::bd_fn;
 
 wrap_fn_ptr!(pub unsafe extern "C" fn loopfilter_sb(
@@ -60,11 +57,7 @@ impl loopfilter_sb::Fn {
         let dst = FFISafe::new(&dst);
         let lvl = FFISafe::new(&lvl);
         // SAFETY: Fallback `fn loop_filter_sb128_rust` is safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                dst_ptr, stride, mask, lvl_ptr, b4_stride, lut, w, bd, dst, lvl,
-            )
-        }
+        unsafe { self.get()(dst_ptr, stride, mask, lvl_ptr, b4_stride, lut, w, bd, dst, lvl) }
     }
 
     const fn default<BD: BitDepth, const HV: usize, const YUV: usize>() -> Self {
@@ -129,9 +122,8 @@ fn loop_filter<BD: BitDepth>(
         let mut flat8out = false;
         let mut flat8in = false;
 
-        let mut fm = (p1 - p0).abs() <= i
-            && (q1 - q0).abs() <= i
-            && (p0 - q0).abs() * 2 + ((p1 - q1).abs() >> 1) <= e;
+        let mut fm =
+            (p1 - p0).abs() <= i && (q1 - q0).abs() <= i && (p0 - q0).abs() * 2 + ((p1 - q1).abs() >> 1) <= e;
 
         if wd > 4 {
             p2 = get_dst(-3);
@@ -167,10 +159,8 @@ fn loop_filter<BD: BitDepth>(
         }
 
         if wd >= 6 {
-            flat8in = (p2 - p0).abs() <= f
-                && (p1 - p0).abs() <= f
-                && (q1 - q0).abs() <= f
-                && (q2 - q0).abs() <= f;
+            flat8in =
+                (p2 - p0).abs() <= f && (p1 - p0).abs() <= f && (q1 - q0).abs() <= f && (q2 - q0).abs() <= f;
         }
 
         if wd >= 8 {
@@ -178,54 +168,18 @@ fn loop_filter<BD: BitDepth>(
         }
 
         if wd >= 16 && flat8out && flat8in {
-            set_dst(
-                -6,
-                p6 + p6 + p6 + p6 + p6 + p6 * 2 + p5 * 2 + p4 * 2 + p3 + p2 + p1 + p0 + q0 + 8 >> 4,
-            );
-            set_dst(
-                -5,
-                p6 + p6 + p6 + p6 + p6 + p5 * 2 + p4 * 2 + p3 * 2 + p2 + p1 + p0 + q0 + q1 + 8 >> 4,
-            );
-            set_dst(
-                -4,
-                p6 + p6 + p6 + p6 + p5 + p4 * 2 + p3 * 2 + p2 * 2 + p1 + p0 + q0 + q1 + q2 + 8 >> 4,
-            );
-            set_dst(
-                -3,
-                p6 + p6 + p6 + p5 + p4 + p3 * 2 + p2 * 2 + p1 * 2 + p0 + q0 + q1 + q2 + q3 + 8 >> 4,
-            );
-            set_dst(
-                -2,
-                p6 + p6 + p5 + p4 + p3 + p2 * 2 + p1 * 2 + p0 * 2 + q0 + q1 + q2 + q3 + q4 + 8 >> 4,
-            );
-            set_dst(
-                -1,
-                p6 + p5 + p4 + p3 + p2 + p1 * 2 + p0 * 2 + q0 * 2 + q1 + q2 + q3 + q4 + q5 + 8 >> 4,
-            );
-            set_dst(
-                0,
-                p5 + p4 + p3 + p2 + p1 + p0 * 2 + q0 * 2 + q1 * 2 + q2 + q3 + q4 + q5 + q6 + 8 >> 4,
-            );
-            set_dst(
-                1,
-                p4 + p3 + p2 + p1 + p0 + q0 * 2 + q1 * 2 + q2 * 2 + q3 + q4 + q5 + q6 + q6 + 8 >> 4,
-            );
-            set_dst(
-                2,
-                p3 + p2 + p1 + p0 + q0 + q1 * 2 + q2 * 2 + q3 * 2 + q4 + q5 + q6 + q6 + q6 + 8 >> 4,
-            );
-            set_dst(
-                3,
-                p2 + p1 + p0 + q0 + q1 + q2 * 2 + q3 * 2 + q4 * 2 + q5 + q6 + q6 + q6 + q6 + 8 >> 4,
-            );
-            set_dst(
-                4,
-                p1 + p0 + q0 + q1 + q2 + q3 * 2 + q4 * 2 + q5 * 2 + q6 + q6 + q6 + q6 + q6 + 8 >> 4,
-            );
-            set_dst(
-                5,
-                p0 + q0 + q1 + q2 + q3 + q4 * 2 + q5 * 2 + q6 * 2 + q6 + q6 + q6 + q6 + q6 + 8 >> 4,
-            );
+            set_dst(-6, p6 + p6 + p6 + p6 + p6 + p6 * 2 + p5 * 2 + p4 * 2 + p3 + p2 + p1 + p0 + q0 + 8 >> 4);
+            set_dst(-5, p6 + p6 + p6 + p6 + p6 + p5 * 2 + p4 * 2 + p3 * 2 + p2 + p1 + p0 + q0 + q1 + 8 >> 4);
+            set_dst(-4, p6 + p6 + p6 + p6 + p5 + p4 * 2 + p3 * 2 + p2 * 2 + p1 + p0 + q0 + q1 + q2 + 8 >> 4);
+            set_dst(-3, p6 + p6 + p6 + p5 + p4 + p3 * 2 + p2 * 2 + p1 * 2 + p0 + q0 + q1 + q2 + q3 + 8 >> 4);
+            set_dst(-2, p6 + p6 + p5 + p4 + p3 + p2 * 2 + p1 * 2 + p0 * 2 + q0 + q1 + q2 + q3 + q4 + 8 >> 4);
+            set_dst(-1, p6 + p5 + p4 + p3 + p2 + p1 * 2 + p0 * 2 + q0 * 2 + q1 + q2 + q3 + q4 + q5 + 8 >> 4);
+            set_dst(0, p5 + p4 + p3 + p2 + p1 + p0 * 2 + q0 * 2 + q1 * 2 + q2 + q3 + q4 + q5 + q6 + 8 >> 4);
+            set_dst(1, p4 + p3 + p2 + p1 + p0 + q0 * 2 + q1 * 2 + q2 * 2 + q3 + q4 + q5 + q6 + q6 + 8 >> 4);
+            set_dst(2, p3 + p2 + p1 + p0 + q0 + q1 * 2 + q2 * 2 + q3 * 2 + q4 + q5 + q6 + q6 + q6 + 8 >> 4);
+            set_dst(3, p2 + p1 + p0 + q0 + q1 + q2 * 2 + q3 * 2 + q4 * 2 + q5 + q6 + q6 + q6 + q6 + 8 >> 4);
+            set_dst(4, p1 + p0 + q0 + q1 + q2 + q3 * 2 + q4 * 2 + q5 * 2 + q6 + q6 + q6 + q6 + q6 + 8 >> 4);
+            set_dst(5, p0 + q0 + q1 + q2 + q3 + q4 * 2 + q5 * 2 + q6 * 2 + q6 + q6 + q6 + q6 + q6 + 8 >> 4);
         } else if wd >= 8 && flat8in {
             set_dst(-3, p3 + p3 + p3 + 2 * p2 + p1 + p0 + q0 + 4 >> 3);
             set_dst(-2, p3 + p3 + p2 + 2 * p1 + p0 + q0 + q1 + 4 >> 3);
@@ -242,11 +196,7 @@ fn loop_filter<BD: BitDepth>(
             let hev = (p1 - p0).abs() > h || (q1 - q0).abs() > h;
 
             fn iclip_diff(v: c_int, bitdepth_min_8: u8) -> i32 {
-                iclip(
-                    v,
-                    -128 * (1 << bitdepth_min_8),
-                    128 * (1 << bitdepth_min_8) - 1,
-                )
+                iclip(v, -128 * (1 << bitdepth_min_8), 128 * (1 << bitdepth_min_8) - 1)
             }
 
             if hev {
@@ -334,11 +284,7 @@ fn loop_filter_sb128_rust<BD: BitDepth, const HV: usize, const YUV: usize>(
             let i = lut.0.i[l as usize];
             let idx = match yuv {
                 YUV::Y => {
-                    let idx = if vmask[2] & xy != 0 {
-                        2
-                    } else {
-                        (vmask[1] & xy != 0) as c_int
-                    };
+                    let idx = if vmask[2] & xy != 0 { 2 } else { (vmask[1] & xy != 0) as c_int };
                     4 << idx
                 }
                 YUV::UV => {
@@ -429,8 +375,7 @@ impl Rav1dLoopFilterDSPContext {
 
             if !flags.contains(CpuFlags::SLOW_GATHER) {
                 self.loop_filter_sb.y.h = bd_fn!(loopfilter_sb::decl_fn, BD, lpf_h_sb_y, avx512icl);
-                self.loop_filter_sb.uv.h =
-                    bd_fn!(loopfilter_sb::decl_fn, BD, lpf_h_sb_uv, avx512icl);
+                self.loop_filter_sb.uv.h = bd_fn!(loopfilter_sb::decl_fn, BD, lpf_h_sb_uv, avx512icl);
             }
         }
 

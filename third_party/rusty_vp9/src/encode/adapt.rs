@@ -24,10 +24,7 @@ mod tests {
     fn encoder_reuses_decoder_adaptation_exactly() {
         // Coefficient adaptation: the encoder's factors must reproduce the
         // decoder's merge (locks the shared contract, anchored to libvpx).
-        assert_eq!(
-            merge_probs(128, [24, 0], COEF_COUNT_SAT, COEF_MAX_UPDATE_FACTOR),
-            184
-        );
+        assert_eq!(merge_probs(128, [24, 0], COEF_COUNT_SAT, COEF_MAX_UPDATE_FACTOR), 184);
         // Mode/MV adaptation is the fixed count→factor merge.
         assert_eq!(mode_mv_merge_probs(128, [20, 0]), 192);
         // Tree-structured probabilities merge bottom-up.

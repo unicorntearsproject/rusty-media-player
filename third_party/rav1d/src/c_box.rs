@@ -136,13 +136,7 @@ impl<T: ?Sized> CBox<T> {
     /// `free.free` is always called with `free.cookie`,
     /// which must be accessed thread-safely.
     pub unsafe fn from_c(data: NonNull<T>, free: Free) -> Self {
-        Self::C {
-            data: Unique {
-                pointer: data,
-                _marker: PhantomData,
-            },
-            free,
-        }
+        Self::C { data: Unique { pointer: data, _marker: PhantomData }, free }
     }
 
     pub fn from_box(data: Box<T>) -> Self {

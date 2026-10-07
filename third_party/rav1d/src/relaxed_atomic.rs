@@ -18,9 +18,7 @@ pub struct RelaxedAtomic<T: Atom> {
 
 impl<T: Atom> RelaxedAtomic<T> {
     pub fn new(value: T) -> Self {
-        Self {
-            inner: Atomic::new(value),
-        }
+        Self { inner: Atomic::new(value) }
     }
 
     pub fn get(&self) -> T {

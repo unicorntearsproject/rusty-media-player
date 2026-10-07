@@ -108,9 +108,7 @@ fn dc_pred(
     max: i32,
 ) {
     let dc: u16 = if left_avail && up_avail {
-        let s: u32 = (0..bs)
-            .map(|i| a(above, i as i32) as u32 + left[i] as u32)
-            .sum();
+        let s: u32 = (0..bs).map(|i| a(above, i as i32) as u32 + left[i] as u32).sum();
         ((s + bs as u32) / (2 * bs as u32)) as u16
     } else if up_avail {
         let s: u32 = (0..bs).map(|i| a(above, i as i32) as u32).sum();
@@ -137,11 +135,7 @@ fn d45_pred(dst: &mut [u16], stride: usize, bs: usize, above: &[u16]) {
         for r in 0..4 {
             for c in 0..4 {
                 let v = if r + c + 2 < 8 {
-                    avg3(
-                        a(above, (r + c) as i32),
-                        a(above, (r + c + 1) as i32),
-                        a(above, (r + c + 2) as i32),
-                    )
+                    avg3(a(above, (r + c) as i32), a(above, (r + c + 1) as i32), a(above, (r + c + 2) as i32))
                 } else {
                     a(above, 7)
                 };
@@ -152,11 +146,7 @@ fn d45_pred(dst: &mut [u16], stride: usize, bs: usize, above: &[u16]) {
     }
     let ar = a(above, bs as i32 - 1);
     for x in 0..bs - 1 {
-        *d(dst, stride, 0, x) = avg3(
-            a(above, x as i32),
-            a(above, x as i32 + 1),
-            a(above, x as i32 + 2),
-        );
+        *d(dst, stride, 0, x) = avg3(a(above, x as i32), a(above, x as i32 + 1), a(above, x as i32 + 2));
     }
     *d(dst, stride, 0, bs - 1) = ar;
     for x in 1..bs {
@@ -180,11 +170,7 @@ fn d63_pred(dst: &mut [u16], stride: usize, bs: usize, above: &[u16]) {
                 let v = if r & 1 == 0 {
                     avg2(a(above, i as i32), a(above, i as i32 + 1))
                 } else {
-                    avg3(
-                        a(above, i as i32),
-                        a(above, i as i32 + 1),
-                        a(above, i as i32 + 2),
-                    )
+                    avg3(a(above, i as i32), a(above, i as i32 + 1), a(above, i as i32 + 2))
                 };
                 *d(dst, stride, r, c) = v;
             }
@@ -194,11 +180,7 @@ fn d63_pred(dst: &mut [u16], stride: usize, bs: usize, above: &[u16]) {
     let last = a(above, bs as i32 - 1);
     for c in 0..bs {
         *d(dst, stride, 0, c) = avg2(a(above, c as i32), a(above, c as i32 + 1));
-        *d(dst, stride, 1, c) = avg3(
-            a(above, c as i32),
-            a(above, c as i32 + 1),
-            a(above, c as i32 + 2),
-        );
+        *d(dst, stride, 1, c) = avg3(a(above, c as i32), a(above, c as i32 + 1), a(above, c as i32 + 2));
     }
     let (mut r, mut size) = (2usize, bs - 2);
     while r < bs {
@@ -245,11 +227,7 @@ fn d117_pred(dst: &mut [u16], stride: usize, bs: usize, above: &[u16], left: &[u
     }
     *d(dst, stride, 1, 0) = avg3(left[0], a(above, -1), a(above, 0));
     for c in 1..bs {
-        *d(dst, stride, 1, c) = avg3(
-            a(above, c as i32 - 2),
-            a(above, c as i32 - 1),
-            a(above, c as i32),
-        );
+        *d(dst, stride, 1, c) = avg3(a(above, c as i32 - 2), a(above, c as i32 - 1), a(above, c as i32));
     }
     *d(dst, stride, 2, 0) = avg3(a(above, -1), left[0], left[1]);
     for r in 3..bs {
@@ -271,11 +249,7 @@ fn d135_pred(dst: &mut [u16], stride: usize, bs: usize, above: &[u16], left: &[u
     border[bs - 1] = avg3(left[0], a(above, -1), a(above, 0));
     border[bs] = avg3(a(above, -1), a(above, 0), a(above, 1));
     for i in 0..bs - 2 {
-        border[bs + 1 + i] = avg3(
-            a(above, i as i32),
-            a(above, i as i32 + 1),
-            a(above, i as i32 + 2),
-        );
+        border[bs + 1 + i] = avg3(a(above, i as i32), a(above, i as i32 + 1), a(above, i as i32 + 2));
     }
     for i in 0..bs {
         for c in 0..bs {
@@ -295,11 +269,7 @@ fn d153_pred(dst: &mut [u16], stride: usize, bs: usize, above: &[u16], left: &[u
         *d(dst, stride, r, 1) = avg3(left[r - 2], left[r - 1], left[r]);
     }
     for c in 0..bs - 2 {
-        *d(dst, stride, 0, 2 + c) = avg3(
-            a(above, c as i32 - 1),
-            a(above, c as i32),
-            a(above, c as i32 + 1),
-        );
+        *d(dst, stride, 0, 2 + c) = avg3(a(above, c as i32 - 1), a(above, c as i32), a(above, c as i32 + 1));
     }
     for r in 1..bs {
         for c in 0..bs - 2 {
@@ -527,10 +497,7 @@ mod tests {
             run(V_PRED),
             [110, 120, 130, 140, 110, 120, 130, 140, 110, 120, 130, 140, 110, 120, 130, 140]
         );
-        assert_eq!(
-            run(H_PRED),
-            [90, 90, 90, 90, 80, 80, 80, 80, 70, 70, 70, 70, 60, 60, 60, 60]
-        );
+        assert_eq!(run(H_PRED), [90, 90, 90, 90, 80, 80, 80, 80, 70, 70, 70, 70, 60, 60, 60, 60]);
         assert_eq!(
             run(D45_PRED),
             [120, 130, 140, 150, 130, 140, 150, 160, 140, 150, 160, 170, 150, 160, 170, 180]
@@ -543,22 +510,13 @@ mod tests {
             run(D117_PRED),
             [105, 115, 125, 135, 100, 110, 120, 130, 90, 105, 115, 125, 80, 100, 110, 120]
         );
-        assert_eq!(
-            run(D153_PRED),
-            [95, 100, 110, 120, 85, 90, 95, 100, 75, 80, 85, 90, 65, 70, 75, 80]
-        );
-        assert_eq!(
-            run(D207_PRED),
-            [85, 80, 75, 70, 75, 70, 65, 63, 65, 63, 60, 60, 60, 60, 60, 60]
-        );
+        assert_eq!(run(D153_PRED), [95, 100, 110, 120, 85, 90, 95, 100, 75, 80, 85, 90, 65, 70, 75, 80]);
+        assert_eq!(run(D207_PRED), [85, 80, 75, 70, 75, 70, 65, 63, 65, 63, 60, 60, 60, 60, 60, 60]);
         assert_eq!(
             run(D63_PRED),
             [115, 125, 135, 145, 120, 130, 140, 150, 125, 135, 145, 155, 130, 140, 150, 160]
         );
-        assert_eq!(
-            run(TM_PRED),
-            [100, 110, 120, 130, 90, 100, 110, 120, 80, 90, 100, 110, 70, 80, 90, 100]
-        );
+        assert_eq!(run(TM_PRED), [100, 110, 120, 130, 90, 100, 110, 120, 80, 90, 100, 110, 70, 80, 90, 100]);
     }
 
     #[test]
@@ -568,19 +526,14 @@ mod tests {
         let mut above = [0u16; 1 + 8];
         let mut left = [0u16; 4];
         build_intra_edges(
-            V_PRED, 4, true, true, true, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left,
-            255,
+            V_PRED, 4, true, true, true, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left, 255,
         );
         // above row = the 4 pixels at row 3, cols 4..8; above-left = (3,3).
-        assert_eq!(
-            &above[1..5],
-            &[3 * 16 + 4, 3 * 16 + 5, 3 * 16 + 6, 3 * 16 + 7]
-        );
+        assert_eq!(&above[1..5], &[3 * 16 + 4, 3 * 16 + 5, 3 * 16 + 6, 3 * 16 + 7]);
         assert_eq!(above[0], 3 * 16 + 3);
         // H mode reads the left column (4,3),(5,3),(6,3),(7,3).
         build_intra_edges(
-            H_PRED, 4, true, true, true, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left,
-            255,
+            H_PRED, 4, true, true, true, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left, 255,
         );
         assert_eq!(left, [4 * 16 + 3, 5 * 16 + 3, 6 * 16 + 3, 7 * 16 + 3]);
     }
@@ -592,14 +545,12 @@ mod tests {
         let mut left = [0u16; 4];
         // No above → above row 127, above-left 127.
         build_intra_edges(
-            V_PRED, 4, false, true, false, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left,
-            255,
+            V_PRED, 4, false, true, false, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left, 255,
         );
         assert!(above[..5].iter().all(|&v| v == 127));
         // No left → left column 129.
         build_intra_edges(
-            H_PRED, 4, true, false, false, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left,
-            255,
+            H_PRED, 4, true, false, false, &frame, 16, 16, 16, 4, 4, 64, 64, &mut above, &mut left, 255,
         );
         assert!(left.iter().all(|&v| v == 129));
     }

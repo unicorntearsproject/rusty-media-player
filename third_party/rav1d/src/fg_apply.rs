@@ -108,11 +108,7 @@ pub(crate) fn rav1d_prep_grain<BD: BitDepth>(
     if has_chroma {
         assert!(out.stride[1] == r#in.stride[1]);
     }
-    let num_points = [
-        data.num_y_points,
-        data.num_uv_points[0],
-        data.num_uv_points[1],
-    ];
+    let num_points = [data.num_y_points, data.num_uv_points[0], data.num_uv_points[1]];
     let [in_data, out_data] = [r#in, out].map(|p| &p.data.as_ref().unwrap().data);
     for i in 0..3 {
         if (i == 0 || has_chroma) && num_points[i] == 0 {
@@ -148,17 +144,7 @@ pub(crate) fn rav1d_apply_grain_row<BD: BitDepth>(
 
     if data.num_y_points != 0 {
         let bh = cmp::min(h - row * FG_BLOCK_SIZE, FG_BLOCK_SIZE);
-        dsp.fgy_32x32xn.call(
-            &out_data[0],
-            &in_data[0],
-            data,
-            w,
-            &scaling[0],
-            &grain_lut[0],
-            bh,
-            row,
-            bd,
-        );
+        dsp.fgy_32x32xn.call(&out_data[0], &in_data[0], data, w, &scaling[0], &grain_lut[0], bh, row, bd);
     }
 
     if data.num_uv_points[0] == 0 && data.num_uv_points[1] == 0 && !data.chroma_scaling_from_luma {

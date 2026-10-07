@@ -1,17 +1,16 @@
 #![allow(warnings)] // vendored code: upstream lints are not ours to fix (see PATCHES.md)
 #![allow(non_upper_case_globals)]
 #![cfg_attr(target_arch = "arm", feature(stdarch_arm_feature_detection))]
-#![cfg_attr(
-    any(target_arch = "riscv32", target_arch = "riscv64"),
-    feature(stdarch_riscv_feature_detection)
-)]
+#![cfg_attr(any(target_arch = "riscv32", target_arch = "riscv64"), feature(stdarch_riscv_feature_detection))]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::all)]
 #![deny(clippy::undocumented_unsafe_blocks)]
 #![deny(clippy::missing_safety_doc)]
 
 #[cfg(not(any(feature = "bitdepth_8", feature = "bitdepth_16")))]
-compile_error!("No bitdepths enabled. Enable one or more of the following features: `bitdepth_8`, `bitdepth_16`");
+compile_error!(
+    "No bitdepths enabled. Enable one or more of the following features: `bitdepth_8`, `bitdepth_16`"
+);
 
 /// Minimal replacement for the `libc` crate items rav1d uses, so the crate builds for targets with no libc
 /// (wasm32-unknown-unknown). The errno values are the Linux ones, which is what rav1d's C API documents.

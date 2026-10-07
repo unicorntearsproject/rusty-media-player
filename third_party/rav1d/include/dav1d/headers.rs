@@ -51,10 +51,7 @@ where
     D: Default,
 {
     fn default() -> Self {
-        Self {
-            rav1d: Default::default(),
-            dav1d: Default::default(),
-        }
+        Self { rav1d: Default::default(), dav1d: Default::default() }
     }
 }
 
@@ -80,8 +77,7 @@ pub(crate) const RAV1D_TOTAL_REFS_PER_FRAME: usize = DAV1D_TOTAL_REFS_PER_FRAME;
 
 pub type Dav1dObuType = c_uint;
 pub const DAV1D_OBU_PADDING: Dav1dObuType = Rav1dObuType::Padding as Dav1dObuType;
-pub const DAV1D_OBU_REDUNDANT_FRAME_HDR: Dav1dObuType =
-    Rav1dObuType::RedundantFrameHdr as Dav1dObuType;
+pub const DAV1D_OBU_REDUNDANT_FRAME_HDR: Dav1dObuType = Rav1dObuType::RedundantFrameHdr as Dav1dObuType;
 pub const DAV1D_OBU_FRAME: Dav1dObuType = Rav1dObuType::Frame as Dav1dObuType;
 pub const DAV1D_OBU_METADATA: Dav1dObuType = Rav1dObuType::Metadata as Dav1dObuType;
 pub const DAV1D_OBU_TILE_GRP: Dav1dObuType = Rav1dObuType::TileGrp as Dav1dObuType;
@@ -135,10 +131,8 @@ pub const DAV1D_N_FILTERS: usize = Rav1dFilterMode::N_FILTERS as usize;
 pub const DAV1D_FILTER_SWITCHABLE: Dav1dFilterMode = Rav1dFilterMode::Switchable as Dav1dFilterMode;
 pub const DAV1D_FILTER_BILINEAR: Dav1dFilterMode = Rav1dFilterMode::Bilinear as Dav1dFilterMode;
 pub const DAV1D_FILTER_8TAP_SHARP: Dav1dFilterMode = Rav1dFilterMode::Sharp8Tap as Dav1dFilterMode;
-pub const DAV1D_FILTER_8TAP_SMOOTH: Dav1dFilterMode =
-    Rav1dFilterMode::Smooth8Tap as Dav1dFilterMode;
-pub const DAV1D_FILTER_8TAP_REGULAR: Dav1dFilterMode =
-    Rav1dFilterMode::Regular8Tap as Dav1dFilterMode;
+pub const DAV1D_FILTER_8TAP_SMOOTH: Dav1dFilterMode = Rav1dFilterMode::Smooth8Tap as Dav1dFilterMode;
+pub const DAV1D_FILTER_8TAP_REGULAR: Dav1dFilterMode = Rav1dFilterMode::Regular8Tap as Dav1dFilterMode;
 
 #[derive(Clone, Copy, PartialEq, Eq, FromRepr, Default, Debug)]
 pub enum Rav1dFilterMode {
@@ -178,8 +172,7 @@ impl TryFrom<Dav1dFilterMode> for Rav1dFilterMode {
 pub type Dav1dAdaptiveBoolean = c_uint;
 pub const DAV1D_OFF: Dav1dAdaptiveBoolean = Rav1dAdaptiveBoolean::Off as Dav1dAdaptiveBoolean;
 pub const DAV1D_ON: Dav1dAdaptiveBoolean = Rav1dAdaptiveBoolean::On as Dav1dAdaptiveBoolean;
-pub const DAV1D_ADAPTIVE: Dav1dAdaptiveBoolean =
-    Rav1dAdaptiveBoolean::Adaptive as Dav1dAdaptiveBoolean;
+pub const DAV1D_ADAPTIVE: Dav1dAdaptiveBoolean = Rav1dAdaptiveBoolean::Adaptive as Dav1dAdaptiveBoolean;
 
 #[derive(Clone, Copy, PartialEq, Eq, FromRepr)]
 pub enum Rav1dAdaptiveBoolean {
@@ -213,8 +206,7 @@ impl TryFrom<Dav1dAdaptiveBoolean> for Rav1dAdaptiveBoolean {
 
 pub type Dav1dRestorationType = u8;
 pub const DAV1D_RESTORATION_NONE: Dav1dRestorationType = Rav1dRestorationType::None.to_repr();
-pub const DAV1D_RESTORATION_SWITCHABLE: Dav1dRestorationType =
-    Rav1dRestorationType::Switchable.to_repr();
+pub const DAV1D_RESTORATION_SWITCHABLE: Dav1dRestorationType = Rav1dRestorationType::Switchable.to_repr();
 pub const DAV1D_RESTORATION_WIENER: Dav1dRestorationType = Rav1dRestorationType::Wiener.to_repr();
 pub const DAV1D_RESTORATION_SGRPROJ: Dav1dRestorationType =
     Rav1dRestorationType::SgrProj(SgrIdx::I0).to_repr();
@@ -354,11 +346,7 @@ impl TryFrom<Dav1dWarpedMotionParams> for Rav1dWarpedMotionParams {
     type Error = ();
 
     fn try_from(value: Dav1dWarpedMotionParams) -> Result<Self, Self::Error> {
-        let Dav1dWarpedMotionParams {
-            r#type,
-            matrix,
-            abcd,
-        } = value;
+        let Dav1dWarpedMotionParams { r#type, matrix, abcd } = value;
         Ok(Self {
             r#type: Rav1dWarpedMotionType::from_repr(r#type as usize).ok_or(())?,
             matrix,
@@ -369,16 +357,8 @@ impl TryFrom<Dav1dWarpedMotionParams> for Rav1dWarpedMotionParams {
 
 impl From<Rav1dWarpedMotionParams> for Dav1dWarpedMotionParams {
     fn from(value: Rav1dWarpedMotionParams) -> Self {
-        let Rav1dWarpedMotionParams {
-            r#type,
-            matrix,
-            abcd,
-        } = value;
-        Self {
-            r#type: r#type as Dav1dWarpedMotionType,
-            matrix,
-            abcd: abcd.get(),
-        }
+        let Rav1dWarpedMotionParams { r#type, matrix, abcd } = value;
+        Self { r#type: r#type as Dav1dWarpedMotionType, matrix, abcd: abcd.get() }
     }
 }
 
@@ -580,30 +560,21 @@ impl TryFrom<Dav1dColorPrimaries> for Rav1dColorPrimaries {
 }
 
 pub type Dav1dTransferCharacteristics = c_uint;
-pub const DAV1D_TRC_BT709: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::BT709.to_dav1d();
-pub const DAV1D_TRC_UNKNOWN: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::UNKNOWN.to_dav1d();
-pub const DAV1D_TRC_BT470M: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::BT470M.to_dav1d();
-pub const DAV1D_TRC_BT470BG: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::BT470BG.to_dav1d();
-pub const DAV1D_TRC_BT601: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::BT601.to_dav1d();
+pub const DAV1D_TRC_BT709: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::BT709.to_dav1d();
+pub const DAV1D_TRC_UNKNOWN: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::UNKNOWN.to_dav1d();
+pub const DAV1D_TRC_BT470M: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::BT470M.to_dav1d();
+pub const DAV1D_TRC_BT470BG: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::BT470BG.to_dav1d();
+pub const DAV1D_TRC_BT601: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::BT601.to_dav1d();
 pub const DAV1D_TRC_SMPTE240: Dav1dTransferCharacteristics =
     Rav1dTransferCharacteristics::SMPTE240.to_dav1d();
-pub const DAV1D_TRC_LINEAR: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::LINEAR.to_dav1d();
-pub const DAV1D_TRC_LOG100: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::LOG100.to_dav1d();
+pub const DAV1D_TRC_LINEAR: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::LINEAR.to_dav1d();
+pub const DAV1D_TRC_LOG100: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::LOG100.to_dav1d();
 pub const DAV1D_TRC_LOG100_SQRT10: Dav1dTransferCharacteristics =
     Rav1dTransferCharacteristics::LOG100_SQRT10.to_dav1d();
 pub const DAV1D_TRC_IEC61966: Dav1dTransferCharacteristics =
     Rav1dTransferCharacteristics::IEC61966.to_dav1d();
-pub const DAV1D_TRC_BT1361: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::BT1361.to_dav1d();
-pub const DAV1D_TRC_SRGB: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::SRGB.to_dav1d();
+pub const DAV1D_TRC_BT1361: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::BT1361.to_dav1d();
+pub const DAV1D_TRC_SRGB: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::SRGB.to_dav1d();
 pub const DAV1D_TRC_BT2020_10BIT: Dav1dTransferCharacteristics =
     Rav1dTransferCharacteristics::BT2020_10BIT.to_dav1d();
 pub const DAV1D_TRC_BT2020_12BIT: Dav1dTransferCharacteristics =
@@ -612,8 +583,7 @@ pub const DAV1D_TRC_SMPTE2084: Dav1dTransferCharacteristics =
     Rav1dTransferCharacteristics::SMPTE2084.to_dav1d();
 pub const DAV1D_TRC_SMPTE428: Dav1dTransferCharacteristics =
     Rav1dTransferCharacteristics::SMPTE428.to_dav1d();
-pub const DAV1D_TRC_HLG: Dav1dTransferCharacteristics =
-    Rav1dTransferCharacteristics::HLG.to_dav1d();
+pub const DAV1D_TRC_HLG: Dav1dTransferCharacteristics = Rav1dTransferCharacteristics::HLG.to_dav1d();
 // this symbol is defined by dav1d, but not part of the spec
 pub const DAV1D_TRC_RESERVED: Dav1dTransferCharacteristics = 255;
 
@@ -668,18 +638,12 @@ pub const DAV1D_MC_FCC: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::FCC.t
 pub const DAV1D_MC_BT470BG: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::BT470BG.to_dav1d();
 pub const DAV1D_MC_BT601: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::BT601.to_dav1d();
 pub const DAV1D_MC_SMPTE240: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::SMPTE240.to_dav1d();
-pub const DAV1D_MC_SMPTE_YCGCO: Dav1dMatrixCoefficients =
-    Rav1dMatrixCoefficients::SMPTE_YCGCO.to_dav1d();
-pub const DAV1D_MC_BT2020_NCL: Dav1dMatrixCoefficients =
-    Rav1dMatrixCoefficients::BT2020_NCL.to_dav1d();
-pub const DAV1D_MC_BT2020_CL: Dav1dMatrixCoefficients =
-    Rav1dMatrixCoefficients::BT2020_CL.to_dav1d();
-pub const DAV1D_MC_SMPTE2085: Dav1dMatrixCoefficients =
-    Rav1dMatrixCoefficients::SMPTE2085.to_dav1d();
-pub const DAV1D_MC_CHROMAT_NCL: Dav1dMatrixCoefficients =
-    Rav1dMatrixCoefficients::CHROMAT_NCL.to_dav1d();
-pub const DAV1D_MC_CHROMAT_CL: Dav1dMatrixCoefficients =
-    Rav1dMatrixCoefficients::CHROMAT_CL.to_dav1d();
+pub const DAV1D_MC_SMPTE_YCGCO: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::SMPTE_YCGCO.to_dav1d();
+pub const DAV1D_MC_BT2020_NCL: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::BT2020_NCL.to_dav1d();
+pub const DAV1D_MC_BT2020_CL: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::BT2020_CL.to_dav1d();
+pub const DAV1D_MC_SMPTE2085: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::SMPTE2085.to_dav1d();
+pub const DAV1D_MC_CHROMAT_NCL: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::CHROMAT_NCL.to_dav1d();
+pub const DAV1D_MC_CHROMAT_CL: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::CHROMAT_CL.to_dav1d();
 pub const DAV1D_MC_ICTCP: Dav1dMatrixCoefficients = Rav1dMatrixCoefficients::ICTCP.to_dav1d();
 // this symbol is defined by dav1d, but not part of the spec
 pub const DAV1D_MC_RESERVED: Dav1dMatrixCoefficients = 255;
@@ -805,11 +769,7 @@ pub struct Rav1dITUTT35 {
 
 impl From<&Rav1dITUTT35> for Dav1dITUTT35 {
     fn from(value: &Rav1dITUTT35) -> Self {
-        let Rav1dITUTT35 {
-            country_code,
-            country_code_extension_byte,
-            ref payload,
-        } = *value;
+        let Rav1dITUTT35 { country_code, country_code_extension_byte, ref payload } = *value;
         Self {
             country_code,
             country_code_extension_byte,
@@ -924,11 +884,7 @@ impl From<Dav1dSequenceHeaderOperatingParameterInfo> for Rav1dSequenceHeaderOper
             encoder_buffer_delay,
             low_delay_mode,
         } = value;
-        Self {
-            decoder_buffer_delay,
-            encoder_buffer_delay,
-            low_delay_mode,
-        }
+        Self { decoder_buffer_delay, encoder_buffer_delay, low_delay_mode }
     }
 }
 
@@ -939,11 +895,7 @@ impl From<Rav1dSequenceHeaderOperatingParameterInfo> for Dav1dSequenceHeaderOper
             encoder_buffer_delay,
             low_delay_mode,
         } = value;
-        Self {
-            decoder_buffer_delay,
-            encoder_buffer_delay,
-            low_delay_mode,
-        }
+        Self { decoder_buffer_delay, encoder_buffer_delay, low_delay_mode }
     }
 }
 
@@ -1005,8 +957,7 @@ pub struct Dav1dSequenceHeader {
     pub color_description_present: u8,
     pub separate_uv_delta_q: u8,
     pub film_grain_present: u8,
-    pub operating_parameter_info:
-        [Dav1dSequenceHeaderOperatingParameterInfo; DAV1D_MAX_OPERATING_POINTS],
+    pub operating_parameter_info: [Dav1dSequenceHeaderOperatingParameterInfo; DAV1D_MAX_OPERATING_POINTS],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, FromRepr)]
@@ -1088,8 +1039,7 @@ pub struct Rav1dSequenceHeader {
     pub color_description_present: u8,
     pub separate_uv_delta_q: u8,
     pub film_grain_present: u8,
-    pub operating_parameter_info:
-        [Rav1dSequenceHeaderOperatingParameterInfo; RAV1D_MAX_OPERATING_POINTS],
+    pub operating_parameter_info: [Rav1dSequenceHeaderOperatingParameterInfo; RAV1D_MAX_OPERATING_POINTS],
 }
 
 impl Rav1dSequenceHeader {
@@ -1477,16 +1427,7 @@ impl From<Dav1dSegmentationData> for Rav1dSegmentationData {
             skip,
             globalmv,
         } = value;
-        Self {
-            delta_q,
-            delta_lf_y_v,
-            delta_lf_y_h,
-            delta_lf_u,
-            delta_lf_v,
-            r#ref,
-            skip,
-            globalmv,
-        }
+        Self { delta_q, delta_lf_y_v, delta_lf_y_h, delta_lf_u, delta_lf_v, r#ref, skip, globalmv }
     }
 }
 
@@ -1502,16 +1443,7 @@ impl From<Rav1dSegmentationData> for Dav1dSegmentationData {
             skip,
             globalmv,
         } = value;
-        Self {
-            delta_q,
-            delta_lf_y_v,
-            delta_lf_y_h,
-            delta_lf_u,
-            delta_lf_v,
-            r#ref,
-            skip,
-            globalmv,
-        }
+        Self { delta_q, delta_lf_y_v, delta_lf_y_h, delta_lf_u, delta_lf_v, r#ref, skip, globalmv }
     }
 }
 
@@ -1533,31 +1465,15 @@ pub struct Rav1dSegmentationDataSet {
 
 impl From<Dav1dSegmentationDataSet> for Rav1dSegmentationDataSet {
     fn from(value: Dav1dSegmentationDataSet) -> Self {
-        let Dav1dSegmentationDataSet {
-            d,
-            preskip,
-            last_active_segid,
-        } = value;
-        Self {
-            d: d.map(|c| c.into()),
-            preskip,
-            last_active_segid,
-        }
+        let Dav1dSegmentationDataSet { d, preskip, last_active_segid } = value;
+        Self { d: d.map(|c| c.into()), preskip, last_active_segid }
     }
 }
 
 impl From<Rav1dSegmentationDataSet> for Dav1dSegmentationDataSet {
     fn from(value: Rav1dSegmentationDataSet) -> Self {
-        let Rav1dSegmentationDataSet {
-            d,
-            preskip,
-            last_active_segid,
-        } = value;
-        Self {
-            d: d.map(|rust| rust.into()),
-            preskip,
-            last_active_segid,
-        }
+        let Rav1dSegmentationDataSet { d, preskip, last_active_segid } = value;
+        Self { d: d.map(|rust| rust.into()), preskip, last_active_segid }
     }
 }
 
@@ -1577,27 +1493,15 @@ pub struct Rav1dLoopfilterModeRefDeltas {
 
 impl From<Dav1dLoopfilterModeRefDeltas> for Rav1dLoopfilterModeRefDeltas {
     fn from(value: Dav1dLoopfilterModeRefDeltas) -> Self {
-        let Dav1dLoopfilterModeRefDeltas {
-            mode_delta,
-            ref_delta,
-        } = value;
-        Self {
-            mode_delta,
-            ref_delta,
-        }
+        let Dav1dLoopfilterModeRefDeltas { mode_delta, ref_delta } = value;
+        Self { mode_delta, ref_delta }
     }
 }
 
 impl From<Rav1dLoopfilterModeRefDeltas> for Dav1dLoopfilterModeRefDeltas {
     fn from(value: Rav1dLoopfilterModeRefDeltas) -> Self {
-        let Rav1dLoopfilterModeRefDeltas {
-            mode_delta,
-            ref_delta,
-        } = value;
-        Self {
-            mode_delta,
-            ref_delta,
-        }
+        let Rav1dLoopfilterModeRefDeltas { mode_delta, ref_delta } = value;
+        Self { mode_delta, ref_delta }
     }
 }
 
@@ -1786,31 +1690,15 @@ pub struct Rav1dFrameHeaderFilmGrain {
 
 impl From<Dav1dFrameHeaderFilmGrain> for Rav1dFrameHeaderFilmGrain {
     fn from(value: Dav1dFrameHeaderFilmGrain) -> Self {
-        let Dav1dFrameHeaderFilmGrain {
-            data,
-            present,
-            update,
-        } = value;
-        Self {
-            data: data.into(),
-            present,
-            update,
-        }
+        let Dav1dFrameHeaderFilmGrain { data, present, update } = value;
+        Self { data: data.into(), present, update }
     }
 }
 
 impl From<Rav1dFrameHeaderFilmGrain> for Dav1dFrameHeaderFilmGrain {
     fn from(value: Rav1dFrameHeaderFilmGrain) -> Self {
-        let Rav1dFrameHeaderFilmGrain {
-            data,
-            present,
-            update,
-        } = value;
-        Self {
-            data: data.into(),
-            present,
-            update,
-        }
+        let Rav1dFrameHeaderFilmGrain { data, present, update } = value;
+        Self { data: data.into(), present, update }
     }
 }
 
@@ -1828,23 +1716,15 @@ pub struct Rav1dFrameHeaderOperatingPoint {
 
 impl From<Dav1dFrameHeaderOperatingPoint> for Rav1dFrameHeaderOperatingPoint {
     fn from(value: Dav1dFrameHeaderOperatingPoint) -> Self {
-        let Dav1dFrameHeaderOperatingPoint {
-            buffer_removal_time,
-        } = value;
-        Self {
-            buffer_removal_time,
-        }
+        let Dav1dFrameHeaderOperatingPoint { buffer_removal_time } = value;
+        Self { buffer_removal_time }
     }
 }
 
 impl From<Rav1dFrameHeaderOperatingPoint> for Dav1dFrameHeaderOperatingPoint {
     fn from(value: Rav1dFrameHeaderOperatingPoint) -> Self {
-        let Rav1dFrameHeaderOperatingPoint {
-            buffer_removal_time,
-        } = value;
-        Self {
-            buffer_removal_time,
-        }
+        let Rav1dFrameHeaderOperatingPoint { buffer_removal_time } = value;
+        Self { buffer_removal_time }
     }
 }
 
@@ -1864,27 +1744,15 @@ pub struct Rav1dFrameHeaderSuperRes {
 
 impl From<Dav1dFrameHeaderSuperRes> for Rav1dFrameHeaderSuperRes {
     fn from(value: Dav1dFrameHeaderSuperRes) -> Self {
-        let Dav1dFrameHeaderSuperRes {
-            width_scale_denominator,
-            enabled,
-        } = value;
-        Self {
-            width_scale_denominator,
-            enabled: enabled != 0,
-        }
+        let Dav1dFrameHeaderSuperRes { width_scale_denominator, enabled } = value;
+        Self { width_scale_denominator, enabled: enabled != 0 }
     }
 }
 
 impl From<Rav1dFrameHeaderSuperRes> for Dav1dFrameHeaderSuperRes {
     fn from(value: Rav1dFrameHeaderSuperRes) -> Self {
-        let Rav1dFrameHeaderSuperRes {
-            width_scale_denominator,
-            enabled,
-        } = value;
-        Self {
-            width_scale_denominator,
-            enabled: enabled as u8,
-        }
+        let Rav1dFrameHeaderSuperRes { width_scale_denominator, enabled } = value;
+        Self { width_scale_denominator, enabled: enabled as u8 }
     }
 }
 
@@ -2058,18 +1926,7 @@ impl From<Dav1dFrameHeaderQuant> for Rav1dFrameHeaderQuant {
             qm_u,
             qm_v,
         } = value;
-        Self {
-            yac,
-            ydc_delta,
-            udc_delta,
-            uac_delta,
-            vdc_delta,
-            vac_delta,
-            qm,
-            qm_y,
-            qm_u,
-            qm_v,
-        }
+        Self { yac, ydc_delta, udc_delta, uac_delta, vdc_delta, vac_delta, qm, qm_y, qm_u, qm_v }
     }
 }
 
@@ -2087,18 +1944,7 @@ impl From<Rav1dFrameHeaderQuant> for Dav1dFrameHeaderQuant {
             qm_u,
             qm_v,
         } = value;
-        Self {
-            yac,
-            ydc_delta,
-            udc_delta,
-            uac_delta,
-            vdc_delta,
-            vac_delta,
-            qm,
-            qm_y,
-            qm_u,
-            qm_v,
-        }
+        Self { yac, ydc_delta, udc_delta, uac_delta, vdc_delta, vac_delta, qm, qm_y, qm_u, qm_v }
     }
 }
 
@@ -2219,31 +2065,15 @@ pub struct Rav1dFrameHeaderDeltaLF {
 
 impl From<Dav1dFrameHeaderDeltaLF> for Rav1dFrameHeaderDeltaLF {
     fn from(value: Dav1dFrameHeaderDeltaLF) -> Self {
-        let Dav1dFrameHeaderDeltaLF {
-            present,
-            res_log2,
-            multi,
-        } = value;
-        Self {
-            present,
-            res_log2,
-            multi,
-        }
+        let Dav1dFrameHeaderDeltaLF { present, res_log2, multi } = value;
+        Self { present, res_log2, multi }
     }
 }
 
 impl From<Rav1dFrameHeaderDeltaLF> for Dav1dFrameHeaderDeltaLF {
     fn from(value: Rav1dFrameHeaderDeltaLF) -> Self {
-        let Rav1dFrameHeaderDeltaLF {
-            present,
-            res_log2,
-            multi,
-        } = value;
-        Self {
-            present,
-            res_log2,
-            multi,
-        }
+        let Rav1dFrameHeaderDeltaLF { present, res_log2, multi } = value;
+        Self { present, res_log2, multi }
     }
 }
 
@@ -2264,20 +2094,14 @@ pub struct Rav1dFrameHeaderDelta {
 impl From<Dav1dFrameHeaderDelta> for Rav1dFrameHeaderDelta {
     fn from(value: Dav1dFrameHeaderDelta) -> Self {
         let Dav1dFrameHeaderDelta { q, lf } = value;
-        Self {
-            q: q.into(),
-            lf: lf.into(),
-        }
+        Self { q: q.into(), lf: lf.into() }
     }
 }
 
 impl From<Rav1dFrameHeaderDelta> for Dav1dFrameHeaderDelta {
     fn from(value: Rav1dFrameHeaderDelta) -> Self {
         let Rav1dFrameHeaderDelta { q, lf } = value;
-        Self {
-            q: q.into(),
-            lf: lf.into(),
-        }
+        Self { q: q.into(), lf: lf.into() }
     }
 }
 
@@ -2371,35 +2195,15 @@ pub struct Rav1dFrameHeaderCdef {
 
 impl From<Dav1dFrameHeaderCdef> for Rav1dFrameHeaderCdef {
     fn from(value: Dav1dFrameHeaderCdef) -> Self {
-        let Dav1dFrameHeaderCdef {
-            damping,
-            n_bits,
-            y_strength,
-            uv_strength,
-        } = value;
-        Self {
-            damping,
-            n_bits,
-            y_strength,
-            uv_strength,
-        }
+        let Dav1dFrameHeaderCdef { damping, n_bits, y_strength, uv_strength } = value;
+        Self { damping, n_bits, y_strength, uv_strength }
     }
 }
 
 impl From<Rav1dFrameHeaderCdef> for Dav1dFrameHeaderCdef {
     fn from(value: Rav1dFrameHeaderCdef) -> Self {
-        let Rav1dFrameHeaderCdef {
-            damping,
-            n_bits,
-            y_strength,
-            uv_strength,
-        } = value;
-        Self {
-            damping,
-            n_bits,
-            y_strength,
-            uv_strength,
-        }
+        let Rav1dFrameHeaderCdef { damping, n_bits, y_strength, uv_strength } = value;
+        Self { damping, n_bits, y_strength, uv_strength }
     }
 }
 
@@ -2420,20 +2224,14 @@ pub struct Rav1dFrameHeaderRestoration {
 impl From<Dav1dFrameHeaderRestoration> for Rav1dFrameHeaderRestoration {
     fn from(value: Dav1dFrameHeaderRestoration) -> Self {
         let Dav1dFrameHeaderRestoration { r#type, unit_size } = value;
-        Self {
-            r#type: r#type.map(|e| Rav1dRestorationType::from_repr(e as usize).unwrap()),
-            unit_size,
-        }
+        Self { r#type: r#type.map(|e| Rav1dRestorationType::from_repr(e as usize).unwrap()), unit_size }
     }
 }
 
 impl From<Rav1dFrameHeaderRestoration> for Dav1dFrameHeaderRestoration {
     fn from(value: Rav1dFrameHeaderRestoration) -> Self {
         let Rav1dFrameHeaderRestoration { r#type, unit_size } = value;
-        Self {
-            r#type: r#type.map(|e| e.to_repr()),
-            unit_size,
-        }
+        Self { r#type: r#type.map(|e| e.to_repr()), unit_size }
     }
 }
 
@@ -2675,15 +2473,7 @@ impl From<Dav1dFrameHeader> for Rav1dFrameHeader {
 impl From<Rav1dFrameHeader> for Dav1dFrameHeader {
     fn from(value: Rav1dFrameHeader) -> Self {
         let Rav1dFrameHeader {
-            size:
-                Rav1dFrameSize {
-                    width,
-                    height,
-                    render_width,
-                    render_height,
-                    super_res,
-                    have_render_size,
-                },
+            size: Rav1dFrameSize { width, height, render_width, render_height, super_res, have_render_size },
             film_grain,
             frame_type,
             frame_offset,

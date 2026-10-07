@@ -40,13 +40,10 @@ pub(crate) use frameenc::FrameEncoder;
 pub use frameenc::{ref_hist_take, set_modemap_std, set_snap_pool};
 pub(crate) use header::write_uncompressed_header;
 pub(crate) use intermode::{
-    write_comp_inter, write_comp_ref, write_inter_mode, write_interp_filter, write_is_inter,
-    write_single_ref,
+    write_comp_inter, write_comp_ref, write_inter_mode, write_interp_filter, write_is_inter, write_single_ref,
 };
 pub(crate) use mv::encode_mv;
-pub(crate) use prob::{
-    diff_update_encode, encode_term_subexp, forward_remap_prob, update_mv_prob_encode,
-};
+pub(crate) use prob::{diff_update_encode, encode_term_subexp, forward_remap_prob, update_mv_prob_encode};
 pub(crate) use quantize::quantize;
 pub(crate) use syntax::{
     write_intra_mode, write_partition, write_segment_id, write_selected_tx_size, write_skip,
@@ -62,10 +59,7 @@ mod tests {
     #[test]
     fn reused_codebooks_are_reachable() {
         // Coefficient model probabilities (anchor from libvpx).
-        assert_eq!(
-            crate::prob_tables::DEFAULT_COEF_PROBS[0][0][0][0][0],
-            [195, 29, 183]
-        );
+        assert_eq!(crate::prob_tables::DEFAULT_COEF_PROBS[0][0][0][0][0], [195, 29, 183]);
         // Dequant steps (the encoder divides by the same table it inverts).
         assert!(crate::quant::dc_quant(0, 8) > 0);
         assert!(crate::quant::ac_quant(255, 8) > 0);

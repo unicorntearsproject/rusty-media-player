@@ -47,16 +47,10 @@ impl<'a, T: AsMutPtr<Target = u8>> Strided for PicOrBuf<'a, T> {
 
 impl<'a, T: AsMutPtr<Target = u8>> WithOffset<PicOrBuf<'a, T>> {
     pub fn pic(pic: WithOffset<&'a Rav1dPictureDataComponent>) -> Self {
-        Self {
-            data: PicOrBuf::Pic(pic.data),
-            offset: pic.offset,
-        }
+        Self { data: PicOrBuf::Pic(pic.data), offset: pic.offset }
     }
 
     pub fn buf(buf: WithOffset<WithStride<&'a DisjointMut<T>>>) -> Self {
-        Self {
-            data: PicOrBuf::Buf(buf.data),
-            offset: buf.offset,
-        }
+        Self { data: PicOrBuf::Buf(buf.data), offset: buf.offset }
     }
 }

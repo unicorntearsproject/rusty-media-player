@@ -45,10 +45,7 @@ where
     /// Create an [`EnumMap`] from an existing array
     /// where the array's indices correspond to `K`'s values `as usize`.
     pub const fn new(array: [V; N]) -> Self {
-        Self {
-            array,
-            _phantom: PhantomData,
-        }
+        Self { array, _phantom: PhantomData }
     }
 }
 
@@ -60,10 +57,7 @@ where
     /// Create an [`EnumMap`] with default values when `V: ` [`DefaultValue`].
     #[allow(dead_code)] // TODO(kkysen) remove when used
     const fn default() -> Self {
-        Self {
-            array: [V::DEFAULT; N],
-            _phantom: PhantomData,
-        }
+        Self { array: [V::DEFAULT; N], _phantom: PhantomData }
     }
 }
 

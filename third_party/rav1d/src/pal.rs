@@ -18,15 +18,7 @@ impl pal_idx_finish::Fn {
     /// If `dst` is [`None`], `tmp` is used as `dst`.
     /// This is why `tmp` must be `&mut`, too.
     /// `tmp` is always used as `src`.
-    pub fn call(
-        &self,
-        dst: Option<&mut [u8]>,
-        tmp: &mut [u8],
-        bw: usize,
-        bh: usize,
-        w: usize,
-        h: usize,
-    ) {
+    pub fn call(&self, dst: Option<&mut [u8]>, tmp: &mut [u8], bw: usize, bh: usize, w: usize, h: usize) {
         let dst = dst.map(|dst| &mut dst[..(bw / 2) * bh]);
         let tmp = &mut tmp[..bw * bh];
         // SAFETY: Note that `dst` and `src` may be the same.
@@ -133,9 +125,7 @@ fn pal_idx_finish_rust(idx: PalIdx, bw: usize, bh: usize, w: usize, h: usize) {
 
 impl Rav1dPalDSPContext {
     pub const fn default() -> Self {
-        Self {
-            pal_idx_finish: pal_idx_finish::Fn::new(pal_idx_finish_c),
-        }
+        Self { pal_idx_finish: pal_idx_finish::Fn::new(pal_idx_finish_c) }
     }
 
     #[cfg(all(feature = "asm", any(target_arch = "x86", target_arch = "x86_64")))]

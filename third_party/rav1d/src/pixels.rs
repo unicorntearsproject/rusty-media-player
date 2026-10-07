@@ -36,9 +36,7 @@ pub trait Pixels {
         #[inline(never)]
         #[cfg_attr(debug_assertions, track_caller)]
         fn out_of_bounds(pixel_offset: usize, pixel_len: usize) -> ! {
-            panic!(
-                "pixel offset {pixel_offset} out of range for slice of pixel length {pixel_len}"
-            );
+            panic!("pixel offset {pixel_offset} out of range for slice of pixel length {pixel_len}");
         }
 
         let pixel_len = self.pixel_len::<BD>();

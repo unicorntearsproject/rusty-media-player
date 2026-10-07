@@ -60,7 +60,11 @@ impl CodecFactory for DesktopCodecs {
 impl DesktopCodecs {
     /// Our HEVC decoder refuses a stream that turns out to need more than it does (range extensions) on the first packet that says so:
     /// the system's decoder takes it from there.
-    fn with_fallback(&self, dec: CoreResult<Box<dyn VideoDecoder>>, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
+    fn with_fallback(
+        &self,
+        dec: CoreResult<Box<dyn VideoDecoder>>,
+        info: &StreamInfo,
+    ) -> CoreResult<Box<dyn VideoDecoder>> {
         match dec {
             Ok(d) if info.codec == "hevc" && self.platform.is_some() => {
                 Ok(Box::new(rvp_core::FallbackVideo::new(d, self.platform.clone(), info.clone())))

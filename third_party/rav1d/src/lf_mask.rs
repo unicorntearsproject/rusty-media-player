@@ -4,6 +4,7 @@ use crate::include::dav1d::headers::Rav1dFrameHeader;
 use crate::include::dav1d::headers::Rav1dLoopfilterModeRefDeltas;
 use crate::include::dav1d::headers::Rav1dPixelLayout;
 use crate::include::dav1d::headers::Rav1dRestorationType;
+use crate::libc::ptrdiff_t;
 use crate::src::align::Align16;
 use crate::src::align::ArrayDefault;
 use crate::src::ctx::CaseSet;
@@ -14,7 +15,6 @@ use crate::src::levels::SegmentId;
 use crate::src::levels::TxfmSize;
 use crate::src::relaxed_atomic::RelaxedAtomic;
 use crate::src::tables::dav1d_txfm_dimensions;
-use crate::libc::ptrdiff_t;
 use parking_lot::RwLock;
 use std::cmp;
 use std::ffi::c_int;
@@ -29,11 +29,7 @@ pub struct Av1FilterLUT {
 
 impl Default for Av1FilterLUT {
     fn default() -> Self {
-        Self {
-            e: [0; 64],
-            i: [0; 64],
-            sharp: Default::default(),
-        }
+        Self { e: [0; 64], i: [0; 64], sharp: Default::default() }
     }
 }
 
@@ -256,8 +252,7 @@ fn mask_edges_inter(
     // SAFETY: h4 - 1 < h4 and ..w4 < w4 so txa[1][0][h4 - 1][..w4] is
     // initialized. Note that this can be replaced by
     // `MaybeUninit::slice_assume_init_ref` if it is stabilized.
-    let txa_slice =
-        unsafe { &*(&txa[1][0][h4 - 1][..w4] as *const [MaybeUninit<u8>] as *const [u8]) };
+    let txa_slice = unsafe { &*(&txa[1][0][h4 - 1][..w4] as *const [MaybeUninit<u8>] as *const [u8]) };
     a[..w4].copy_from_slice(txa_slice);
 }
 
@@ -472,14 +467,8 @@ pub(crate) fn rav1d_create_lf_mask_intra(
 
     let ss_ver = (layout == Rav1dPixelLayout::I420) as usize;
     let ss_hor = (layout != Rav1dPixelLayout::I444) as usize;
-    let cbw4 = cmp::min(
-        (iw + ss_hor >> ss_hor) - (bx >> ss_hor),
-        (b_dim[0] + ss_hor) >> ss_hor,
-    );
-    let cbh4 = cmp::min(
-        (ih + ss_ver >> ss_ver) - (by >> ss_ver),
-        (b_dim[1] + ss_ver) >> ss_ver,
-    );
+    let cbw4 = cmp::min((iw + ss_hor >> ss_hor) - (bx >> ss_hor), (b_dim[0] + ss_hor) >> ss_hor);
+    let cbh4 = cmp::min((ih + ss_ver >> ss_ver) - (by >> ss_ver), (b_dim[1] + ss_ver) >> ss_ver);
 
     if cbw4 == 0 || cbh4 == 0 {
         return;
@@ -500,19 +489,7 @@ pub(crate) fn rav1d_create_lf_mask_intra(
         level_cache_off += b4_stride;
     }
 
-    mask_edges_chroma(
-        &lflvl.filter_uv,
-        cby4,
-        cbx4,
-        cbw4,
-        cbh4,
-        false,
-        uvtx,
-        auv,
-        luv,
-        ss_hor,
-        ss_ver,
-    );
+    mask_edges_chroma(&lflvl.filter_uv, cby4, cbx4, cbw4, cbh4, false, uvtx, auv, luv, ss_hor, ss_ver);
 }
 
 #[inline(never)]
@@ -560,18 +537,7 @@ pub(crate) fn rav1d_create_lf_mask_inter(
             level_cache_off += b4_stride;
         }
 
-        mask_edges_inter(
-            &lflvl.filter_y,
-            by4,
-            bx4,
-            bw4,
-            bh4,
-            skip,
-            max_ytx,
-            tx_masks,
-            ay,
-            ly,
-        );
+        mask_edges_inter(&lflvl.filter_y, by4, bx4, bw4, bh4, skip, max_ytx, tx_masks, ay, ly);
     }
 
     let (auv, luv) = match aluv {
@@ -581,14 +547,8 @@ pub(crate) fn rav1d_create_lf_mask_inter(
 
     let ss_ver = (layout == Rav1dPixelLayout::I420) as usize;
     let ss_hor = (layout != Rav1dPixelLayout::I444) as usize;
-    let cbw4 = cmp::min(
-        (iw + ss_hor >> ss_hor) - (bx >> ss_hor),
-        (b_dim[0] + ss_hor) >> ss_hor,
-    );
-    let cbh4 = cmp::min(
-        (ih + ss_ver >> ss_ver) - (by >> ss_ver),
-        (b_dim[1] + ss_ver) >> ss_ver,
-    );
+    let cbw4 = cmp::min((iw + ss_hor >> ss_hor) - (bx >> ss_hor), (b_dim[0] + ss_hor) >> ss_hor);
+    let cbh4 = cmp::min((ih + ss_ver >> ss_ver) - (by >> ss_ver), (b_dim[1] + ss_ver) >> ss_ver);
 
     if cbw4 == 0 || cbh4 == 0 {
         return;
@@ -609,19 +569,7 @@ pub(crate) fn rav1d_create_lf_mask_inter(
         level_cache_off += b4_stride;
     }
 
-    mask_edges_chroma(
-        &lflvl.filter_uv,
-        cby4,
-        cbx4,
-        cbw4,
-        cbh4,
-        skip,
-        uvtx,
-        auv,
-        luv,
-        ss_hor,
-        ss_ver,
-    );
+    mask_edges_chroma(&lflvl.filter_uv, cby4, cbx4, cbw4, cbh4, skip, uvtx, auv, luv, ss_hor, ss_ver);
 }
 
 pub fn rav1d_calc_eih(lim_lut: &mut Av1FilterLUT, filter_sharpness: u8) {
@@ -651,11 +599,7 @@ fn calc_lf_value(
     seg_delta: i8,
     mr_delta: Option<&Rav1dLoopfilterModeRefDeltas>,
 ) {
-    let base = iclip(
-        iclip(base_lvl as c_int + lf_delta as c_int, 0, 63) + seg_delta as c_int,
-        0,
-        63,
-    );
+    let base = iclip(iclip(base_lvl as c_int + lf_delta as c_int, 0, 63) + seg_delta as c_int, 0, 63);
 
     if let Some(mr_delta) = mr_delta {
         let sh = (base >= 32) as c_int;
@@ -691,11 +635,7 @@ pub(crate) fn rav1d_calc_lf_values(
     hdr: &Rav1dFrameHeader,
     lf_delta: &[i8; 4],
 ) {
-    let n_seg = if hdr.segmentation.enabled != 0 {
-        SegmentId::COUNT
-    } else {
-        1
-    };
+    let n_seg = if hdr.segmentation.enabled != 0 { SegmentId::COUNT } else { 1 };
 
     if hdr.loopfilter.level_y == [0; 2] {
         lflvl_values[..n_seg].fill_with(Default::default);
@@ -703,17 +643,9 @@ pub(crate) fn rav1d_calc_lf_values(
     }
 
     let mr_deltas = hdr.loopfilter.mode_ref_deltas.clone().into();
-    let mr_deltas = if hdr.loopfilter.mode_ref_delta_enabled != 0 {
-        Some(&mr_deltas)
-    } else {
-        None
-    };
+    let mr_deltas = if hdr.loopfilter.mode_ref_delta_enabled != 0 { Some(&mr_deltas) } else { None };
     for s in 0..n_seg {
-        let segd = if hdr.segmentation.enabled != 0 {
-            Some(&hdr.segmentation.seg_data.d[s])
-        } else {
-            None
-        };
+        let segd = if hdr.segmentation.enabled != 0 { Some(&hdr.segmentation.seg_data.d[s]) } else { None };
 
         calc_lf_value(
             &mut lflvl_values[s][0],

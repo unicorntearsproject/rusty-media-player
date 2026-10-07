@@ -87,8 +87,7 @@ fn polyfit_cubic(xs: &[f64], ys: &[f64]) -> [f64; 4] {
 
 /// Definite integral of the cubic `c` over `[lo, hi]`.
 fn integ_cubic(c: &[f64; 4], lo: f64, hi: f64) -> f64 {
-    let f =
-        |x: f64| c[0] * x + c[1] * x * x / 2.0 + c[2] * x.powi(3) / 3.0 + c[3] * x.powi(4) / 4.0;
+    let f = |x: f64| c[0] * x + c[1] * x * x / 2.0 + c[2] * x.powi(3) / 3.0 + c[3] * x.powi(4) / 4.0;
     f(hi) - f(lo)
 }
 
@@ -159,11 +158,7 @@ fn rd_curve(cfg: impl Fn(&mut FrameEncoder), qindexes: &[u32]) -> Vec<(f64, f64)
                 npx += (cw * ch) as u64;
             }
             let mse = sse as f64 / npx as f64;
-            let psnr = if mse == 0.0 {
-                99.0
-            } else {
-                10.0 * (255.0f64 * 255.0 / mse).log10()
-            };
+            let psnr = if mse == 0.0 { 99.0 } else { 10.0 * (255.0f64 * 255.0 / mse).log10() };
             (bits as f64, psnr)
         })
         .collect()
@@ -182,9 +177,8 @@ fn rd_curve_inter(cfg: impl Fn(&mut FrameEncoder), qindexes: &[u32]) -> Vec<(f64
         |x, y| ((x * y) / 8 + (x ^ y)) as u16 % 256,
     ];
     let frame = |f: fn(usize, usize) -> u16, sx: usize, sy: usize| -> [Vec<u16>; 3] {
-        let y: Vec<u16> = (0..cw * ch)
-            .map(|i| f((i % cw).saturating_sub(sx), (i / cw).saturating_sub(sy)))
-            .collect();
+        let y: Vec<u16> =
+            (0..cw * ch).map(|i| f((i % cw).saturating_sub(sx), (i / cw).saturating_sub(sy))).collect();
         let uv = vec![128u16; (cw / 2) * (ch / 2)];
         [y, uv.clone(), uv]
     };
@@ -198,8 +192,7 @@ fn rd_curve_inter(cfg: impl Fn(&mut FrameEncoder), qindexes: &[u32]) -> Vec<(f64
                 let _ = enc0.encode_frame();
                 let recon0 = enc0.recon_owned();
                 let p_src = frame(f, 4, 2);
-                let mut enc1 =
-                    FrameEncoder::new(cw as u32, ch as u32, q, p_src.clone(), Some(recon0));
+                let mut enc1 = FrameEncoder::new(cw as u32, ch as u32, q, p_src.clone(), Some(recon0));
                 enc1.set_use_prob_updates(false);
                 cfg(&mut enc1);
                 bits += enc1.encode_frame().len() as u64 * 8;
@@ -211,11 +204,7 @@ fn rd_curve_inter(cfg: impl Fn(&mut FrameEncoder), qindexes: &[u32]) -> Vec<(f64
                 npx += (cw * ch) as u64;
             }
             let mse = sse as f64 / npx as f64;
-            let psnr = if mse == 0.0 {
-                99.0
-            } else {
-                10.0 * (255.0f64 * 255.0 / mse).log10()
-            };
+            let psnr = if mse == 0.0 { 99.0 } else { 10.0 * (255.0f64 * 255.0 / mse).log10() };
             (bits as f64, psnr)
         })
         .collect()
@@ -232,10 +221,7 @@ mod tests {
     fn bd_rate_oracle_is_sane() {
         let qs = [40u32, 80, 120, 170];
         let baseline = rd_curve(|_| {}, &qs); // default encoder
-        assert!(
-            bd_rate(&baseline, &baseline).abs() < 0.01,
-            "BD-rate vs self must be ~0"
-        );
+        assert!(bd_rate(&baseline, &baseline).abs() < 0.01, "BD-rate vs self must be ~0");
     }
 
     /// The unbiased verdict on the R5 deadzone. Reports BD-rate (negative ⇒ a real
@@ -263,10 +249,7 @@ mod tests {
         let bd = bd_rate(&base, &trel);
         eprintln!("R5 trellis EOB BD-rate vs baseline: {bd:+.2}%  (negative = win)");
         for (&q, (b, t)) in qs.iter().zip(base.iter().zip(trel.iter())) {
-            eprintln!(
-                "  q{q}: base {:.0} b @ {:.3} dB | trellis {:.0} b @ {:.3} dB",
-                b.0, b.1, t.0, t.1
-            );
+            eprintln!("  q{q}: base {:.0} b @ {:.3} dB | trellis {:.0} b @ {:.3} dB", b.0, b.1, t.0, t.1);
         }
         assert!(bd.is_finite());
     }
@@ -281,10 +264,7 @@ mod tests {
         let bd = bd_rate(&base, &txs);
         eprintln!("Roof tx-search BD-rate vs 4×4-only: {bd:+.2}%  (negative = win)");
         for (&q, (b, t)) in qs.iter().zip(base.iter().zip(txs.iter())) {
-            eprintln!(
-                "  q{q}: 4×4 {:.0} b @ {:.3} dB | tx-search {:.0} b @ {:.3} dB",
-                b.0, b.1, t.0, t.1
-            );
+            eprintln!("  q{q}: 4×4 {:.0} b @ {:.3} dB | tx-search {:.0} b @ {:.3} dB", b.0, b.1, t.0, t.1);
         }
         assert!(bd.is_finite());
     }
@@ -301,10 +281,7 @@ mod tests {
         let bd = bd_rate(&base, &part);
         eprintln!("Roof partition-RD BD-rate vs all-8×8: {bd:+.2}%  (negative = win)");
         for (&q, (b, p)) in qs.iter().zip(base.iter().zip(part.iter())) {
-            eprintln!(
-                "  q{q}: 8×8 {:.0} b @ {:.3} dB | partition {:.0} b @ {:.3} dB",
-                b.0, b.1, p.0, p.1
-            );
+            eprintln!("  q{q}: 8×8 {:.0} b @ {:.3} dB | partition {:.0} b @ {:.3} dB", b.0, b.1, p.0, p.1);
         }
         assert!(bd.is_finite());
     }
@@ -319,10 +296,7 @@ mod tests {
         let bd = bd_rate(&base, &part);
         eprintln!("Inter partition-RD BD-rate vs all-8×8: {bd:+.2}%  (negative = win)");
         for (&q, (b, p)) in qs.iter().zip(base.iter().zip(part.iter())) {
-            eprintln!(
-                "  q{q}: 8×8 {:.0} b @ {:.3} dB | partition {:.0} b @ {:.3} dB",
-                b.0, b.1, p.0, p.1
-            );
+            eprintln!("  q{q}: 8×8 {:.0} b @ {:.3} dB | partition {:.0} b @ {:.3} dB", b.0, b.1, p.0, p.1);
         }
         assert!(bd.is_finite());
     }
@@ -348,9 +322,8 @@ mod tests {
     fn speed_benchmark() {
         use std::time::Instant;
         let (w, h) = (256usize, 256usize);
-        let y: Vec<u16> = (0..w * h)
-            .map(|i| ((i % w).wrapping_mul(53) ^ (i / w).wrapping_mul(97)) as u16 % 256)
-            .collect();
+        let y: Vec<u16> =
+            (0..w * h).map(|i| ((i % w).wrapping_mul(53) ^ (i / w).wrapping_mul(97)) as u16 % 256).collect();
         let uv = vec![128u16; (w / 2) * (h / 2)];
         let src = [y, uv.clone(), uv];
         let mp = (w * h) as f64 / 1e6;
@@ -375,10 +348,7 @@ mod tests {
             let _ = dec.next_frame().unwrap();
         }
         let dec_ms = t.elapsed().as_secs_f64() * 1000.0 / n as f64;
-        eprintln!(
-            "VP9 decode: {dec_ms:.2} ms/frame, {:.1} MP/s",
-            mp / (dec_ms / 1000.0)
-        );
+        eprintln!("VP9 decode: {dec_ms:.2} ms/frame, {:.1} MP/s", mp / (dec_ms / 1000.0));
     }
 
     /// The gold-standard external arm: our intra encoder vs ffmpeg's `libvpx-vp9`
@@ -393,9 +363,8 @@ mod tests {
         let ff = std::env::var("FFMPEG").unwrap_or_else(|_| "ffmpeg".into());
         let (w, h) = (256usize, 256usize);
         let (cw, ch) = (w / 2, h / 2);
-        let yf = |x: usize, y: usize| {
-            (x.wrapping_mul(53) ^ y.wrapping_mul(97)).wrapping_add(x * y / 16) as u8
-        };
+        let yf =
+            |x: usize, y: usize| (x.wrapping_mul(53) ^ y.wrapping_mul(97)).wrapping_add(x * y / 16) as u8;
         let mut yuv = Vec::with_capacity(w * h + 2 * cw * ch);
         for y in 0..h {
             for x in 0..w {
@@ -412,8 +381,7 @@ mod tests {
             .iter()
             .map(|&q| {
                 let uv = vec![128u16; cw * ch];
-                let mut enc =
-                    FrameEncoder::new(w as u32, h as u32, q, [src_y.clone(), uv.clone(), uv], None);
+                let mut enc = FrameEncoder::new(w as u32, h as u32, q, [src_y.clone(), uv.clone(), uv], None);
                 let bits = enc.encode_frame().len() as f64 * 8.0;
                 (bits, psnr(&src_y, enc.recon()[0]))
             })

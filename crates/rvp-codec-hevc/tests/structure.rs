@@ -100,11 +100,11 @@ impl Enc {
         Self { low: 0, range: 510, first: true, outstanding: 0, out: Bits::default(), state: [0; ctx::COUNT] }
     }
     fn init_contexts(&mut self, qp: i32) {
-        for i in 0..ctx::COUNT {
+        for (i, st) in self.state.iter_mut().enumerate() {
             let v = ctx::INIT_VALUES[0][i] as i32;
             let (m, n) = ((v >> 4) * 5 - 45, ((v & 15) << 3) - 16);
             let pre = (((m * qp.clamp(0, 51)) >> 4) + n).clamp(1, 126);
-            self.state[i] = if pre <= 63 { ((63 - pre) as u8) << 1 } else { (((pre - 64) as u8) << 1) | 1 };
+            *st = if pre <= 63 { ((63 - pre) as u8) << 1 } else { (((pre - 64) as u8) << 1) | 1 };
         }
     }
     fn restart(&mut self) {
@@ -209,7 +209,6 @@ impl Rng {
 }
 
 struct Layout {
-    rs_to_ts: Vec<usize>,
     ts_to_rs: Vec<usize>,
     tile_of_rs: Vec<usize>,
     tile_x0: Vec<usize>,
@@ -225,14 +224,13 @@ fn layout(c: &Config) -> Layout {
     for h in &c.rows {
         row_bd.push(row_bd.last().unwrap() + h);
     }
-    let (mut rs_to_ts, mut ts_to_rs, mut tile_of_rs) = (vec![0; n], vec![0; n], vec![0; n]);
+    let (mut ts_to_rs, mut tile_of_rs) = (vec![0; n], vec![0; n]);
     let mut ts = 0;
     for ty in 0..c.rows.len() {
         for tx in 0..c.cols.len() {
             for y in row_bd[ty]..row_bd[ty + 1] {
                 for x in col_bd[tx]..col_bd[tx + 1] {
                     let rs = y * c.w_ctb + x;
-                    rs_to_ts[rs] = ts;
                     ts_to_rs[ts] = rs;
                     tile_of_rs[rs] = ty * c.cols.len() + tx;
                     ts += 1;
@@ -241,7 +239,7 @@ fn layout(c: &Config) -> Layout {
         }
     }
     let tile_x0 = (0..c.rows.len() * c.cols.len()).map(|t| col_bd[t % c.cols.len()]).collect();
-    Layout { rs_to_ts, ts_to_rs, tile_of_rs, tile_x0 }
+    Layout { ts_to_rs, tile_of_rs, tile_x0 }
 }
 
 fn vps() -> Vec<u8> {
@@ -365,7 +363,7 @@ fn pps(c: &Config) -> Vec<u8> {
 fn picture(c: &Config, lay: &Layout, rng: &mut Rng) -> Vec<Vec<u8>> {
     let n = c.w_ctb * c.h_ctb;
     let tiles = c.cols.len() > 1 || c.rows.len() > 1;
-    let addr_bits = (usize::BITS - (n - 1).leading_zeros()) as u32;
+    let addr_bits = usize::BITS - (n - 1).leading_zeros();
     let addr_bits = if n <= 1 { 0 } else { addr_bits };
     let mut units = Vec::new();
     let mut slice_addr_rs = vec![usize::MAX; n];
@@ -517,7 +515,7 @@ fn ours(c: &Config, pics: &[Vec<Vec<u8>>]) -> Result<Vec<u8>, String> {
     let strip = |u: &[u8]| u[4..].to_vec();
     let mut s = HevcStream::new(SwBackend::new(), &[]).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
-    let mut take = |s: &mut HevcStream<SwBackend>, out: &mut Vec<u8>| {
+    let take = |s: &mut HevcStream<SwBackend>, out: &mut Vec<u8>| {
         while let Some(f) = s.receive() {
             assert_eq!((f.width as usize, f.height as usize), (w, h));
             for (i, p) in f.planes.iter().enumerate() {

@@ -18,6 +18,7 @@ use crate::include::dav1d::headers::Rav1dSequenceHeader;
 use crate::include::dav1d::headers::Rav1dWarpedMotionParams;
 use crate::include::dav1d::picture::Rav1dPicAllocator;
 use crate::include::dav1d::picture::Rav1dPicture;
+use crate::libc::ptrdiff_t;
 use crate::src::align::Align16;
 use crate::src::align::Align64;
 use crate::src::align::AlignedVec64;
@@ -88,7 +89,6 @@ use crate::src::thread_task::Rav1dTaskIndex;
 use crate::src::thread_task::Rav1dTasks;
 use atomig::Atom;
 use atomig::Atomic;
-use crate::libc::ptrdiff_t;
 use parking_lot::Condvar;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -267,10 +267,7 @@ pub struct GrainBD<BD: BitDepth> {
 // Implemented manually since we don't require `BD: Default`.
 impl<BD: BitDepth> Default for GrainBD<BD> {
     fn default() -> Self {
-        Self {
-            grain_lut: Default::default(),
-            scaling: Default::default(),
-        }
+        Self { grain_lut: Default::default(), scaling: Default::default() }
     }
 }
 
@@ -649,9 +646,7 @@ pub(crate) struct TxLpfRightEdge {
 impl TxLpfRightEdge {
     #[allow(dead_code)]
     pub fn new() -> Self {
-        Self {
-            inner: DisjointMut::default(),
-        }
+        Self { inner: DisjointMut::default() }
     }
 
     pub fn resize(&mut self, right_edge_size: usize, value: u8) {
@@ -662,17 +657,11 @@ impl TxLpfRightEdge {
         &'a self,
         index_y: Range<usize>,
         index_uv: Range<usize>,
-    ) -> (
-        impl 'a + Deref<Target = [u8]>,
-        impl 'a + Deref<Target = [u8]>,
-    ) {
+    ) -> (impl 'a + Deref<Target = [u8]>, impl 'a + Deref<Target = [u8]>) {
         let mid = self.inner.len() / 2;
         assert!(index_y.end <= mid);
         let (uv_start, uv_end) = (index_uv.start + mid, index_uv.end + mid);
-        (
-            self.inner.index(index_y),
-            self.inner.index(uv_start..uv_end),
-        )
+        (self.inner.index(index_y), self.inner.index(uv_start..uv_end))
     }
 
     pub fn copy_from_slice_y(&self, index: Range<usize>, src: &[u8]) {
@@ -731,7 +720,7 @@ pub(crate) struct Rav1dFrameContextTaskThread {
     pub init_done: AtomicI32,
     pub done: [AtomicI32; 2],
     pub retval: Mutex<Option<Rav1dError>>,
-    pub finished: AtomicBool, // true when FrameData.tiles is cleared
+    pub finished: AtomicBool,            // true when FrameData.tiles is cleared
     pub update_set: RelaxedAtomic<bool>, // whether we need to update CDF reference
     pub error: AtomicI32,
     pub task_counter: AtomicI32,
@@ -771,13 +760,7 @@ impl Rav1dFrameContext {
     }
 
     pub fn frame_hdr(&self) -> Arc<DRav1d<Rav1dFrameHeader, Dav1dFrameHeader>> {
-        self.data
-            .try_read()
-            .unwrap()
-            .frame_hdr
-            .as_ref()
-            .unwrap()
-            .clone()
+        self.data.try_read().unwrap().frame_hdr.as_ref().unwrap().clone()
     }
 }
 

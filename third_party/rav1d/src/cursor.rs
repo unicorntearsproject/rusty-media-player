@@ -34,10 +34,7 @@ impl<'a, T> CursorMut<'a, T> {
     }
 
     pub fn clone(&mut self) -> CursorMut<'_, T> {
-        CursorMut {
-            data: self.data,
-            index: self.index,
-        }
+        CursorMut { data: self.data, index: self.index }
     }
 }
 

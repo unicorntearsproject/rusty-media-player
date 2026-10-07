@@ -13,8 +13,7 @@ use super::controls::{create_metadata_dict, ServiceState};
 
 // TODO: This type is super messed up, but it's the only way to get seeking working properly
 // on graphical media controls using dbus-crossroads.
-pub type SeekedSignal =
-    Arc<Mutex<Option<Box<dyn Fn(&Path<'_>, &(String,)) -> dbus::Message + Send + Sync>>>>;
+pub type SeekedSignal = Arc<Mutex<Option<Box<dyn Fn(&Path<'_>, &(String,)) -> dbus::Message + Send + Sync>>>>;
 
 pub fn register_methods<F>(
     state: &Arc<Mutex<ServiceState>>,
@@ -30,28 +29,17 @@ where
         let event_handler = event_handler.clone();
 
         move |b| {
-            b.property("Identity")
-                .get(move |_, _| Ok(friendly_name.clone()));
+            b.property("Identity").get(move |_, _| Ok(friendly_name.clone()));
 
             register_method(b, &event_handler, "Raise", MediaControlEvent::Raise);
             register_method(b, &event_handler, "Quit", MediaControlEvent::Quit);
 
             // TODO: allow user to set these properties
-            b.property("CanQuit")
-                .get(|_, _| Ok(true))
-                .emits_changed_true();
-            b.property("CanRaise")
-                .get(|_, _| Ok(true))
-                .emits_changed_true();
-            b.property("HasTracklist")
-                .get(|_, _| Ok(false))
-                .emits_changed_true();
-            b.property("SupportedUriSchemes")
-                .get(move |_, _| Ok(&[] as &[String]))
-                .emits_changed_true();
-            b.property("SupportedMimeTypes")
-                .get(move |_, _| Ok(&[] as &[String]))
-                .emits_changed_true();
+            b.property("CanQuit").get(|_, _| Ok(true)).emits_changed_true();
+            b.property("CanRaise").get(|_, _| Ok(true)).emits_changed_true();
+            b.property("HasTracklist").get(|_, _| Ok(false)).emits_changed_true();
+            b.property("SupportedUriSchemes").get(move |_, _| Ok(&[] as &[String])).emits_changed_true();
+            b.property("SupportedMimeTypes").get(move |_, _| Ok(&[] as &[String])).emits_changed_true();
         }
     });
 
@@ -68,11 +56,7 @@ where
 
             move |ctx, _, (offset,): (i64,)| {
                 let abs_offset = offset.unsigned_abs();
-                let direction = if offset > 0 {
-                    SeekDirection::Forward
-                } else {
-                    SeekDirection::Backward
-                };
+                let direction = if offset > 0 { SeekDirection::Forward } else { SeekDirection::Backward };
 
                 (event_handler.lock().unwrap())(MediaControlEvent::SeekBy(
                     direction,
@@ -107,9 +91,7 @@ where
                 if let Ok(position) = u64::try_from(position) {
                     let position = Duration::from_micros(position);
 
-                    (event_handler.lock().unwrap())(MediaControlEvent::SetPosition(MediaPosition(
-                        position,
-                    )));
+                    (event_handler.lock().unwrap())(MediaControlEvent::SetPosition(MediaPosition(position)));
                 }
                 Ok(())
             }
@@ -167,12 +149,8 @@ where
             move |_, _| {
                 let state = state.lock().unwrap();
                 let progress: i64 = match state.playback_status {
-                    MediaPlayback::Playing {
-                        progress: Some(progress),
-                    }
-                    | MediaPlayback::Paused {
-                        progress: Some(progress),
-                    } => progress.0.as_micros(),
+                    MediaPlayback::Playing { progress: Some(progress) }
+                    | MediaPlayback::Paused { progress: Some(progress) } => progress.0.as_micros(),
                     _ => 0,
                 }
                 .try_into()
@@ -181,38 +159,18 @@ where
             }
         });
 
-        b.property("MinimumRate")
-            .get(|_, _| Ok(1.0))
-            .emits_changed_true();
-        b.property("MaximumRate")
-            .get(|_, _| Ok(1.0))
-            .emits_changed_true();
+        b.property("MinimumRate").get(|_, _| Ok(1.0)).emits_changed_true();
+        b.property("MaximumRate").get(|_, _| Ok(1.0)).emits_changed_true();
 
-        b.property("CanGoNext")
-            .get(|_, _| Ok(true))
-            .emits_changed_true();
-        b.property("CanGoPrevious")
-            .get(|_, _| Ok(true))
-            .emits_changed_true();
-        b.property("CanPlay")
-            .get(|_, _| Ok(true))
-            .emits_changed_true();
-        b.property("CanPause")
-            .get(|_, _| Ok(true))
-            .emits_changed_true();
-        b.property("CanSeek")
-            .get(|_, _| Ok(true))
-            .emits_changed_true();
-        b.property("CanControl")
-            .get(|_, _| Ok(true))
-            .emits_changed_true();
+        b.property("CanGoNext").get(|_, _| Ok(true)).emits_changed_true();
+        b.property("CanGoPrevious").get(|_, _| Ok(true)).emits_changed_true();
+        b.property("CanPlay").get(|_, _| Ok(true)).emits_changed_true();
+        b.property("CanPause").get(|_, _| Ok(true)).emits_changed_true();
+        b.property("CanSeek").get(|_, _| Ok(true)).emits_changed_true();
+        b.property("CanControl").get(|_, _| Ok(true)).emits_changed_true();
     });
 
-    cr.insert(
-        "/org/mpris/MediaPlayer2",
-        &[app_interface, player_interface],
-        (),
-    );
+    cr.insert("/org/mpris/MediaPlayer2", &[app_interface, player_interface], ());
 
     seeked_signal.lock().ok();
 

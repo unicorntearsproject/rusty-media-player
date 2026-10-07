@@ -78,25 +78,13 @@ pub fn get_intra_ctx(
 }
 
 #[inline]
-pub fn get_tx_ctx(
-    a: &BlockContext,
-    l: &BlockContext,
-    max_tx: &TxfmInfo,
-    yb4: c_int,
-    xb4: c_int,
-) -> u8 {
+pub fn get_tx_ctx(a: &BlockContext, l: &BlockContext, max_tx: &TxfmInfo, yb4: c_int, xb4: c_int) -> u8 {
     (*l.tx_intra.index(yb4 as usize) as i32 >= max_tx.lh as i32) as u8
         + (*a.tx_intra.index(xb4 as usize) as i32 >= max_tx.lw as i32) as u8
 }
 
 #[inline]
-pub fn get_partition_ctx(
-    a: &BlockContext,
-    l: &BlockContext,
-    bl: BlockLevel,
-    yb8: c_int,
-    xb8: c_int,
-) -> u8 {
+pub fn get_partition_ctx(a: &BlockContext, l: &BlockContext, bl: BlockLevel, yb8: c_int, xb8: c_int) -> u8 {
     // the right-most ("index zero") bit of the partition represents the 8x8 block level,
     // but the BlockLevel enum represents the variants numerically in the opposite order
     // (128x128 = 0, 8x8 = 4). The shift reverses the ordering.
@@ -106,15 +94,12 @@ pub fn get_partition_ctx(
 
 #[inline]
 pub fn gather_left_partition_prob(r#in: &[u16; 16], bl: BlockLevel) -> u32 {
-    let mut out =
-        r#in[BlockPartition::H as usize - 1] as i32 - r#in[BlockPartition::H as usize] as i32;
+    let mut out = r#in[BlockPartition::H as usize - 1] as i32 - r#in[BlockPartition::H as usize] as i32;
     // Exploit the fact that cdfs for BlockPartition::Split, BlockPartition::TopSplit,
     // BlockPartition::BottomSplit and BlockPartition::LeftSplit are neighbors.
-    out += r#in[BlockPartition::Split as usize - 1] as i32
-        - r#in[BlockPartition::LeftSplit as usize] as i32;
+    out += r#in[BlockPartition::Split as usize - 1] as i32 - r#in[BlockPartition::LeftSplit as usize] as i32;
     if bl != BlockLevel::Bl128x128 {
-        out +=
-            r#in[BlockPartition::H4 as usize - 1] as i32 - r#in[BlockPartition::H4 as usize] as i32;
+        out += r#in[BlockPartition::H4 as usize - 1] as i32 - r#in[BlockPartition::H4 as usize] as i32;
     }
     out as u32
 }
@@ -123,16 +108,16 @@ pub fn gather_left_partition_prob(r#in: &[u16; 16], bl: BlockLevel) -> u32 {
 pub fn gather_top_partition_prob(r#in: &[u16; 16], bl: BlockLevel) -> u32 {
     // Exploit the fact that cdfs for BlockPartition::V, BlockPartition::Split and
     // BlockPartition::TopSplit are neighbors.
-    let mut out = r#in[BlockPartition::V as usize - 1] as i32
-        - r#in[BlockPartition::TopSplit as usize] as i32;
+    let mut out =
+        r#in[BlockPartition::V as usize - 1] as i32 - r#in[BlockPartition::TopSplit as usize] as i32;
     // Exploit the facts that cdfs for BlockPartition::LeftSplit and
     // BlockPartition::RightSplit are neighbors, the probability for
     // BlockPartition::V4 is always zero, and the probability for
     // BlockPartition::RightSplit is zero in 128x128 blocks.
     out += r#in[BlockPartition::LeftSplit as usize - 1] as i32;
     if bl != BlockLevel::Bl128x128 {
-        out += r#in[BlockPartition::V4 as usize - 1] as i32
-            - r#in[BlockPartition::RightSplit as usize] as i32;
+        out +=
+            r#in[BlockPartition::V4 as usize - 1] as i32 - r#in[BlockPartition::RightSplit as usize] as i32;
     }
     out as u32
 }
@@ -143,9 +128,7 @@ pub fn get_uv_inter_txtp(uvt_dim: &TxfmInfo, ytxtp: TxfmType) -> TxfmType {
         return if ytxtp == IDTX { IDTX } else { DCT_DCT };
     }
     if uvt_dim.min == TxfmSize::S16x16 as _
-        && ((1 << ytxtp as u8)
-            & ((1 << H_FLIPADST) | (1 << V_FLIPADST) | (1 << H_ADST) | (1 << V_ADST)))
-            != 0
+        && ((1 << ytxtp as u8) & ((1 << H_FLIPADST) | (1 << V_FLIPADST) | (1 << H_ADST) | (1 << V_ADST))) != 0
     {
         return DCT_DCT;
     }
@@ -205,8 +188,7 @@ pub fn get_comp_ctx(
                 // 4U means intra (-1) or bwd (>= 4)
                 2 + (*a.r#ref[0].index(xb4 as usize) as c_uint >= 4) as u8
             } else {
-                ((*l.r#ref[0].index(yb4 as usize) >= 4) ^ (*a.r#ref[0].index(xb4 as usize) >= 4))
-                    as u8
+                ((*l.r#ref[0].index(yb4 as usize) >= 4) ^ (*a.r#ref[0].index(xb4 as usize) >= 4)) as u8
             }
         } else {
             if a.comp_type.index(xb4 as usize).is_some() {
@@ -324,8 +306,8 @@ pub fn get_jnt_comp_ctx(
     let d1 = get_poc_diff(order_hint_n_bits, poc as c_int, ref1poc as c_int).abs();
     let offset = (d0 == d1) as u8;
     let [a_ctx, l_ctx] = [(a, xb4), (l, yb4)].map(|(al, b4)| {
-        (*al.comp_type.index(b4 as usize) >= Some(CompInterType::Avg)
-            || *al.r#ref[0].index(b4 as usize) == 6) as u8
+        (*al.comp_type.index(b4 as usize) >= Some(CompInterType::Avg) || *al.r#ref[0].index(b4 as usize) == 6)
+            as u8
     });
 
     3 * offset + a_ctx + l_ctx
@@ -678,10 +660,7 @@ pub(crate) fn get_gmv_2d(
             assert!(gmv.matrix[4] == -gmv.matrix[3]);
         }
         Rav1dWarpedMotionType::Translation => {
-            let mut res = Mv {
-                y: (gmv.matrix[0] >> 13) as i16,
-                x: (gmv.matrix[1] >> 13) as i16,
-            };
+            let mut res = Mv { y: (gmv.matrix[0] >> 13) as i16, x: (gmv.matrix[1] >> 13) as i16 };
             if hdr.force_integer_mv {
                 fix_int_mv_precision(&mut res);
             }

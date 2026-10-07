@@ -80,10 +80,7 @@ mod tests {
             write_interp_filter(&mut enc, filter, &probs);
             let bytes = enc.finish();
             let mut bd = BoolDecoder::new(&bytes).unwrap();
-            assert_eq!(
-                read_tree(&mut bd, &SWITCHABLE_INTERP_TREE, &probs) as u8,
-                filter
-            );
+            assert_eq!(read_tree(&mut bd, &SWITCHABLE_INTERP_TREE, &probs) as u8, filter);
         }
     }
 

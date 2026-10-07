@@ -171,9 +171,7 @@ pub fn snapshot() -> [(f64, u64); N] {
     let mut out = [(0.0f64, 0u64); N];
     for (i, o) in out.iter_mut().enumerate() {
         let calls = COUNT[i].load(Relaxed);
-        let cyc = CYC[i]
-            .load(Relaxed)
-            .saturating_sub(calls.saturating_mul(ovh_self));
+        let cyc = CYC[i].load(Relaxed).saturating_sub(calls.saturating_mul(ovh_self));
         *o = (cyc as f64 / hz * 1e3, calls);
     }
     out
@@ -290,15 +288,9 @@ impl Scope {
         let on = enabled();
         if on {
             let _ = CAL.get_or_init(|| (Instant::now(), rdtsc()));
-            Scope {
-                stage: stage as usize,
-                start: rdtsc().max(1),
-            }
+            Scope { stage: stage as usize, start: rdtsc().max(1) }
         } else {
-            Scope {
-                stage: stage as usize,
-                start: 0,
-            }
+            Scope { stage: stage as usize, start: 0 }
         }
     }
 }
@@ -362,11 +354,7 @@ pub fn dump() {
     // `ovh_full × (tens of millions of calls)` from the raw wall was not (a few-cyc
     // calibration wobble × 45M calls swung the total ±30%). The raw Total wall and
     // its instrument tax are printed separately as context, not used as the base.
-    let total = TOPLEVEL
-        .iter()
-        .map(|&s| cor(s as usize))
-        .sum::<u64>()
-        .max(1);
+    let total = TOPLEVEL.iter().map(|&s| cor(s as usize)).sum::<u64>().max(1);
     let ms = |c: u64| c as f64 / hz * 1e3;
     let us_call = |c: u64, n: u64| {
         if n > 0 {
@@ -398,10 +386,7 @@ pub fn dump() {
     let inner: u64 = (0..N).filter(|&i| i != S::Total as usize).map(cnt).sum();
     let instr = inner.saturating_mul(ovh_full);
     let orch = wall.saturating_sub(total).saturating_sub(instr);
-    eprintln!(
-        "  [context] Σ measured primitives = {:.0} ms (denominator)",
-        ms(total)
-    );
+    eprintln!("  [context] Σ measured primitives = {:.0} ms (denominator)", ms(total));
     eprintln!(
         "  [context] raw decision wall = {:.0} ms  |  profiler instrument tax ≈ {:.0} ms  |  unscoped orchestration ≈ {:.0} ms",
         ms(wall),

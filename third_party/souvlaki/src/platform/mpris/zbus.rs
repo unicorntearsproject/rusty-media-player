@@ -9,9 +9,7 @@ use std::time::Duration;
 use zbus::{dbus_interface, ConnectionBuilder, SignalContext};
 use zvariant::{ObjectPath, Value};
 
-use crate::{
-    MediaControlEvent, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection,
-};
+use crate::{MediaControlEvent, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection};
 
 use super::Error;
 
@@ -66,17 +64,9 @@ impl From<MediaMetadata<'_>> for OwnedMetadata {
 impl MediaControls {
     /// Create media controls with the specified config.
     pub fn new(config: PlatformConfig) -> Result<Self, Error> {
-        let PlatformConfig {
-            dbus_name,
-            display_name,
-            ..
-        } = config;
+        let PlatformConfig { dbus_name, display_name, .. } = config;
 
-        Ok(Self {
-            thread: None,
-            dbus_name: dbus_name.to_string(),
-            friendly_name: display_name.to_string(),
-        })
+        Ok(Self { thread: None, dbus_name: dbus_name.to_string(), friendly_name: display_name.to_string() })
     }
 
     /// Attach the media control events to a handler.
@@ -94,19 +84,14 @@ impl MediaControls {
         self.thread = Some(ServiceThreadHandle {
             event_channel,
             thread: thread::spawn(move || {
-                pollster::block_on(run_service(dbus_name, friendly_name, event_handler, rx))
-                    .unwrap();
+                pollster::block_on(run_service(dbus_name, friendly_name, event_handler, rx)).unwrap();
             }),
         });
         Ok(())
     }
     /// Detach the event handler.
     pub fn detach(&mut self) -> Result<(), Error> {
-        if let Some(ServiceThreadHandle {
-            event_channel,
-            thread,
-        }) = self.thread.take()
-        {
+        if let Some(ServiceThreadHandle { event_channel, thread }) = self.thread.take() {
             event_channel.send(InternalEvent::Kill).ok();
             thread.join().map_err(|_| Error::ThreadPanicked)?;
         }
@@ -132,11 +117,7 @@ impl MediaControls {
     }
 
     fn send_internal_event(&mut self, event: InternalEvent) -> Result<(), Error> {
-        let channel = &self
-            .thread
-            .as_ref()
-            .ok_or(Error::ThreadNotRunning)?
-            .event_channel;
+        let channel = &self.thread.as_ref().ok_or(Error::ThreadNotRunning)?.event_channel;
         channel.send(event).map_err(|_| Error::ThreadPanicked)
     }
 }
@@ -226,16 +207,9 @@ impl PlayerInterface {
 
     fn seek(&self, offset: i64) {
         let abs_offset = offset.unsigned_abs();
-        let direction = if offset > 0 {
-            SeekDirection::Forward
-        } else {
-            SeekDirection::Backward
-        };
+        let direction = if offset > 0 { SeekDirection::Forward } else { SeekDirection::Backward };
 
-        self.send_event(MediaControlEvent::SeekBy(
-            direction,
-            Duration::from_micros(abs_offset),
-        ));
+        self.send_event(MediaControlEvent::SeekBy(direction, Duration::from_micros(abs_offset)));
 
         // NOTE: Should the `Seeked` signal be called when calling this method?
     }
@@ -278,13 +252,8 @@ impl PlayerInterface {
         // TODO: this should be stored in a cache inside the state.
         let mut dict = HashMap::<&str, Value>::new();
 
-        let OwnedMetadata {
-            ref title,
-            ref album,
-            ref artist,
-            ref cover_url,
-            ref duration,
-        } = self.state.metadata;
+        let OwnedMetadata { ref title, ref album, ref artist, ref cover_url, ref duration } =
+            self.state.metadata;
 
         // MPRIS
         dict.insert(
@@ -327,12 +296,8 @@ impl PlayerInterface {
     #[dbus_interface(property)]
     fn position(&self) -> i64 {
         let position = match self.state.playback_status {
-            MediaPlayback::Playing {
-                progress: Some(pos),
-            }
-            | MediaPlayback::Paused {
-                progress: Some(pos),
-            } => pos.0.as_micros(),
+            MediaPlayback::Playing { progress: Some(pos) }
+            | MediaPlayback::Paused { progress: Some(pos) } => pos.0.as_micros(),
             _ => 0,
         };
 
@@ -386,10 +351,7 @@ async fn run_service(
     event_handler: Arc<Mutex<dyn Fn(MediaControlEvent) + Send + 'static>>,
     event_channel: mpsc::Receiver<InternalEvent>,
 ) -> zbus::Result<()> {
-    let app = AppInterface {
-        friendly_name,
-        event_handler: event_handler.clone(),
-    };
+    let app = AppInterface { friendly_name, event_handler: event_handler.clone() };
 
     let player = PlayerInterface {
         state: ServiceState {
@@ -415,10 +377,7 @@ async fn run_service(
                 break;
             }
 
-            let interface_ref = connection
-                .object_server()
-                .interface::<_, PlayerInterface>(&path)
-                .await?;
+            let interface_ref = connection.object_server().interface::<_, PlayerInterface>(&path).await?;
             let mut interface = interface_ref.get_mut().await;
             let ctxt = SignalContext::new(&connection, &path)?;
 

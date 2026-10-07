@@ -4,6 +4,7 @@ use crate::include::common::bitdepth::BitDepth;
 use crate::include::dav1d::headers::Rav1dPixelLayout;
 use crate::include::dav1d::headers::Rav1dRestorationType;
 use crate::include::dav1d::picture::Rav1dPictureDataComponentOffset;
+use crate::libc::ptrdiff_t;
 use crate::src::align::Align16;
 use crate::src::internal::Rav1dContext;
 use crate::src::internal::Rav1dFrameData;
@@ -15,7 +16,6 @@ use crate::src::strided::Strided as _;
 use crate::src::tables::dav1d_sgr_params;
 use assert_matches::assert_matches;
 use bitflags::bitflags;
-use crate::libc::ptrdiff_t;
 use std::cmp;
 use std::ffi::c_int;
 
@@ -97,21 +97,8 @@ fn lr_stripe<BD: BitDepth>(
 
     let mut left = &left[..];
     while y + stripe_h <= row_h {
-        edges.set(
-            LrEdgeFlags::BOTTOM,
-            sby + 1 != f.sbh || y + stripe_h != row_h,
-        );
-        lr_fn.call::<BD>(
-            p,
-            left,
-            &f.lf.lr_line_buf,
-            lpf_offset,
-            unit_w,
-            stripe_h,
-            &params,
-            edges,
-            bd,
-        );
+        edges.set(LrEdgeFlags::BOTTOM, sby + 1 != f.sbh || y + stripe_h != row_h);
+        lr_fn.call::<BD>(p, left, &f.lf.lr_line_buf, lpf_offset, unit_w, stripe_h, &params, edges, bd);
         left = &left[stripe_h as usize..];
         y += stripe_h;
         p += stripe_h as isize * p.pixel_stride::<BD>();
@@ -173,8 +160,7 @@ fn lr_sbrow<BD: BitDepth>(
     let shift_hor = 7 - ss_hor;
 
     // maximum sbrow height is 128 + 8 rows offset
-    let mut pre_lr_border: Align16<[[[BD::Pixel; 4]; 128 + 8]; 2]> =
-        Align16([[[0.into(); 4]; 128 + 8]; 2]);
+    let mut pre_lr_border: Align16<[[[BD::Pixel; 4]; 128 + 8]; 2]> = Align16([[[0.into(); 4]; 128 + 8]; 2]);
     let mut lr = [Av1RestorationUnit::default(); 2];
     let mut edges = LrEdgeFlags::TOP.select(y > 0) | LrEdgeFlags::RIGHT;
     let mut aligned_unit_pos = row_y & !(unit_size - 1);
@@ -184,26 +170,20 @@ fn lr_sbrow<BD: BitDepth>(
     aligned_unit_pos <<= ss_ver;
     let sb_idx = (aligned_unit_pos >> 7) * f.sr_sb128w;
     let unit_idx = (aligned_unit_pos >> 6 & 1) << 1;
-    lr[0] = *f.lf.lr_mask[sb_idx as usize].lr[plane as usize][unit_idx as usize]
-        .try_read()
-        .unwrap();
+    lr[0] = *f.lf.lr_mask[sb_idx as usize].lr[plane as usize][unit_idx as usize].try_read().unwrap();
     let mut restore = lr[0].r#type != Rav1dRestorationType::None;
     let mut x = 0;
     let mut bit = false;
     while x + max_unit_size <= w {
         let next_x = x + unit_size;
         let next_u_idx = unit_idx + (next_x >> shift_hor - 1 & 1);
-        lr[!bit as usize] = *f.lf.lr_mask[(sb_idx + (next_x >> shift_hor)) as usize].lr
-            [plane as usize][next_u_idx as usize]
+        lr[!bit as usize] = *f.lf.lr_mask[(sb_idx + (next_x >> shift_hor)) as usize].lr[plane as usize]
+            [next_u_idx as usize]
             .try_read()
             .unwrap();
         let restore_next = lr[!bit as usize].r#type != Rav1dRestorationType::None;
         if restore_next {
-            backup_4xu::<BD>(
-                &mut pre_lr_border[bit as usize],
-                p + (unit_size as usize - 4),
-                row_h - y,
-            );
+            backup_4xu::<BD>(&mut pre_lr_border[bit as usize], p + (unit_size as usize - 4), row_h - y);
         }
         if restore {
             lr_stripe::<BD>(

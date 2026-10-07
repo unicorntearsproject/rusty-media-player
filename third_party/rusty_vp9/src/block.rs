@@ -242,12 +242,7 @@ pub fn subsize(partition: usize, bsize: usize) -> u8 {
 
 /// Read a partition type given its context probabilities and whether the lower
 /// /right halves are inside the frame (libvpx `read_partition`).
-pub fn read_partition(
-    bd: &mut BoolDecoder,
-    probs: &[u8; 3],
-    has_rows: bool,
-    has_cols: bool,
-) -> usize {
+pub fn read_partition(bd: &mut BoolDecoder, probs: &[u8; 3], has_rows: bool, has_cols: bool) -> usize {
     if has_rows && has_cols {
         read_tree(bd, &PARTITION_TREE, probs) as usize
     } else if !has_rows && has_cols {
@@ -344,27 +339,15 @@ mod tests {
         assert_eq!(above_block_mode(&cur, None, 0), DC_PRED);
         assert_eq!(left_block_mode(&cur, None, 0), DC_PRED);
         // An inter neighbour is also treated as DC for intra mode prediction.
-        let inter = ModeInfo {
-            is_inter: true,
-            mode: TM_PRED,
-            ..Default::default()
-        };
+        let inter = ModeInfo { is_inter: true, mode: TM_PRED, ..Default::default() };
         assert_eq!(above_block_mode(&cur, Some(&inter), 1), DC_PRED);
     }
 
     #[test]
     fn block_mode_reads_neighbour_and_self() {
         // 8×8 above neighbour with mode V → above mode of top sub-blocks is V.
-        let above = ModeInfo {
-            sb_type: BLOCK_8X8 as u8,
-            mode: 1,
-            ..Default::default()
-        };
-        let cur = ModeInfo {
-            sb_type: BLOCK_8X8 as u8,
-            bmi: [3, 4, 5, 6],
-            ..Default::default()
-        };
+        let above = ModeInfo { sb_type: BLOCK_8X8 as u8, mode: 1, ..Default::default() };
+        let cur = ModeInfo { sb_type: BLOCK_8X8 as u8, bmi: [3, 4, 5, 6], ..Default::default() };
         assert_eq!(above_block_mode(&cur, Some(&above), 0), 1);
         // Lower sub-blocks (b=2,3) read the current block's own bmi.
         assert_eq!(above_block_mode(&cur, Some(&above), 2), cur.bmi[0]);
@@ -373,47 +356,24 @@ mod tests {
 
     #[test]
     fn kf_mode_prob_selection_indexes_by_neighbours() {
-        let above = ModeInfo {
-            sb_type: BLOCK_8X8 as u8,
-            mode: 2,
-            ..Default::default()
-        };
-        let left = ModeInfo {
-            sb_type: BLOCK_8X8 as u8,
-            mode: 5,
-            ..Default::default()
-        };
-        let cur = ModeInfo {
-            sb_type: BLOCK_8X8 as u8,
-            ..Default::default()
-        };
+        let above = ModeInfo { sb_type: BLOCK_8X8 as u8, mode: 2, ..Default::default() };
+        let left = ModeInfo { sb_type: BLOCK_8X8 as u8, mode: 5, ..Default::default() };
+        let cur = ModeInfo { sb_type: BLOCK_8X8 as u8, ..Default::default() };
         let p = kf_y_mode_probs(&cur, Some(&above), Some(&left), 0);
         assert_eq!(p, &KF_Y_MODE_PROBS[2][5]);
     }
 
     #[test]
     fn contexts_match_formulas() {
-        let s0 = ModeInfo {
-            skip: false,
-            ..Default::default()
-        };
-        let s1 = ModeInfo {
-            skip: true,
-            ..Default::default()
-        };
+        let s0 = ModeInfo { skip: false, ..Default::default() };
+        let s1 = ModeInfo { skip: true, ..Default::default() };
         assert_eq!(skip_context(Some(&s1), Some(&s1)), 2);
         assert_eq!(skip_context(Some(&s0), None), 0);
         // partition context: bsl picks the bit, packs (left*2+above)+bsl*4.
         let above_seg = [0b1000u8; 8];
         let left_seg = [0b1000u8; 8];
-        assert_eq!(
-            partition_plane_context(&above_seg, &left_seg, 0, 0, 3),
-            (1 * 2 + 1) + 3 * 4
-        );
-        assert_eq!(
-            partition_plane_context(&above_seg, &left_seg, 0, 0, 2),
-            0 + 2 * 4
-        );
+        assert_eq!(partition_plane_context(&above_seg, &left_seg, 0, 0, 3), (1 * 2 + 1) + 3 * 4);
+        assert_eq!(partition_plane_context(&above_seg, &left_seg, 0, 0, 2), 0 + 2 * 4);
     }
 
     #[test]

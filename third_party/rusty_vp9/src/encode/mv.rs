@@ -35,11 +35,7 @@ fn encode_mv_component(
     // [2^(c+3), 2^(c+4)). base(c) = (c==0) ? 0 : 1<<(c+3); offset = z - base
     // packs as (d<<3) | (fp<<1) | hp.
     let z = comp.unsigned_abs() as i32 - 1;
-    let mv_class = if z < 16 {
-        0usize
-    } else {
-        ((31 - (z as u32).leading_zeros()) as usize - 3).min(10)
-    };
+    let mv_class = if z < 16 { 0usize } else { ((31 - (z as u32).leading_zeros()) as usize - 3).min(10) };
     enc.write_tree(&MV_CLASS_TREE, &c.classes, mv_class as i32);
     cnt.classes[mv_class] += 1;
     let class0 = mv_class == 0;
@@ -61,11 +57,7 @@ fn encode_mv_component(
         }
     }
 
-    let fp_probs = if class0 {
-        &c.class0_fp[d as usize]
-    } else {
-        &c.fp
-    };
+    let fp_probs = if class0 { &c.class0_fp[d as usize] } else { &c.fp };
     enc.write_tree(&MV_FP_TREE, fp_probs, fp);
     if class0 {
         cnt.class0_fp[d as usize][fp as usize] += 1;
@@ -154,10 +146,7 @@ mod tests {
         let ctx = DEFAULT_NMV_CONTEXT;
         let mut s = 0x4d56_0a0b_0c0d_0e0fu64;
         for _ in 0..4000 {
-            let ref_mv = (
-                (xs(&mut s) % 256) as i32 - 128,
-                (xs(&mut s) % 256) as i32 - 128,
-            );
+            let ref_mv = ((xs(&mut s) % 256) as i32 - 128, (xs(&mut s) % 256) as i32 - 128);
             let allow_hp = xs(&mut s) & 1 == 0;
             let use_hp = allow_hp && use_mv_hp(ref_mv);
             let diff = (rand_diff(&mut s, use_hp), rand_diff(&mut s, use_hp));

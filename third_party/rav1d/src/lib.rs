@@ -102,12 +102,7 @@ pub const DAV1D_API_VERSION_PATCH: u8 = 0;
 #[no_mangle]
 #[cold]
 pub extern "C" fn dav1d_version_api() -> c_uint {
-    u32::from_be_bytes([
-        0,
-        DAV1D_API_VERSION_MAJOR,
-        DAV1D_API_VERSION_MINOR,
-        DAV1D_API_VERSION_PATCH,
-    ])
+    u32::from_be_bytes([0, DAV1D_API_VERSION_MAJOR, DAV1D_API_VERSION_MINOR, DAV1D_API_VERSION_PATCH])
 }
 
 impl Default for Rav1dSettings {
@@ -193,10 +188,7 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
     validate_input!((s.n_threads >= 0 && s.n_threads <= 256, EINVAL))?;
     validate_input!((s.max_frame_delay >= 0 && s.max_frame_delay <= 256, EINVAL))?;
     validate_input!((s.operating_point <= 31, EINVAL))?;
-    validate_input!((
-        !s.allocator.is_default() || s.allocator.cookie.is_none(),
-        EINVAL
-    ))?;
+    validate_input!((!s.allocator.is_default() || s.allocator.cookie.is_none(), EINVAL))?;
 
     // On 32-bit systems, extremely large frame sizes can cause overflows in
     // `rav1d_decode_frame` alloc size calculations. Prevent that from occuring
@@ -270,9 +262,7 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
                 }
                 Rav1dContextTaskType::Worker
             } else {
-                Rav1dContextTaskType::Single(Mutex::new(Box::new(Rav1dTaskContext::new(
-                    thread_data_copy,
-                ))))
+                Rav1dContextTaskType::Single(Mutex::new(Box::new(Rav1dTaskContext::new(thread_data_copy))))
             };
             Rav1dContextTaskThread { task, thread_data }
         })
@@ -399,11 +389,7 @@ fn output_image(c: &Rav1dContext, state: &mut Rav1dState, out: &mut Rav1dPicture
     let mut res = Ok(());
 
     let use_cache = !c.all_layers && state.max_spatial_id != 0;
-    let r#in = if !use_cache {
-        &mut state.out
-    } else {
-        &mut state.cache
-    };
+    let r#in = if !use_cache { &mut state.out } else { &mut state.cache };
     if !c.apply_grain || !r#in.p.has_grain() {
         *out = mem::take(&mut r#in.p);
     } else {
@@ -477,12 +463,10 @@ fn drain_picture(c: &Rav1dContext, state: &mut Rav1dState, out: &mut Rav1dPictur
         }
         state.frame_thread.next = (state.frame_thread.next + 1) % c.fc.len() as u32;
         drop(task_thread_lock);
-        mem::take(&mut *fc.task_thread.retval.try_lock().unwrap())
-            .err_or(())
-            .inspect_err(|_| {
-                state.cached_error_props = out_delayed.p.m.clone();
-                let _ = mem::take(out_delayed);
-            })?;
+        mem::take(&mut *fc.task_thread.retval.try_lock().unwrap()).err_or(()).inspect_err(|_| {
+            state.cached_error_props = out_delayed.p.m.clone();
+            let _ = mem::take(out_delayed);
+        })?;
         if out_delayed.p.data.is_some() {
             let progress = out_delayed.progress.as_ref().unwrap()[1].load(Ordering::Relaxed);
             if (out_delayed.visible || c.output_invisible_frames) && progress != FRAME_ERROR {
@@ -506,10 +490,7 @@ fn gen_picture(c: &Rav1dContext, state: &mut Rav1dState) -> Rav1dResult {
         return Ok(());
     }
     // Take so we don't have 2 `&mut`s.
-    let Rav1dData {
-        data: r#in,
-        m: props,
-    } = mem::take(&mut state.in_0);
+    let Rav1dData { data: r#in, m: props } = mem::take(&mut state.in_0);
     let Some(mut r#in) = r#in else { return Ok(()) };
     while !r#in.is_empty() {
         let len = rav1d_parse_obus(c, state, &r#in, &props);
@@ -520,10 +501,7 @@ fn gen_picture(c: &Rav1dContext, state: &mut Rav1dState) -> Rav1dResult {
         if output_picture_ready(c, state, false) {
             // Restore into `c` when there's still data left.
             if !r#in.is_empty() {
-                state.in_0 = Rav1dData {
-                    data: Some(r#in),
-                    m: props,
-                }
+                state.in_0 = Rav1dData { data: Some(r#in), m: props }
             }
             break;
         }
@@ -713,9 +691,7 @@ pub(crate) fn rav1d_flush(c: &Rav1dContext) {
         }
         c.task_thread.first.store(0, Ordering::SeqCst);
         c.task_thread.cur.set(c.fc.len() as u32);
-        c.task_thread
-            .reset_task_cur
-            .store(u32::MAX, Ordering::SeqCst);
+        c.task_thread.reset_task_cur.store(u32::MAX, Ordering::SeqCst);
         c.task_thread.cond_signaled.store(0, Ordering::SeqCst);
     }
     if c.fc.len() > 1 {
@@ -863,10 +839,7 @@ pub unsafe extern "C" fn dav1d_data_create(buf: Option<NonNull<Dav1dData>>, sz: 
         validate_input!((sz <= usize::MAX / 2, EINVAL))?;
         let data = Rav1dData::create(sz)?;
         let data = data.to::<Dav1dData>();
-        let ptr = data
-            .data
-            .map(|ptr| ptr.as_ptr())
-            .unwrap_or_else(ptr::null_mut);
+        let ptr = data.data.map(|ptr| ptr.as_ptr()).unwrap_or_else(ptr::null_mut);
         // SAFETY: `buf` is safe to write to.
         unsafe { buf.as_ptr().write(data) };
         Ok(ptr)

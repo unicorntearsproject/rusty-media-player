@@ -73,8 +73,8 @@ pub fn filter(r: &mut Refs, n: usize, mode: u32, luma: bool, strong_enabled: boo
         {
             let (l63, t63) = (r.left[64], r.top[64]);
             for i in 0..63usize {
-                r.left[1 + i] = (((63 - i as i32) * corner + (i as i32 + 1) * l63 + 32) >> 6) as i32;
-                r.top[1 + i] = (((63 - i as i32) * corner + (i as i32 + 1) * t63 + 32) >> 6) as i32;
+                r.left[1 + i] = ((63 - i as i32) * corner + (i as i32 + 1) * l63 + 32) >> 6;
+                r.top[1 + i] = ((63 - i as i32) * corner + (i as i32 + 1) * t63 + 32) >> 6;
             }
             return;
         }
@@ -137,9 +137,7 @@ fn angular(out: &mut [i32], r: &Refs, n: usize, mode: u32, luma: bool, bit_depth
     let (main, side) = if vertical { (&r.top, &r.left) } else { (&r.left, &r.top) };
     let mut refv = [0i32; 3 * 64 + 2];
     let off = 64usize; // refv[off + i] = ref[i]
-    for i in 0..=n {
-        refv[off + i] = main[i];
-    }
+    refv[off..=off + n].copy_from_slice(&main[..=n]);
     if angle < 0 {
         let last = (n as i32 * angle) >> 5;
         if last < -1 {
@@ -150,9 +148,7 @@ fn angular(out: &mut [i32], r: &Refs, n: usize, mode: u32, luma: bool, bit_depth
             }
         }
     } else {
-        for i in n + 1..=2 * n {
-            refv[off + i] = main[i];
-        }
+        refv[off + n + 1..=off + 2 * n].copy_from_slice(&main[n + 1..=2 * n]);
     }
     let maxv = (1i32 << bit_depth) - 1;
     for a in 0..n {

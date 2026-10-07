@@ -437,8 +437,7 @@ impl<T: AsMutPtr<Target = u8>> DisjointMut<T> {
     where
         V: AsBytes + FromBytes,
     {
-        self.index_mut((index..index + 1).mul(mem::size_of::<V>()))
-            .cast()
+        self.index_mut((index..index + 1).mul(mem::size_of::<V>())).cast()
     }
 
     /// Immutably borrow a slice of a convertible type.
@@ -505,8 +504,7 @@ impl<T: AsMutPtr<Target = u8>> DisjointMut<T> {
     where
         V: FromBytes,
     {
-        self.index((index..index + 1).mul(mem::size_of::<V>()))
-            .cast()
+        self.index((index..index + 1).mul(mem::size_of::<V>())).cast()
     }
 }
 
@@ -620,17 +618,13 @@ impl Bounds {
 
 impl From<usize> for Bounds {
     fn from(index: usize) -> Self {
-        Self {
-            range: index..index + 1,
-        }
+        Self { range: index..index + 1 }
     }
 }
 
 impl<T: SliceBounds> From<T> for Bounds {
     fn from(range: T) -> Self {
-        Self {
-            range: range.to_range(usize::MAX),
-        }
+        Self { range: range.to_range(usize::MAX) }
     }
 }
 
@@ -755,19 +749,13 @@ mod release {
 
     impl<'a, T: ?Sized + AsMutPtr, V: ?Sized> DisjointMutGuard<'a, T, V> {
         pub fn new(_parent: &'a DisjointMut<T>, slice: &'a mut V, _bounds: Bounds) -> Self {
-            Self {
-                slice,
-                phantom: PhantomData,
-            }
+            Self { slice, phantom: PhantomData }
         }
     }
 
     impl<'a, T: ?Sized + AsMutPtr, V: ?Sized> DisjointImmutGuard<'a, T, V> {
         pub fn new(_parent: &'a DisjointMut<T>, slice: &'a V, _bounds: Bounds) -> Self {
-            Self {
-                slice,
-                phantom: PhantomData,
-            }
+            Self { slice, phantom: PhantomData }
         }
     }
 }
@@ -840,13 +828,7 @@ mod debug {
 
     impl Display for DisjointMutBounds {
         fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-            let Self {
-                bounds,
-                mutable,
-                location,
-                backtrace,
-                thread,
-            } = self;
+            let Self { bounds, mutable, location, backtrace, thread } = self;
             let mutable = if *mutable { "&mut" } else { "   &" };
             write!(f, "{mutable} _[{bounds}] on {thread:?} at {location}")?;
             if backtrace.status() == BacktraceStatus::Captured {
@@ -865,10 +847,7 @@ mod debug {
 
     impl DisjointMutAllBounds {
         pub const fn new() -> Self {
-            Self {
-                mutable: Mutex::new(Vec::new()),
-                immutable: Mutex::new(Vec::new()),
-            }
+            Self { mutable: Mutex::new(Vec::new()), immutable: Mutex::new(Vec::new()) }
         }
     }
 
@@ -895,11 +874,8 @@ mod debug {
         }
 
         fn remove_bound(&self, bounds: &DisjointMutBounds) {
-            let mut all_bounds = if bounds.mutable {
-                self.bounds.mutable.lock()
-            } else {
-                self.bounds.immutable.lock()
-            };
+            let mut all_bounds =
+                if bounds.mutable { self.bounds.mutable.lock() } else { self.bounds.immutable.lock() };
             let idx = all_bounds
                 .iter()
                 .position(|r| r == bounds)
@@ -913,12 +889,7 @@ mod debug {
         pub fn new(parent: &'a DisjointMut<T>, slice: &'a mut V, bounds: Bounds) -> Self {
             parent.add_mut_bounds(DisjointMutBounds::new(bounds.clone(), true));
             let bounds = DisjointMutBounds::new(bounds, true);
-            Self {
-                parent,
-                slice,
-                bounds,
-                phantom: PhantomData,
-            }
+            Self { parent, slice, bounds, phantom: PhantomData }
         }
     }
 
@@ -933,12 +904,7 @@ mod debug {
         pub fn new(parent: &'a DisjointMut<T>, slice: &'a V, bounds: Bounds) -> Self {
             parent.add_immut_bounds(DisjointMutBounds::new(bounds.clone(), false));
             let bounds = DisjointMutBounds::new(bounds, false);
-            Self {
-                parent,
-                slice,
-                bounds,
-                phantom: PhantomData,
-            }
+            Self { parent, slice, bounds, phantom: PhantomData }
         }
     }
 

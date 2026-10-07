@@ -42,13 +42,7 @@ use std::ffi::c_int;
 use std::num::NonZeroUsize;
 
 #[inline(never)]
-fn inv_dct4_1d_internal_c(
-    c: &mut [i32],
-    stride: NonZeroUsize,
-    min: c_int,
-    max: c_int,
-    tx64: c_int,
-) {
+fn inv_dct4_1d_internal_c(c: &mut [i32], stride: NonZeroUsize, min: c_int, max: c_int, tx64: c_int) {
     let clip = |v| iclip(v, min, max);
     let stride = stride.get();
 
@@ -85,13 +79,7 @@ pub fn rav1d_inv_dct4_1d_c(c: &mut [i32], stride: NonZeroUsize, min: c_int, max:
 }
 
 #[inline(never)]
-fn inv_dct8_1d_internal_c(
-    c: &mut [i32],
-    stride: NonZeroUsize,
-    min: c_int,
-    max: c_int,
-    tx64: c_int,
-) {
+fn inv_dct8_1d_internal_c(c: &mut [i32], stride: NonZeroUsize, min: c_int, max: c_int, tx64: c_int) {
     let clip = |v| iclip(v, min, max);
     let stride = stride.get();
 
@@ -147,13 +135,7 @@ pub fn rav1d_inv_dct8_1d_c(c: &mut [i32], stride: NonZeroUsize, min: c_int, max:
 }
 
 #[inline(never)]
-fn inv_dct16_1d_internal_c(
-    c: &mut [i32],
-    stride: NonZeroUsize,
-    min: c_int,
-    max: c_int,
-    tx64: c_int,
-) {
+fn inv_dct16_1d_internal_c(c: &mut [i32], stride: NonZeroUsize, min: c_int, max: c_int, tx64: c_int) {
     let clip = |v| iclip(v, min, max);
     let stride = stride.get();
 
@@ -256,13 +238,7 @@ pub fn rav1d_inv_dct16_1d_c(c: &mut [i32], stride: NonZeroUsize, min: c_int, max
 }
 
 #[inline(never)]
-fn inv_dct32_1d_internal_c(
-    c: &mut [i32],
-    stride: NonZeroUsize,
-    min: c_int,
-    max: c_int,
-    tx64: c_int,
-) {
+fn inv_dct32_1d_internal_c(c: &mut [i32], stride: NonZeroUsize, min: c_int, max: c_int, tx64: c_int) {
     let clip = |v| iclip(v, min, max);
     let stride = stride.get();
 
@@ -846,11 +822,7 @@ fn inv_adst4_1d_internal_c(
 
     let out = &mut c[..];
     let stride = stride as isize;
-    let (out_off, out_s) = if out_backwards {
-        ((4 - 1) * stride, -stride)
-    } else {
-        (0, stride)
-    };
+    let (out_off, out_s) = if out_backwards { ((4 - 1) * stride, -stride) } else { (0, stride) };
 
     out[(out_off + 0 * out_s) as usize] =
         (1321 * in0 + (3803 - 4096) * in2 + (2482 - 4096) * in3 + (3344 - 4096) * in1 + 2048 >> 12)
@@ -858,8 +830,7 @@ fn inv_adst4_1d_internal_c(
             + in3
             + in1;
     out[(out_off + 1 * out_s) as usize] =
-        ((2482 - 4096) * in0 - 1321 * in2 - (3803 - 4096) * in3 + (3344 - 4096) * in1 + 2048 >> 12)
-            + in0
+        ((2482 - 4096) * in0 - 1321 * in2 - (3803 - 4096) * in3 + (3344 - 4096) * in1 + 2048 >> 12) + in0
             - in3
             + in1;
     out[(out_off + 2 * out_s) as usize] = 209 * (in0 - in2 + in3) + 128 >> 8;
@@ -871,13 +842,7 @@ fn inv_adst4_1d_internal_c(
 }
 
 #[inline(never)]
-fn inv_adst8_1d_internal_c(
-    c: &mut [i32],
-    stride: NonZeroUsize,
-    out_backwards: bool,
-    min: c_int,
-    max: c_int,
-) {
+fn inv_adst8_1d_internal_c(c: &mut [i32], stride: NonZeroUsize, out_backwards: bool, min: c_int, max: c_int) {
     let clip = |v| iclip(v, min, max);
     let stride = stride.get();
 
@@ -918,11 +883,7 @@ fn inv_adst8_1d_internal_c(
 
     let out = &mut c[..];
     let stride = stride as isize;
-    let (out_off, out_s) = if out_backwards {
-        ((8 - 1) * stride, -stride)
-    } else {
-        (0, stride)
-    };
+    let (out_off, out_s) = if out_backwards { ((8 - 1) * stride, -stride) } else { (0, stride) };
 
     out[(out_off + 0 * out_s) as usize] = clip(t0 + t2);
     out[(out_off + 7 * out_s) as usize] = -clip(t1 + t3);
@@ -1041,11 +1002,7 @@ fn inv_adst16_1d_internal_c(
 
     let out = &mut c[..];
     let stride = stride as isize;
-    let (out_off, out_s) = if out_backwards {
-        ((16 - 1) * stride, -stride)
-    } else {
-        (0, stride)
-    };
+    let (out_off, out_s) = if out_backwards { ((16 - 1) * stride, -stride) } else { (0, stride) };
 
     out[(out_off + 0 * out_s) as usize] = clip(t0 + t2);
     out[(out_off + 15 * out_s) as usize] = -clip(t1 + t3);

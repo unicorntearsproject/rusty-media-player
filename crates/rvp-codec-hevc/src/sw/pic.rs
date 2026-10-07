@@ -81,7 +81,6 @@ pub(super) struct PicState {
     /// `TileId` by raster CTB address.
     pub tile_id_rs: Vec<u16>,
     pub col_bd: Vec<u32>,
-    pub row_bd: Vec<u32>,
     pub log2_min_tb: u32,
     pub w_tb: usize,
     /// `MinTbAddrZs` by (y * w_tb + x).
@@ -166,7 +165,6 @@ impl PicState {
             ts_to_rs,
             tile_id_rs,
             col_bd,
-            row_bd,
             log2_min_tb,
             w_tb,
             zs,

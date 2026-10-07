@@ -52,10 +52,7 @@ use std::iter::zip;
 /// This optimizes for the common cases where `buf.len()` is a small power of 2,
 /// where the array write is optimized as few and large stores as possible.
 #[inline]
-pub fn small_memset<T: Clone + Copy, const UP_TO: usize, const WITH_DEFAULT: bool>(
-    buf: &mut [T],
-    val: T,
-) {
+pub fn small_memset<T: Clone + Copy, const UP_TO: usize, const WITH_DEFAULT: bool>(buf: &mut [T], val: T) {
     fn as_array<T: Clone + Copy, const N: usize>(buf: &mut [T]) -> &mut [T; N] {
         buf.try_into().unwrap()
     }
@@ -131,12 +128,8 @@ impl<const UP_TO: usize, const WITH_DEFAULT: bool> CaseSet<UP_TO, WITH_DEFAULT> 
     /// The `lens`, `offsets`, and `dirs` are zipped and passed to [`CaseSet::one`],
     /// where `dirs` can be an array of any type and whose elements are passed back to the `set_ctx` closure.
     #[inline]
-    pub fn many<T, F, const N: usize>(
-        dirs: [T; N],
-        lens: [usize; N],
-        offsets: [usize; N],
-        mut set_ctx: F,
-    ) where
+    pub fn many<T, F, const N: usize>(dirs: [T; N], lens: [usize; N], offsets: [usize; N], mut set_ctx: F)
+    where
         F: FnMut(&CaseSetter<UP_TO, WITH_DEFAULT>, T),
     {
         for (dir, (len, offset)) in zip(dirs, zip(lens, offsets)) {

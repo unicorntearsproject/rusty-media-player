@@ -134,10 +134,7 @@ pub struct FrameHeader {
 /// (width, height) of each of the 8 reference slots, used to resolve an inter
 /// frame's `frame_size_with_refs`; pass zeros when only key/intra frames are
 /// expected (the size then comes from the explicit fields).
-pub fn parse_uncompressed_header(
-    r: &mut BitReader,
-    ref_dims: &[(u32, u32); 8],
-) -> Result<FrameHeader> {
+pub fn parse_uncompressed_header(r: &mut BitReader, ref_dims: &[(u32, u32); 8]) -> Result<FrameHeader> {
     let mut h = FrameHeader::default();
     if r.f(2)? != FRAME_MARKER {
         return Err(Error::invalid("vp9: bad frame marker"));
@@ -617,21 +614,14 @@ impl Vp9Decoder {
     /// [`Error::Eof`] means the stream is drained after [`flush`](Vp9Decoder::flush).
     pub fn next_frame(&mut self) -> Result<DecodedFrame> {
         let Some((data, pts, display)) = self.queue.pop_front() else {
-            return if self.eof {
-                Err(Error::Eof)
-            } else {
-                Err(Error::Again)
-            };
+            return if self.eof { Err(Error::Eof) } else { Err(Error::Again) };
         };
         // Bounds the profiler's residue to real decode work: everything outside
         // this scope (demux, output writing, the caller's loop) is charged to the
         // discarded idle sink instead of the reported glue bucket.
         let _frame = prof::Scope::new(prof::S::Other);
         let mut r = BitReader::new(&data);
-        let mut h = prof::dprof!(
-            prof::S::Header,
-            parse_uncompressed_header(&mut r, &self.ref_dims())
-        )?;
+        let mut h = prof::dprof!(prof::S::Header, parse_uncompressed_header(&mut r, &self.ref_dims()))?;
 
         // show_existing_frame: re-emit a previously decoded reference, no decode.
         if h.show_existing_frame {
@@ -707,11 +697,7 @@ impl Vp9Decoder {
         h.lf_ref_deltas = self.lf_ref_deltas;
         h.lf_mode_deltas = self.lf_mode_deltas;
         // Key/intra/error-resilient frames are forced onto context 0.
-        let ctx_idx = if reset_all {
-            0
-        } else {
-            h.frame_context_idx as usize
-        };
+        let ctx_idx = if reset_all { 0 } else { h.frame_context_idx as usize };
         let pre_fc = self.frame_contexts[ctx_idx].clone();
 
         // Temporal MV prediction is valid only when the previous frame was a
@@ -744,11 +730,7 @@ impl Vp9Decoder {
         // (it never mutates `self`), so a caught panic leaves the decoder
         // consistent — the frame just fails. The common malformed cases are
         // already rejected as `Err` upstream; this contains the long tail.
-        let recycled = if pool_disabled() {
-            None
-        } else {
-            self.plane_pool.pop()
-        };
+        let recycled = if pool_disabled() { None } else { self.plane_pool.pop() };
         let decode_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             decode::decode_frame(
                 &h,
@@ -800,11 +782,7 @@ impl Vp9Decoder {
         let rf = std::sync::Arc::new(decoded);
 
         // Update the reference slots selected by refresh_frame_flags.
-        let refresh = if h.key_frame {
-            0xFF
-        } else {
-            h.refresh_frame_flags
-        };
+        let refresh = if h.key_frame { 0xFF } else { h.refresh_frame_flags };
         for i in 0..8 {
             if refresh & (1 << i) != 0 {
                 // Reclaim the outgoing buffer when this was its last holder.
@@ -986,10 +964,7 @@ mod tests {
     fn dump_sequence() {
         let dir = std::env::var("VP9_SEQ_DIR").unwrap();
         let prefix = std::env::var("VP9_SEQ_PREFIX").unwrap_or_else(|_| "seqfp_f".into());
-        let n: usize = std::env::var("VP9_SEQ_N")
-            .unwrap_or_else(|_| "8".into())
-            .parse()
-            .unwrap();
+        let n: usize = std::env::var("VP9_SEQ_N").unwrap_or_else(|_| "8".into()).parse().unwrap();
         let mut dec = Vp9Decoder::default();
         for i in 0..n {
             let data = std::fs::read(format!("{dir}/{prefix}{i}.vp9")).unwrap();
@@ -1031,10 +1006,7 @@ mod tests {
         for (i, p) in planes.iter().enumerate() {
             std::fs::write(format!("{dir}/my_plane{i}.raw"), p).unwrap();
         }
-        eprintln!(
-            "dims {:?} {:?} loop_filter_level={} -> {dir}",
-            widths, heights, h.loop_filter_level
-        );
+        eprintln!("dims {:?} {:?} loop_filter_level={} -> {dir}", widths, heights, h.loop_filter_level);
     }
 
     /// Decode-throughput benchmark. Pre-loads all packets into memory, then times
@@ -1048,20 +1020,14 @@ mod tests {
         let dir = std::env::var("VP9_BENCH_DIR").unwrap();
         let pre = std::env::var("VP9_BENCH_PREFIX").unwrap_or_else(|_| "bench_f".into());
         let n: usize = std::env::var("VP9_BENCH_N").unwrap().parse().unwrap();
-        let passes: usize = std::env::var("VP9_BENCH_PASSES")
-            .unwrap_or_else(|_| "5".into())
-            .parse()
-            .unwrap();
-        let packets: Vec<Vec<u8>> = (0..n)
-            .map(|i| std::fs::read(format!("{dir}/{pre}{i}.vp9")).unwrap())
-            .collect();
+        let passes: usize = std::env::var("VP9_BENCH_PASSES").unwrap_or_else(|_| "5".into()).parse().unwrap();
+        let packets: Vec<Vec<u8>> =
+            (0..n).map(|i| std::fs::read(format!("{dir}/{pre}{i}.vp9")).unwrap()).collect();
 
         // Optional correctness check + frame geometry from the first pass.
         let mut shown = 0usize;
         let mut pix = 0u64;
-        let refdata = std::env::var("VP9_BENCH_REF")
-            .ok()
-            .map(|p| std::fs::read(p).unwrap());
+        let refdata = std::env::var("VP9_BENCH_REF").ok().map(|p| std::fs::read(p).unwrap());
         {
             let mut dec = Vp9Decoder::default();
             let mut off = 0usize;
@@ -1082,8 +1048,7 @@ mod tests {
                             for pl in &vf.planes {
                                 buf.extend_from_slice(pl);
                             }
-                            if *off + buf.len() <= rd.len() && rd[*off..*off + buf.len()] != buf[..]
-                            {
+                            if *off + buf.len() <= rd.len() && rd[*off..*off + buf.len()] != buf[..] {
                                 *mism += 1;
                             }
                             *off += buf.len();
@@ -1139,17 +1104,10 @@ mod tests {
         use std::time::Instant;
         let dir = std::env::var("VP9_BENCH_DIR").unwrap();
         let n: usize = std::env::var("VP9_BENCH_N").unwrap().parse().unwrap();
-        let passes: usize = std::env::var("VP9_BENCH_PASSES")
-            .unwrap_or_else(|_| "8".into())
-            .parse()
-            .unwrap();
-        let threads: usize = std::env::var("VP9_BENCH_T")
-            .unwrap_or_else(|_| "1".into())
-            .parse()
-            .unwrap();
-        let packets: Vec<Vec<u8>> = (0..n)
-            .map(|i| std::fs::read(format!("{dir}/bench_f{i}.vp9")).unwrap())
-            .collect();
+        let passes: usize = std::env::var("VP9_BENCH_PASSES").unwrap_or_else(|_| "8".into()).parse().unwrap();
+        let threads: usize = std::env::var("VP9_BENCH_T").unwrap_or_else(|_| "1".into()).parse().unwrap();
+        let packets: Vec<Vec<u8>> =
+            (0..n).map(|i| std::fs::read(format!("{dir}/bench_f{i}.vp9")).unwrap()).collect();
         let decode_all = |packets: &[Vec<u8>]| -> usize {
             let mut total = 0;
             for _ in 0..passes {
@@ -1169,9 +1127,7 @@ mod tests {
         };
         let t = Instant::now();
         let total: usize = std::thread::scope(|s| {
-            let handles: Vec<_> = (0..threads)
-                .map(|_| s.spawn(|| decode_all(&packets)))
-                .collect();
+            let handles: Vec<_> = (0..threads).map(|_| s.spawn(|| decode_all(&packets))).collect();
             handles.into_iter().map(|h| h.join().unwrap()).sum()
         });
         let el = t.elapsed();

@@ -6,9 +6,7 @@ pub struct MemPool<T> {
 
 impl<T> MemPool<T> {
     pub const fn new() -> Self {
-        Self {
-            bufs: Mutex::new(Vec::new()),
-        }
+        Self { bufs: Mutex::new(Vec::new()) }
     }
 
     pub fn _pop(&self, size: usize) -> Vec<T> {

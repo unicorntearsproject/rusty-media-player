@@ -407,10 +407,7 @@ impl<'a> Dec<'a> {
     fn start_quant_group(&mut self, xq: i32, yq: i32) {
         let ctb_mask = !((1i32 << self.pic.ctb_log2) - 1);
         let prev = self.qp_prev;
-        let a = if self.pic.available(xq, yq, xq - 1, yq)
-            && (xq - 1) & ctb_mask == xq & ctb_mask
-            && yq & ctb_mask == yq & ctb_mask
-        {
+        let a = if self.pic.available(xq, yq, xq - 1, yq) && (xq - 1) & ctb_mask == xq & ctb_mask {
             self.cell(xq - 1, yq).qp as i32
         } else {
             prev
@@ -522,9 +519,7 @@ impl<'a> Dec<'a> {
         let mut modes = [0u32; 4];
         for i in 0..parts {
             let (px, py) = (x0 + (i as i32 & 1) * psize, y0 + (i as i32 >> 1) * psize);
-            let mpm_idx;
-            let rem;
-            if prev_flag[i] {
+            let (mpm_idx, rem) = if prev_flag[i] {
                 let mut v = 0;
                 if self.cabac.bypass() == 1 {
                     v = 1;
@@ -532,12 +527,10 @@ impl<'a> Dec<'a> {
                         v = 2;
                     }
                 }
-                mpm_idx = v;
-                rem = 0;
+                (v, 0)
             } else {
-                mpm_idx = 0;
-                rem = self.cabac.bypass_bits(5);
-            }
+                (0, self.cabac.bypass_bits(5))
+            };
             let cand = self.mpm_candidates(px, py);
             let mode = if prev_flag[i] {
                 cand[mpm_idx as usize]
@@ -675,12 +668,10 @@ impl<'a> Dec<'a> {
         let merge = skip || self.cabac.decision(&mut self.ctx, ctx::MERGE_FLAG) == 1;
         let motion = if merge {
             let mut idx = 0usize;
-            if max_cand > 1 {
-                if self.cabac.decision(&mut self.ctx, ctx::MERGE_IDX) == 1 {
-                    idx = 1;
-                    while idx < max_cand - 1 && self.cabac.bypass() == 1 {
-                        idx += 1;
-                    }
+            if max_cand > 1 && self.cabac.decision(&mut self.ctx, ctx::MERGE_IDX) == 1 {
+                idx = 1;
+                while idx < max_cand - 1 && self.cabac.bypass() == 1 {
+                    idx += 1;
                 }
             }
             self.merge_motion(cb, pb, part_idx, part, idx)

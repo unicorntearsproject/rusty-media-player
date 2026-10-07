@@ -154,11 +154,7 @@ impl<T: Copy, C: AlignedByteChunk> AlignedVec<T, C> {
         Self::check_byte_chunk_type_is_aligned();
         Self::check_inner_type_is_aligned();
 
-        Self {
-            inner: Vec::new(),
-            len: 0,
-            _phantom: PhantomData,
-        }
+        Self { inner: Vec::new(), len: 0, _phantom: PhantomData }
     }
 
     /// Return the number of elements in the vector.

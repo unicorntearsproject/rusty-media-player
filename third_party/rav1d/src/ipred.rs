@@ -8,6 +8,7 @@ use crate::include::common::intops::apply_sign;
 use crate::include::common::intops::iclip;
 use crate::include::dav1d::headers::Rav1dPixelLayoutSubSampled;
 use crate::include::dav1d::picture::Rav1dPictureDataComponentOffset;
+use crate::libc::ptrdiff_t;
 use crate::src::cpu::CpuFlags;
 use crate::src::enum_map::enum_map;
 use crate::src::enum_map::enum_map_ty;
@@ -37,7 +38,6 @@ use crate::src::tables::dav1d_sm_weights;
 use crate::src::tables::filter_fn;
 use crate::src::tables::FLT_INCR;
 use crate::src::wrap_fn_ptr::wrap_fn_ptr;
-use crate::libc::ptrdiff_t;
 use std::cmp;
 use std::ffi::c_int;
 use std::ffi::c_uint;
@@ -46,10 +46,7 @@ use strum::FromRepr;
 use zerocopy::AsBytes;
 use zerocopy::FromBytes;
 
-#[cfg(all(
-    feature = "asm",
-    not(any(target_arch = "riscv64", target_arch = "riscv32"))
-))]
+#[cfg(all(feature = "asm", not(any(target_arch = "riscv64", target_arch = "riscv32"))))]
 use crate::include::common::bitdepth::bd_fn;
 
 #[cfg(all(feature = "asm", target_arch = "x86_64"))]
@@ -173,20 +170,7 @@ impl cfl_pred::Fn {
         let bd = bd.into_c();
         let dst = FFISafe::new(&dst);
         // SAFETY: Fallback `fn cfl_pred` is safe; asm is supposed to do the same.
-        unsafe {
-            self.get()(
-                dst_ptr,
-                stride,
-                topleft,
-                width,
-                height,
-                ac,
-                alpha,
-                bd,
-                topleft_off,
-                dst,
-            )
-        }
+        unsafe { self.get()(dst_ptr, stride, topleft, width, height, ac, alpha, bd, topleft_off, dst) }
     }
 }
 
@@ -281,11 +265,7 @@ fn cfl_pred<BD: BitDepth>(
     }
 }
 
-fn dc_gen_top<BD: BitDepth>(
-    topleft: &[BD::Pixel; SCRATCH_EDGE_LEN],
-    offset: usize,
-    width: c_int,
-) -> c_uint {
+fn dc_gen_top<BD: BitDepth>(topleft: &[BD::Pixel; SCRATCH_EDGE_LEN], offset: usize, width: c_int) -> c_uint {
     let mut dc = width as u32 >> 1;
     for i in 0..width as usize {
         dc += topleft[offset + 1 + i].as_::<c_uint>();
@@ -326,11 +306,7 @@ fn dc_gen<BD: BitDepth>(
     dc >>= (width + height).trailing_zeros();
 
     if width != height {
-        dc *= if width > height * 2 || height > width * 2 {
-            multiplier_1x4
-        } else {
-            multiplier_1x2
-        };
+        dc *= if width > height * 2 || height > width * 2 { multiplier_1x4 } else { multiplier_1x2 };
         dc >>= base_shift;
     }
     return dc;
@@ -378,12 +354,7 @@ unsafe fn reconstruct_topleft<'a, BD: BitDepth>(
     topleft_off: usize,
 ) -> &'a [BD::Pixel; SCRATCH_EDGE_LEN] {
     // SAFETY: Same as `# Safety` preconditions.
-    unsafe {
-        &*topleft_ptr
-            .cast::<BD::Pixel>()
-            .sub(topleft_off)
-            .cast::<[BD::Pixel; SCRATCH_EDGE_LEN]>()
-    }
+    unsafe { &*topleft_ptr.cast::<BD::Pixel>().sub(topleft_off).cast::<[BD::Pixel; SCRATCH_EDGE_LEN]>() }
 }
 
 /// # Safety
@@ -500,11 +471,7 @@ fn ipred_v_rust<BD: BitDepth>(
 
     for y in 0..height {
         let dst = dst + (y as isize * dst.pixel_stride::<BD>());
-        BD::pixel_copy(
-            &mut *dst.slice_mut::<BD>(width),
-            &topleft[topleft_off + 1..][..width],
-            width,
-        );
+        BD::pixel_copy(&mut *dst.slice_mut::<BD>(width), &topleft[topleft_off + 1..][..width], width);
     }
 }
 
@@ -544,11 +511,7 @@ fn ipred_h_rust<BD: BitDepth>(
 
     for y in 0..height {
         let dst = dst + (y as isize * dst.pixel_stride::<BD>());
-        BD::pixel_set(
-            &mut *dst.slice_mut::<BD>(width),
-            topleft[topleft_off - (1 + y)],
-            width,
-        );
+        BD::pixel_set(&mut *dst.slice_mut::<BD>(width), topleft[topleft_off - (1 + y)], width);
     }
 }
 
@@ -834,8 +797,7 @@ fn filter_edge<BD: BitDepth>(
     while i < cmp::min(lim_to, sz) {
         let mut s = 0;
         for j in 0..5 {
-            s += r#in[in_off.wrapping_add_signed(iclip(i - 2 + j, from, to - 1) as isize)]
-                .as_::<c_int>()
+            s += r#in[in_off.wrapping_add_signed(iclip(i - 2 + j, from, to - 1) as isize)].as_::<c_int>()
                 * kernel[(strength - 1) as usize][j as usize] as c_int;
         }
         out[i as usize] = (s + 8 >> 4).as_::<BD::Pixel>();
@@ -867,12 +829,10 @@ fn upsample_edge<BD: BitDepth>(
         out[(i * 2) as usize] = r#in[in_off + iclip(i, from, to - 1) as usize];
         let mut s = 0;
         for j in 0..4 {
-            s += r#in[in_off.wrapping_add_signed(iclip(i + j - 1, from, to - 1) as isize)]
-                .as_::<c_int>()
+            s += r#in[in_off.wrapping_add_signed(iclip(i + j - 1, from, to - 1) as isize)].as_::<c_int>()
                 * kernel[j as usize] as c_int;
         }
-        out[(i * 2 + 1) as usize] =
-            iclip(s + 8 >> 4, 0, bd.bitdepth_max().as_::<c_int>()).as_::<BD::Pixel>();
+        out[(i * 2 + 1) as usize] = iclip(s + 8 >> 4, 0, bd.bitdepth_max().as_::<c_int>()).as_::<BD::Pixel>();
     }
     let i = hsz - 1;
     out[(i * 2) as usize] = r#in[in_off + iclip(i, from, to - 1) as usize];
@@ -895,11 +855,8 @@ fn ipred_z1_rust<BD: BitDepth>(
     assert!(angle < 90);
     let mut dx = dav1d_dr_intra_derivative[(angle >> 1) as usize] as c_int;
     let mut top_out = [0.into(); 64 + 64];
-    let upsample_above = if enable_intra_edge_filter {
-        get_upsample(width + height, 90 - angle, is_sm)
-    } else {
-        false
-    };
+    let upsample_above =
+        if enable_intra_edge_filter { get_upsample(width + height, 90 - angle, is_sm) } else { false };
     let (top, max_base_x) = if upsample_above {
         upsample_edge::<BD>(
             &mut top_out,
@@ -914,11 +871,8 @@ fn ipred_z1_rust<BD: BitDepth>(
 
         (top_out.as_slice(), 2 * (width + height) - 2)
     } else {
-        let filter_strength = if enable_intra_edge_filter {
-            get_filter_strength(width + height, 90 - angle, is_sm)
-        } else {
-            0
-        };
+        let filter_strength =
+            if enable_intra_edge_filter { get_filter_strength(width + height, 90 - angle, is_sm) } else { 0 };
         if filter_strength != 0 {
             filter_edge::<BD>(
                 &mut top_out,
@@ -933,10 +887,7 @@ fn ipred_z1_rust<BD: BitDepth>(
             );
             (top_out.as_slice(), width + height - 1)
         } else {
-            (
-                &topleft_in[topleft_in_off + 1..],
-                width + cmp::min(width, height) - 1,
-            )
+            (&topleft_in[topleft_in_off + 1..], width + cmp::min(width, height) - 1)
         }
     };
     let width = width as usize;
@@ -951,8 +902,7 @@ fn ipred_z1_rust<BD: BitDepth>(
         for x in 0..width {
             let base = (xpos >> 6) as usize + base_inc * x;
             if base < max_base_x {
-                let v =
-                    top[base].as_::<c_int>() * (64 - frac) + top[base + 1].as_::<c_int>() * frac;
+                let v = top[base].as_::<c_int>() * (64 - frac) + top[base + 1].as_::<c_int>() * frac;
                 dst[x] = (v + 32 >> 6).as_::<BD::Pixel>();
             } else {
                 BD::pixel_set(&mut dst[x..], top[max_base_x], width - x);
@@ -979,29 +929,15 @@ fn ipred_z2_rust<BD: BitDepth>(
     assert!(angle > 90 && angle < 180);
     let mut dy = dav1d_dr_intra_derivative[(angle - 90 >> 1) as usize] as c_int;
     let mut dx = dav1d_dr_intra_derivative[(180 - angle >> 1) as usize] as c_int;
-    let upsample_left = if enable_intra_edge_filter != 0 {
-        get_upsample(width + height, 180 - angle, is_sm)
-    } else {
-        false
-    };
-    let upsample_above = if enable_intra_edge_filter != 0 {
-        get_upsample(width + height, angle - 90, is_sm)
-    } else {
-        false
-    };
+    let upsample_left =
+        if enable_intra_edge_filter != 0 { get_upsample(width + height, 180 - angle, is_sm) } else { false };
+    let upsample_above =
+        if enable_intra_edge_filter != 0 { get_upsample(width + height, angle - 90, is_sm) } else { false };
     let mut edge = [0.into(); 64 + 64 + 1];
     let topleft = 64;
 
     if upsample_above {
-        upsample_edge::<BD>(
-            &mut edge[topleft..],
-            width + 1,
-            topleft_in,
-            topleft_in_off,
-            0,
-            width + 1,
-            bd,
-        );
+        upsample_edge::<BD>(&mut edge[topleft..], width + 1, topleft_in, topleft_in_off, 0, width + 1, bd);
         dx <<= 1;
     } else {
         let filter_strength = if enable_intra_edge_filter != 0 {
@@ -1118,11 +1054,8 @@ fn ipred_z3_rust<BD: BitDepth>(
     let left;
     let left_off;
     let max_base_y;
-    let upsample_left = if enable_intra_edge_filter != 0 {
-        get_upsample(width + height, angle - 180, is_sm)
-    } else {
-        false
-    };
+    let upsample_left =
+        if enable_intra_edge_filter != 0 { get_upsample(width + height, angle - 180, is_sm) } else { false };
     if upsample_left {
         upsample_edge::<BD>(
             &mut left_out,
@@ -1303,17 +1236,7 @@ unsafe extern "C" fn ipred_filter_c_erased<BD: BitDepth>(
     // SAFETY: `fn angular_ipred::Fn::call` makes `topleft` `topleft_off` from the beginning of the array.
     let topleft = unsafe { reconstruct_topleft::<BD>(topleft_in, topleft_off) };
     let bd = BD::from_c(bitdepth_max);
-    ipred_filter_rust(
-        dst,
-        topleft,
-        topleft_off,
-        width,
-        height,
-        filt_idx,
-        max_width,
-        max_height,
-        bd,
-    )
+    ipred_filter_rust(dst, topleft, topleft_off, width, height, filt_idx, max_width, max_height, bd)
 }
 
 #[inline(never)]
@@ -1577,13 +1500,7 @@ mod neon {
     ) -> ());
 
     impl z2_upsample_edge::Fn {
-        pub fn call<BD: BitDepth>(
-            &self,
-            out: &mut [BD::Pixel],
-            hsz: c_int,
-            in_0: &[BD::Pixel],
-            bd: BD,
-        ) {
+        pub fn call<BD: BitDepth>(&self, out: &mut [BD::Pixel], hsz: c_int, in_0: &[BD::Pixel], bd: BD) {
             let out = out.as_mut_ptr().cast();
             let in_0 = in_0.as_ptr().cast();
             let bd = bd.into_c();
@@ -1703,11 +1620,7 @@ mod neon {
         let base_inc = 1 + upsample_above as c_int;
         let pad_pixels = width + 15;
         let px = top_out[max_base_x as usize];
-        rav1d_ipred_pixel_set_neon::<BD>(
-            &mut top_out[max_base_x as usize + 1..],
-            px,
-            pad_pixels * base_inc,
-        );
+        rav1d_ipred_pixel_set_neon::<BD>(&mut top_out[max_base_x as usize + 1..], px, pad_pixels * base_inc);
         if upsample_above {
             bd_fn!(z13_fill::decl_fn, BD, ipred_z1_fill2, neon)
                 .call::<BD>(dst, stride, &top_out, width, height, dx, max_base_x);
@@ -1958,11 +1871,7 @@ mod neon {
         let base_inc = 1 + upsample_left as c_int;
         let pad_pixels = cmp::max(64 - max_base_y - 1, height + 15);
         let px = left_out[max_base_y as usize];
-        rav1d_ipred_pixel_set_neon::<BD>(
-            &mut left_out[max_base_y as usize + 1..],
-            px,
-            pad_pixels * base_inc,
-        );
+        rav1d_ipred_pixel_set_neon::<BD>(&mut left_out[max_base_y as usize + 1..], px, pad_pixels * base_inc);
         if upsample_left {
             bd_fn!(z13_fill::decl_fn, BD, ipred_z3_fill2, neon)
                 .call::<BD>(dst, stride, &left_out, width, height, dy, max_base_y);
@@ -2043,13 +1952,10 @@ impl Rav1dIntraPredDSPContext {
                 // The defaults just call `unimplemented!()`,
                 // which shouldn't slow down the other code paths at all.
                 let mut a = [DefaultValue::DEFAULT; 6];
-                a[DC_PRED as usize] =
-                    cfl_pred::Fn::new(ipred_cfl_c_erased::<BD, { DcGen::TopLeft as u8 }>);
+                a[DC_PRED as usize] = cfl_pred::Fn::new(ipred_cfl_c_erased::<BD, { DcGen::TopLeft as u8 }>);
                 a[DC_128_PRED as usize] = cfl_pred::Fn::new(ipred_cfl_128_c_erased::<BD>);
-                a[TOP_DC_PRED as usize] =
-                    cfl_pred::Fn::new(ipred_cfl_c_erased::<BD, { DcGen::Top as u8 }>);
-                a[LEFT_DC_PRED as usize] =
-                    cfl_pred::Fn::new(ipred_cfl_c_erased::<BD, { DcGen::Left as u8 }>);
+                a[TOP_DC_PRED as usize] = cfl_pred::Fn::new(ipred_cfl_c_erased::<BD, { DcGen::Top as u8 }>);
+                a[LEFT_DC_PRED as usize] = cfl_pred::Fn::new(ipred_cfl_c_erased::<BD, { DcGen::Left as u8 }>);
                 a
             },
             pal_pred: pal_pred::Fn::new(pal_pred_c_erased::<BD>),
@@ -2064,27 +1970,19 @@ impl Rav1dIntraPredDSPContext {
         }
 
         self.intra_pred[DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc, ssse3);
-        self.intra_pred[DC_128_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_128, ssse3);
-        self.intra_pred[TOP_DC_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_top, ssse3);
-        self.intra_pred[LEFT_DC_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_left, ssse3);
+        self.intra_pred[DC_128_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_128, ssse3);
+        self.intra_pred[TOP_DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_top, ssse3);
+        self.intra_pred[LEFT_DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_left, ssse3);
         self.intra_pred[HOR_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_h, ssse3);
         self.intra_pred[VERT_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_v, ssse3);
-        self.intra_pred[PAETH_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, ssse3);
-        self.intra_pred[SMOOTH_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth, ssse3);
-        self.intra_pred[SMOOTH_H_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_h, ssse3);
-        self.intra_pred[SMOOTH_V_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_v, ssse3);
+        self.intra_pred[PAETH_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, ssse3);
+        self.intra_pred[SMOOTH_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth, ssse3);
+        self.intra_pred[SMOOTH_H_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_h, ssse3);
+        self.intra_pred[SMOOTH_V_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_v, ssse3);
         self.intra_pred[Z1_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z1, ssse3);
         self.intra_pred[Z2_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z2, ssse3);
         self.intra_pred[Z3_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z3, ssse3);
-        self.intra_pred[FILTER_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_filter, ssse3);
+        self.intra_pred[FILTER_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_filter, ssse3);
 
         self.cfl_pred[DC_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl, ssse3);
         self.cfl_pred[DC_128_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_128, ssse3);
@@ -2106,18 +2004,13 @@ impl Rav1dIntraPredDSPContext {
             }
 
             self.intra_pred[DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc, avx2);
-            self.intra_pred[DC_128_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_128, avx2);
-            self.intra_pred[TOP_DC_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_top, avx2);
-            self.intra_pred[LEFT_DC_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_left, avx2);
+            self.intra_pred[DC_128_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_128, avx2);
+            self.intra_pred[TOP_DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_top, avx2);
+            self.intra_pred[LEFT_DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_left, avx2);
             self.intra_pred[HOR_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_h, avx2);
             self.intra_pred[VERT_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_v, avx2);
-            self.intra_pred[PAETH_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, avx2);
-            self.intra_pred[SMOOTH_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth, avx2);
+            self.intra_pred[PAETH_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, avx2);
+            self.intra_pred[SMOOTH_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth, avx2);
             self.intra_pred[SMOOTH_H_PRED as usize] =
                 bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_h, avx2);
             self.intra_pred[SMOOTH_V_PRED as usize] =
@@ -2125,16 +2018,12 @@ impl Rav1dIntraPredDSPContext {
             self.intra_pred[Z1_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z1, avx2);
             self.intra_pred[Z2_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z2, avx2);
             self.intra_pred[Z3_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z3, avx2);
-            self.intra_pred[FILTER_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_filter, avx2);
+            self.intra_pred[FILTER_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_filter, avx2);
 
             self.cfl_pred[DC_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl, avx2);
-            self.cfl_pred[DC_128_PRED as usize] =
-                bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_128, avx2);
-            self.cfl_pred[TOP_DC_PRED as usize] =
-                bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_top, avx2);
-            self.cfl_pred[LEFT_DC_PRED as usize] =
-                bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_left, avx2);
+            self.cfl_pred[DC_128_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_128, avx2);
+            self.cfl_pred[TOP_DC_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_top, avx2);
+            self.cfl_pred[LEFT_DC_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_left, avx2);
 
             self.cfl_ac = enum_map!(Rav1dPixelLayoutSubSampled => cfl_ac::Fn; match key {
                 I420 => bd_fn!(cfl_ac::decl_fn, BD, ipred_cfl_ac_420, avx2),
@@ -2165,20 +2054,16 @@ impl Rav1dIntraPredDSPContext {
                     bpc_fn!(angular_ipred::decl_fn, 8 bpc, ipred_z2, avx512icl);
             }
 
-            self.intra_pred[PAETH_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, avx512icl);
+            self.intra_pred[PAETH_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, avx512icl);
             self.intra_pred[SMOOTH_PRED as usize] =
                 bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth, avx512icl);
             self.intra_pred[SMOOTH_H_PRED as usize] =
                 bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_h, avx512icl);
             self.intra_pred[SMOOTH_V_PRED as usize] =
                 bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_v, avx512icl);
-            self.intra_pred[Z1_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_z1, avx512icl);
-            self.intra_pred[Z2_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_z2, avx512icl);
-            self.intra_pred[Z3_PRED as usize] =
-                bd_fn!(angular_ipred::decl_fn, BD, ipred_z3, avx512icl);
+            self.intra_pred[Z1_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z1, avx512icl);
+            self.intra_pred[Z2_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z2, avx512icl);
+            self.intra_pred[Z3_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_z3, avx512icl);
             self.intra_pred[FILTER_PRED as usize] =
                 bd_fn!(angular_ipred::decl_fn, BD, ipred_filter, avx512icl);
 
@@ -2196,35 +2081,24 @@ impl Rav1dIntraPredDSPContext {
         }
 
         self.intra_pred[DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc, neon);
-        self.intra_pred[DC_128_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_128, neon);
-        self.intra_pred[TOP_DC_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_top, neon);
-        self.intra_pred[LEFT_DC_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_left, neon);
+        self.intra_pred[DC_128_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_128, neon);
+        self.intra_pred[TOP_DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_top, neon);
+        self.intra_pred[LEFT_DC_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_dc_left, neon);
         self.intra_pred[HOR_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_h, neon);
         self.intra_pred[VERT_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_v, neon);
-        self.intra_pred[PAETH_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, neon);
-        self.intra_pred[SMOOTH_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth, neon);
-        self.intra_pred[SMOOTH_V_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_v, neon);
-        self.intra_pred[SMOOTH_H_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_h, neon);
+        self.intra_pred[PAETH_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_paeth, neon);
+        self.intra_pred[SMOOTH_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth, neon);
+        self.intra_pred[SMOOTH_V_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_v, neon);
+        self.intra_pred[SMOOTH_H_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_smooth_h, neon);
         #[cfg(target_arch = "aarch64")]
         {
             use self::neon::ipred_z_neon_erased;
 
-            self.intra_pred[Z1_PRED as usize] =
-                angular_ipred::Fn::new(ipred_z_neon_erased::<BD, 1>);
-            self.intra_pred[Z2_PRED as usize] =
-                angular_ipred::Fn::new(ipred_z_neon_erased::<BD, 2>);
-            self.intra_pred[Z3_PRED as usize] =
-                angular_ipred::Fn::new(ipred_z_neon_erased::<BD, 3>);
+            self.intra_pred[Z1_PRED as usize] = angular_ipred::Fn::new(ipred_z_neon_erased::<BD, 1>);
+            self.intra_pred[Z2_PRED as usize] = angular_ipred::Fn::new(ipred_z_neon_erased::<BD, 2>);
+            self.intra_pred[Z3_PRED as usize] = angular_ipred::Fn::new(ipred_z_neon_erased::<BD, 3>);
         }
-        self.intra_pred[FILTER_PRED as usize] =
-            bd_fn!(angular_ipred::decl_fn, BD, ipred_filter, neon);
+        self.intra_pred[FILTER_PRED as usize] = bd_fn!(angular_ipred::decl_fn, BD, ipred_filter, neon);
 
         self.cfl_pred[DC_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl, neon);
         self.cfl_pred[DC_128_PRED as usize] = bd_fn!(cfl_pred::decl_fn, BD, ipred_cfl_128, neon);

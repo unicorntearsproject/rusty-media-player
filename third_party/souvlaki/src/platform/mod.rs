@@ -9,10 +9,7 @@ mod platform;
 #[path = "macos/mod.rs"]
 mod platform;
 
-#[cfg(all(
-    unix,
-    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-))]
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
 #[path = "mpris/mod.rs"]
 mod platform;
 
