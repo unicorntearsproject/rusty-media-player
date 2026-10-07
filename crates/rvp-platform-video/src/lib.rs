@@ -6,6 +6,8 @@
 use rvp_core::PlatformVideo;
 use std::rc::Rc;
 
+#[cfg(windows)]
+pub mod mediafoundation;
 #[cfg(target_os = "linux")]
 pub mod vaapi;
 #[cfg(target_os = "macos")]
@@ -20,6 +22,10 @@ pub fn system_video() -> Option<Rc<dyn PlatformVideo>> {
     #[cfg(target_os = "macos")]
     {
         return Some(Rc::new(videotoolbox::VideoToolboxPlatform::new()));
+    }
+    #[cfg(windows)]
+    {
+        return Some(Rc::new(mediafoundation::MediaFoundationPlatform::new()));
     }
     #[allow(unreachable_code)]
     None
@@ -56,7 +62,11 @@ pub(crate) fn semi_planar_frame(data: &[u8], l: SemiPlanar) -> Result<VideoFrame
     let bytes = if l.ten { 2 } else { 1 };
     let (o0, p0) = l.y;
     let (o1, p1) = l.uv;
-    if o0 + p0 * (ct + h) > data.len() || o1 + p1 * (ct / 2 + ch) > data.len() || p0 < (cl + w) * bytes || p1 < (cl / 2 + cw) * 2 * bytes {
+    if o0 + p0 * (ct + h) > data.len()
+        || o1 + p1 * (ct / 2 + ch) > data.len()
+        || p0 < (cl + w) * bytes
+        || p1 < (cl / 2 + cw) * 2 * bytes
+    {
         return Err(Error::Invalid(String::from("the decoder's picture is smaller than expected")));
     }
     let (matrix, full) = match (l.colour.matrix, l.colour.full_range) {
@@ -79,7 +89,16 @@ pub(crate) fn semi_planar_frame(data: &[u8], l: SemiPlanar) -> Result<VideoFrame
                 v[r * cw + c] = data[src + 2 * c + 1];
             }
         }
-        return Ok(VideoFrame { width: w as u32, height: h as u32, format: PixelFormat::Yuv420p8, matrix, range, planes: [y, u, v], strides: [w, cw, cw], pts: 0 });
+        return Ok(VideoFrame {
+            width: w as u32,
+            height: h as u32,
+            format: PixelFormat::Yuv420p8,
+            matrix,
+            range,
+            planes: [y, u, v],
+            strides: [w, cw, cw],
+            pts: 0,
+        });
     }
     let rd = |off: usize| u16::from_le_bytes([data[off], data[off + 1]]) >> 6;
     let mut y = vec![0u8; w * h * 2];
@@ -97,20 +116,44 @@ pub(crate) fn semi_planar_frame(data: &[u8], l: SemiPlanar) -> Result<VideoFrame
             v[(r * cw + c) * 2..(r * cw + c) * 2 + 2].copy_from_slice(&rd(src + c * 4 + 2).to_le_bytes());
         }
     }
-    let frame = VideoFrame { width: w as u32, height: h as u32, format: PixelFormat::Yuv420p10, matrix, range, planes: [y, u, v], strides: [w * 2, cw * 2, cw * 2], pts: 0 };
+    let frame = VideoFrame {
+        width: w as u32,
+        height: h as u32,
+        format: PixelFormat::Yuv420p10,
+        matrix,
+        range,
+        planes: [y, u, v],
+        strides: [w * 2, cw * 2, cw * 2],
+        pts: 0,
+    };
     if !rvp_core::hdr::is_hdr(l.colour.transfer, l.colour.matrix) {
         return Ok(frame);
     }
     let mut rgba = vec![0u8; w * h * 4];
     rvp_core::hdr::tonemap_to_rgba(&frame, l.colour.transfer, &mut rgba);
-    Ok(VideoFrame { width: w as u32, height: h as u32, format: PixelFormat::Rgba8, matrix, range, planes: [rgba, Vec::new(), Vec::new()], strides: [w * 4, 0, 0], pts: 0 })
+    Ok(VideoFrame {
+        width: w as u32,
+        height: h as u32,
+        format: PixelFormat::Rgba8,
+        matrix,
+        range,
+        planes: [rgba, Vec::new(), Vec::new()],
+        strides: [w * 4, 0, 0],
+        pts: 0,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn layout(w: usize, h: usize, ten: bool, crop: (usize, usize), pitch_pad: usize) -> (Vec<u8>, SemiPlanar) {
+    fn layout(
+        w: usize,
+        h: usize,
+        ten: bool,
+        crop: (usize, usize),
+        pitch_pad: usize,
+    ) -> (Vec<u8>, SemiPlanar) {
         let bytes = if ten { 2 } else { 1 };
         let (cw, ch) = (w + 2 * crop.0, h + 2 * crop.1);
         let p0 = cw * bytes + pitch_pad;
@@ -142,7 +185,15 @@ mod tests {
                 }
             }
         }
-        let l = SemiPlanar { width: w, height: h, crop, y: (0, p0), uv: (p0 * ch, p1), ten, colour: Colour::default() };
+        let l = SemiPlanar {
+            width: w,
+            height: h,
+            crop,
+            y: (0, p0),
+            uv: (p0 * ch, p1),
+            ten,
+            colour: Colour::default(),
+        };
         (data, l)
     }
 
@@ -153,7 +204,13 @@ mod tests {
             let f = semi_planar_frame(&data, l).unwrap();
             assert_eq!((f.width, f.height), (8, 6));
             assert_eq!(f.format, if ten { PixelFormat::Yuv420p10 } else { PixelFormat::Yuv420p8 });
-            let get = |p: usize, i: usize| if ten { u16::from_le_bytes([f.planes[p][i * 2], f.planes[p][i * 2 + 1]]) as usize } else { f.planes[p][i] as usize };
+            let get = |p: usize, i: usize| {
+                if ten {
+                    u16::from_le_bytes([f.planes[p][i * 2], f.planes[p][i * 2 + 1]]) as usize
+                } else {
+                    f.planes[p][i] as usize
+                }
+            };
             let off = if ten { 300 } else { 0 };
             // First displayed luma sample is at (2, 2) of the decoder's picture.
             assert_eq!(get(0, 0), (2 + 2 * 3) % 200 + off);

@@ -267,6 +267,8 @@ jobs:
           fi
       - name: Unit tests of the desktop host
         run: cargo test -p rvp-host-desktop --lib
+      - name: The system's HEVC decoder (Media Foundation) decodes a short stream, or the refusal is a clear sentence
+        run: cargo test -p rvp-platform-video
       - name: Build rusty-wave.exe, the zip and the installer
         env:
           ISCC: C:\Program Files (x86)\Inno Setup 6\ISCC.exe
@@ -307,6 +309,8 @@ jobs:
       - name: Unit tests of the desktop host
         continue-on-error: true   # never run on macOS before; informational until it has been seen to pass
         run: cargo test -p rvp-host-desktop --lib
+      - name: The system's HEVC decoder (VideoToolbox) decodes a short stream bit-exactly and tone-maps HDR10
+        run: cargo test -p rvp-platform-video
       - name: Signing and notarization (only when the repository has the Apple secrets)
         env:
           CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}

@@ -7,8 +7,7 @@ use rvp_codec_hevc::ps::{ScalingList, Sps};
 use rvp_codec_hevc::slice::SliceType;
 use rvp_codec_hevc::stream::{Backend, HevcStream, Picture};
 use rvp_core::{
-    Error, Packet, PlatformSupport, PlatformVideo,
-    Result as CoreResult, StreamInfo, VideoDecoder, VideoFrame,
+    Error, Packet, PlatformSupport, PlatformVideo, Result as CoreResult, StreamInfo, VideoDecoder, VideoFrame,
 };
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};

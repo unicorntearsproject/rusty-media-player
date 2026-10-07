@@ -807,7 +807,9 @@ pub fn hvcc_units(hvcc: &[u8]) -> Vec<(u8, &[u8])> {
         let (kind, n) = (head[0] & 0x3f, u16::from_be_bytes([head[1], head[2]]) as usize);
         at += 3;
         for _ in 0..n {
-            let Some(len) = hvcc.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else { return out };
+            let Some(len) = hvcc.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else {
+                return out;
+            };
             at += 2;
             match hvcc.get(at..at + len) {
                 Some(u) => out.push((kind, u)),
