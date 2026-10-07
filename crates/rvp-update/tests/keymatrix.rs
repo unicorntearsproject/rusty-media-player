@@ -104,3 +104,24 @@ fn the_committed_release_key_refuses_all_of_it() {
         assert_eq!(r, Err(VerifyError::WrongKey), "{sig}");
     }
 }
+
+/// The checksum files of releases that were really published, with the signatures made for them: 0.0.1 by the primary key, rc2 and rc5 by the
+/// CI signing subkey. The key in the repository (no expiry) must accept all of them, today and at any later date.
+#[test]
+fn the_published_releases_signatures_verify_against_the_committed_key() {
+    let release = Verifier::release();
+    for v in ["0.0.1", "1.0.0-rc2", "1.0.0-rc5"] {
+        let dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "tests/data/release-sigs"].iter().collect();
+        let sums = fs::read(dir.join(format!("{v}-SHA256SUMS"))).unwrap();
+        let sig = fs::read(dir.join(format!("{v}-SHA256SUMS.asc"))).unwrap();
+        assert_eq!(release.verify_detached(&sums, &sig), Ok(()), "{v}");
+        // Decades on: a key that never expires still verifies (the clock is not a reason to refuse a release).
+        assert_eq!(release.verify_detached_at(&sums, &sig, 4_102_444_800), Ok(()), "{v} in 2100");
+        let mut changed = sums.clone();
+        changed[0] ^= 1;
+        assert_eq!(release.verify_detached(&changed, &sig), Err(VerifyError::Mismatch), "{v} tampered");
+    }
+    // The committed key says it never expires.
+    let armored = include_str!("../../../packaging/keys/rusty-wave-release.asc");
+    assert!(Verifier::from_armored(armored).is_ok());
+}

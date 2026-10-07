@@ -4,7 +4,7 @@ Everything that cannot be checked in a container or under Wine: real machines, r
 browsers. Nothing here is public yet; build and sign locally, test, then decide. Tick the boxes, note the machine and the version in the table at the
 end. See [`packaging.md`](packaging.md) for how the files are built and signed.
 
-Release key: `E13F F843 723D 5406 8E45  A3FF 54BF 2FA4 0709 3CEE` (key ID `54BF2FA407093CEE`, "Rusty Wave Release", expires 2028-10-04).
+Release key: `E13F F843 723D 5406 8E45  A3FF 54BF 2FA4 0709 3CEE` (key ID `54BF2FA407093CEE`, "Rusty Wave Release", never expires).
 Version below: `0.0.2` (replace with what you built).
 
 ## 0. Build and collect the files (on the dev machine)

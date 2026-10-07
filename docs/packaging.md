@@ -233,7 +233,7 @@ No secret keys or passwords are in the repository. The public half of the releas
 `rusty-wave-release.gpg` that apt and Flatpak import).
 
 **Release key**: "Rusty Wave Release <noreply@users.noreply.github.com>" (primary user ID; the key was created as "Rusty Video Player Release", which stays on the key as a
-second user ID), ed25519, sign-only (`[SC]`), created 2026-10-05, expires 2028-10-04.
+second user ID), ed25519, sign-only (`[SC]`), created 2026-10-05, **never expires** (policy: signing keys do not expire; the expiry was removed on 2026-10-07 with `gpg --quick-set-expire <fingerprint> 0`, fingerprints and user IDs unchanged).
 
     Fingerprint  E13F F843 723D 5406 8E45  A3FF 54BF 2FA4 0709 3CEE     (key ID 54BF2FA407093CEE)
 
@@ -241,11 +241,10 @@ It is a dedicated key (not the Unicorn Viz one) and mirrors how that one is kept
 (protected by the account and disk, as `unicorn-viz`'s is; add one with `gpg --edit-key E13FF843723D54068E45A3FF54BF2FA407093CEE passwd` and gpg-agent
 will ask), the revocation certificate that `gpg` wrote at creation, and the public key committed. Outside the repository, in `~/.local/share/rusty-wave-release/`
 (directory 0700, files 0600): `revocation-<fingerprint>.rev` (publish it only to revoke the key) and `rusty-wave-release-secret.asc` (a secret export, for
-backup or for CI). Move both to offline storage; never commit them. CI signs with a **signing-only subkey** of this key (ed25519, `[S]`, created 2026-10-07, expires 2028-10-06, fingerprint `2FD1848657B706A3576877E071DB2DB049A19B84`), exported with
+backup or for CI). Move both to offline storage; never commit them. CI signs with a **signing-only subkey** of this key (ed25519, `[S]`, created 2026-10-07, never expires, fingerprint `2FD1848657B706A3576877E071DB2DB049A19B84`), exported with
 `gpg --export-secret-subkeys` (the primary is a stub) and stored as the repository secret `RELEASE_GPG_PRIVATE_KEY` (no passphrase); the primary never leaves the maintainer's keyring.
 The public key in `packaging/keys/` carries the subkey, cross-certified; signatures by it verify with the primary's fingerprint (the last field of gpg's `VALIDSIG` line), and
-signatures made earlier by the primary still verify. To extend the expiry before 2028:
-`gpg --quick-set-expire <fingerprint> 2y` and re-export `packaging/keys/*`.
+signatures made earlier by the primary still verify. There is no expiry to renew. After any change to the key (a new subkey, a revocation) re-export `packaging/keys/*` and update the repository secret from `gpg --armor --export-secret-subkeys <subkey fingerprint>!`.
 
 **Signing locally**: `cargo xtask dist <target> --sign` (key from `RVP_GPG_KEY` or `--sign-key`, default the one in `packaging/keys`; its secret half
 must be in your keyring, otherwise the command stops at once). With `--sign`:
