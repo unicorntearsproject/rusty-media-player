@@ -15,6 +15,7 @@ pub mod input;
 pub mod links;
 pub mod media;
 pub mod net;
+pub mod platform;
 pub mod services;
 pub mod smoke;
 pub mod source;

@@ -3027,6 +3027,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rvp-codec-hevc"
+version = "1.0.0-rc8"
+dependencies = [
+ "rvp-core",
+ "rvp-demux",
+ "rvp-host",
+]
+
+[[package]]
 name = "rvp-codec-vp9"
 version = "1.0.0-rc8"
 dependencies = [
@@ -3075,6 +3084,7 @@ dependencies = [
  "rvp-codec-audio",
  "rvp-codec-av1",
  "rvp-codec-h264",
+ "rvp-codec-hevc",
  "rvp-codec-vp9",
  "rvp-core",
  "rvp-host",

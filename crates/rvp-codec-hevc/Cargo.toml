@@ -1,0 +1,19 @@
+[package]
+name = "rvp-codec-hevc"
+description = "HEVC / H.265 bitstream syntax, reference management and output order (no_std + alloc); decoders plug in behind a Backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rvp-core.workspace = true
+
+[dev-dependencies]
+rvp-demux.workspace = true
+rvp-host.workspace = true
