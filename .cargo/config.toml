@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --quiet -p xtask --"
+
+# Tests and the tools they launch (Chromium, xvfb-run, Wine, AppImage unpacking) make temporary files under $TMPDIR: keep them on the scratch
+# drive (`target` is a link to it) and out of /tmp. A TMPDIR set in the environment wins.
+[env]
+TMPDIR = { value = "target", relative = true, force = false }

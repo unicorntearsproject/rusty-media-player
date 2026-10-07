@@ -189,6 +189,9 @@ impl App {
         if let Some(bytes) = rvp_core::task::block_on(host.storage().load(VIDEOS_KEY)) {
             let _ = self.lib.lib.load_videos(&bytes);
         }
+        if let Some(bytes) = rvp_core::task::block_on(host.storage().load(rvp_library::HISTORY_KEY)) {
+            let _ = self.lib.lib.load_history(&bytes);
+        }
     }
 
     /// Thumbnails the tracks use that are still on disk, a few per tick.
@@ -227,6 +230,9 @@ impl App {
         }
         self.lib_save_playlists(host);
         self.lib_save_favorites(host);
+        if self.lib.lib.history_dirty() {
+            self.history_save(host);
+        }
     }
 
     /// Save the thumbnails that are new, and delete the ones nothing uses any more.
@@ -299,6 +305,7 @@ impl App {
             self.lib.scanner.start_posters(pending);
         }
         self.lib_refresh_resume(host);
+        self.history_tick(host, now);
         // Measuring and making posters is background work: it waits while a picture is on the way (playing, or just started or seeking:
         // decoding for them would take the frames), and goes on when the video is paused or ended. Only reading folders goes on, since it
         // takes headers and tags, not pictures.
@@ -866,6 +873,13 @@ impl App {
                 self.lib.lib.playlist_move(pl, idx as usize, d as i32);
                 self.lib_save_playlists(host);
             }
+            LibAction::RemoveFromHistory(seq) => {
+                if self.lib.lib.remove_play(seq) {
+                    self.history_save(host);
+                    self.ui.show_toast("Removed from history", now);
+                }
+            }
+            LibAction::ClearHistory => self.ask_clear_history(now),
             LibAction::QueueToNext(id) => {
                 self.playlist.move_after(id, None);
                 self.requeue();

@@ -53,6 +53,11 @@ impl HostClock for FakeClock {
             self.wake.set(Some(self.wake.get().map_or(at_us, |w| w.min(at_us))));
         }
     }
+
+    fn unix_time(&self) -> i64 {
+        // 2026-10-07 12:00:00 UTC plus the virtual time: tests get a calendar that moves with their clock.
+        1_791_374_400 + self.now.get() / 1_000_000
+    }
 }
 
 /// An in-memory [`Source`] that can misbehave on purpose: short reads and `Pending` polls.

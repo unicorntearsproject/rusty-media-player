@@ -1092,6 +1092,13 @@ Features added on top of M12 (details in the docs named in brackets):
 - **Web build**: content-hashed names, `build-info.json`, the threaded build in the zip, a service worker that precaches the build the browser can run; `dist --target rustybucket` lays a release out for
   Rusty Bucket's release site.
 
+### rc8 round (2026-10-07)
+
+- **Installer icons**: a 128 px `share/pixmaps` icon for deb/rpm, the `.ico` on the Windows shortcuts and in Add/Remove Programs, `.VolumeIcon.icns` on the macOS disk image; `xtask verify` checks the icon in the Flatpak bundle and the AppImage.
+- **Back on every Settings page** (button, Esc, Backspace, Alt+Left; the keyboard returns to the button that opened the page).
+- **First run never adds `$HOME`**: a Videos or Music folder that is `$HOME` or above it is left out with a note; the walker follows symlinked folders without looping, skips hidden and junk files, and is bounded. Scale check on a real 10,954-track, 3,659-album music folder: about 130 s on an idle-priority scan, 137 MB peak, no errors.
+- **Play history**: each play of a song or video (counts after 30 s or half the item, whichever comes first; the time heard and finished-or-skipped are kept) is stored by the same identity as favorites, bounded to 10,000 plays (`library/history`). A **History** view (key `0`) lists Music and Videos newest first, grouped by day (Today, Yesterday, dates) with the time and a play-count badge; rows play, queue, heart, open the album, and **Delete** (or the menu) removes a play. **Clear history** asks first. The Tracks and Videos views sort by *Most played* and *Last played* and show the count and last day while they do. **Pause history** in Settings stops recording. Plays are dated by `HostClock::unix_time` and grouped by the local day (`utc_offset_secs`).
+
 ### Phase A2 of the 2026-10-06 batch
 
 - **Favorites**: a heart on every song and video (rows, posters, the album page's *Favorite* button, the now-playing card, the bar, context menus, key `H`), a Favorites view (key `9`) with Music and Videos

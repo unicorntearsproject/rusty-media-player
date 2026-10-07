@@ -130,7 +130,11 @@ fn settings_offers_the_tooltip_switch_and_the_cycle_controls_without_any_host_se
     let labels = r.buttons();
     assert!(labels.iter().any(|b| b == "Visualizer order: in turn"), "{labels:?}");
     assert!(labels.iter().any(|b| b == "Visualizer cycle time: 1 min"), "{labels:?}");
-    assert_eq!(r.toggles().iter().map(|t| t.1).collect::<Vec<_>>(), [true, false], "tooltips on, cycle off");
+    assert_eq!(
+        r.toggles().iter().map(|t| t.1).collect::<Vec<_>>(),
+        [true, false, false],
+        "tooltips on, cycle off, history on"
+    );
     // Each press is applied at once, and kept.
     r.flip("Show tooltips");
     assert!(!r.app.app_settings().tooltips && !r.saved().tooltips);

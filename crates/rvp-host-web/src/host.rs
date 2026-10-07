@@ -31,6 +31,14 @@ impl HostClock for WebClock {
         // The page ticks every animation frame (and on a timer when hidden); nothing to schedule.
         self.wake.set(at_us);
     }
+
+    fn unix_time(&self) -> i64 {
+        (js_sys::Date::now() / 1000.0) as i64
+    }
+
+    fn utc_offset_secs(&self) -> i32 {
+        (-js_sys::Date::new_0().get_timezone_offset() * 60.0) as i32
+    }
 }
 
 /// The `<canvas>` the whole UI is drawn on.

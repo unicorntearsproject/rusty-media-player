@@ -35,6 +35,7 @@ fn view_name(v: View) -> &'static str {
         View::Tracks => "tracks",
         View::Videos => "videos",
         View::Favorites => "favorites",
+        View::History => "history",
         View::Playlists => "playlists",
         View::Queue => "queue",
         View::Search => "search",

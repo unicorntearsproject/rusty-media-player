@@ -356,6 +356,7 @@ pub fn decode_thumb(bytes: &[u8]) -> Option<Thumb> {
 }
 
 const FAVORITES_MAGIC: &[u8; 4] = b"RVPF";
+const HISTORY_MAGIC: &[u8; 4] = b"RVPH";
 
 impl Library {
     /// The favorites as bytes, and mark them saved.
@@ -383,6 +384,77 @@ impl Library {
             set.insert(r.str()?);
         }
         self.replace_favorites(set);
+        Ok(())
+    }
+}
+
+impl Library {
+    /// The play history as bytes (a table of file keys, then 13 bytes a play), and mark it saved.
+    pub fn save_history(&mut self) -> Vec<u8> {
+        self.history.dirty = false;
+        let plays = self.history.plays.clone();
+        let mut keys: Vec<&str> = Vec::new();
+        let mut index: alloc::collections::BTreeMap<&str, u32> = alloc::collections::BTreeMap::new();
+        for p in &plays {
+            if !index.contains_key(p.key.as_str()) {
+                index.insert(p.key.as_str(), keys.len() as u32);
+                keys.push(p.key.as_str());
+            }
+        }
+        let mut w = W(Vec::with_capacity(16 + plays.len() * 13 + keys.len() * 48));
+        w.0.extend_from_slice(HISTORY_MAGIC);
+        w.u8(VERSION);
+        w.u32(keys.len() as u32);
+        for k in &keys {
+            w.str(k);
+        }
+        w.u32(plays.len() as u32);
+        for p in &plays {
+            w.u32(index[p.key.as_str()]);
+            w.u32(p.at.clamp(0, u32::MAX as i64) as u32);
+            w.u32(p.heard_ms);
+            w.u8(u8::from(p.finished) | (u8::from(p.video) << 1));
+        }
+        w.0
+    }
+
+    /// Put the history saved by [`Library::save_history`] into this library (at most [`crate::MAX_PLAYS`] plays are taken).
+    pub fn load_history(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let mut r = R(bytes);
+        if r.take(4)? != HISTORY_MAGIC || r.u8()? != VERSION {
+            return Err("not a history file".to_string());
+        }
+        let nk = r.count(2)?;
+        let mut keys = Vec::with_capacity(nk);
+        for _ in 0..nk {
+            keys.push(r.str()?);
+        }
+        let np = r.count(13)?;
+        let mut plays = Vec::with_capacity(np.min(crate::MAX_PLAYS));
+        for i in 0..np {
+            let k = r.u32()? as usize;
+            let at = r.u32()? as i64;
+            let heard_ms = r.u32()?;
+            let flags = r.u8()?;
+            let key = keys.get(k).ok_or_else(|| "a play names a missing file".to_string())?.clone();
+            plays.push(crate::Play {
+                seq: i as u64,
+                key,
+                video: flags & 2 != 0,
+                at,
+                heard_ms,
+                finished: flags & 1 != 0,
+            });
+        }
+        if plays.len() > crate::MAX_PLAYS {
+            let drop = plays.len() - crate::MAX_PLAYS;
+            plays.drain(..drop);
+        }
+        self.history.next_seq = np as u64;
+        self.history.plays = plays;
+        self.history.recount();
+        self.history.dirty = false;
+        self.rev += 1;
         Ok(())
     }
 }

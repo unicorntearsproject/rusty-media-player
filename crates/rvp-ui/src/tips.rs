@@ -152,6 +152,10 @@ fn view_text(v: View) -> Option<(String, String)> {
         View::Favorites => {
             tip("Favorites: the songs and videos you hearted, ready to play as one queue.", "9")
         }
+        View::History => tip(
+            "History: what you played, newest first, by day. Play, queue or heart a row; Delete takes it out of the history.",
+            "0",
+        ),
         View::Playlists => {
             tip("Playlists: the lists you saved. Import M3U, M3U8 and PLS files here too.", "4")
         }
@@ -185,7 +189,10 @@ fn header_button_text(view: View, detail: Option<Detail>, id: u8) -> Option<(Str
         (View::Queue, 1) => tip("Save the queue as a playlist.", ""),
         (View::Tracks | View::Albums, 0) => tip("Shuffle every song in your library and play.", ""),
         (View::Videos, 0) => tip("Show the videos as a list or as posters.", ""),
-        (View::Videos, 1) => tip("Change the order: by title, newest first or longest first.", ""),
+        (View::Videos, 1) => {
+            tip("Change the order: by title, newest first, longest first, most played or last played.", "")
+        }
+        (View::History, 0) => tip("Forget every play. Your library, favorites and playlists stay.", ""),
         (View::Favorites, 0) => tip("Play every favorite, songs first, from the top.", ""),
         (View::Favorites, 1) => tip("Play every favorite in a random order.", ""),
         (View::About, 0) => tip("Open Rusty Bucket's site, rustybucket.ai, in your browser.", ""),

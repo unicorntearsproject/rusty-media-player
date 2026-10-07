@@ -154,9 +154,8 @@ impl Ctx {
     /// `verify`; `embedded` also requires the signatures inside the rpm and the AppImage (a release built in CI gets only detached ones).
     pub(super) fn verify_with(&self, embedded: bool) -> Result<(), String> {
         let fpr = resolve_public_fpr(&self.root)?;
-        let home = self.dist().join("verify-gnupg");
-        fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-        set_mode(&home, 0o700)?;
+        let guard = GpgHome::new(self.dist().join("verify-gnupg"))?;
+        let home = guard.path().to_path_buf();
         let gpg = |args: &[&Path]| -> Result<String, String> {
             let o = Command::new("gpg")
                 .env("GNUPGHOME", &home)
@@ -385,7 +384,6 @@ impl Ctx {
                 }),
             );
         }
-        let _ = Command::new("gpgconf").env("GNUPGHOME", &home).args(["--kill", "all"]).status();
         if ok == 0 && bad.is_empty() {
             return Err("nothing signed under target/dist (build with --sign)".into());
         }
@@ -433,6 +431,28 @@ pub(super) fn resolve_public_fpr(root: &Path) -> Result<String, String> {
         Command::new("gpg").args(["--batch", "--show-keys", "--with-colons"]).arg(root.join(KEY_ASC)),
     )?)
     .ok_or_else(|| format!("no key in {KEY_ASC}"))
+}
+
+/// A throwaway GnuPG home. Whatever gpg started there (gpg-agent, dirmngr) is stopped when this goes out of scope, on success, on an error
+/// return and on a panic alike.
+pub(super) struct GpgHome(PathBuf);
+
+impl GpgHome {
+    pub(super) fn new(path: PathBuf) -> Result<Self, String> {
+        fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        set_mode(&path, 0o700)?;
+        Ok(GpgHome(path))
+    }
+
+    pub(super) fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for GpgHome {
+    fn drop(&mut self) {
+        let _ = Command::new("gpgconf").arg("--homedir").arg(&self.0).args(["--kill", "all"]).output();
+    }
 }
 
 #[cfg(test)]

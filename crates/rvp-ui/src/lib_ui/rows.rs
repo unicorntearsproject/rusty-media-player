@@ -2,6 +2,7 @@
 //! change of the library, the view, the search text, the sort or the window width; drawing and hit testing only look at it.
 use super::{Detail, LibCtx, LibUi, Metrics, View};
 use crate::model::UiModel;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -100,6 +101,19 @@ pub(crate) struct Rows {
     pub list: Vec<u32>,
     /// The Videos view is laid out as a list.
     pub video_list: bool,
+    /// In the History view: what each entity is a play of (by entity index).
+    pub hist: BTreeMap<usize, HistInfo>,
+}
+
+/// The play behind a row of the History view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HistInfo {
+    /// The play, for removing it.
+    pub seq: u64,
+    /// When it started to count (seconds since 1970).
+    pub at: i64,
+    /// How many plays of the same file the history holds.
+    pub count: u32,
 }
 
 struct Builder<'a> {
@@ -114,6 +128,7 @@ struct Builder<'a> {
     video_list: bool,
     video_cols: usize,
     vcard_h: f32,
+    hist: BTreeMap<usize, HistInfo>,
     _p: core::marker::PhantomData<&'a ()>,
 }
 
@@ -184,6 +199,7 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
         video_list: ui.video_list,
         video_cols: m.video_cols(),
         vcard_h: m.vcard_h(),
+        hist: BTreeMap::new(),
         _p: Default::default(),
     };
     let empty_lib = lib.track_count() == 0;
@@ -197,7 +213,15 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
             ),
         );
         b.push(24.0 * s, RowKind::Gap);
-        return Rows { key, rows: b.rows, ents: b.ents, total: b.y, list: b.list, video_list: ui.video_list };
+        return Rows {
+            key,
+            rows: b.rows,
+            ents: b.ents,
+            total: b.y,
+            list: b.list,
+            video_list: ui.video_list,
+            hist: b.hist,
+        };
     }
     match (ui.view, ui.detail) {
         (_, Some(Detail::Album(id))) => {
@@ -332,6 +356,50 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
                 b.videos(films.into_iter());
             }
         }
+        (View::History, None) => {
+            let mut any = false;
+            for video in [false, true] {
+                let plays: Vec<_> = lib.history_rows(video).into_iter().filter(|r| r.id.is_some()).collect();
+                if plays.is_empty() {
+                    continue;
+                }
+                any = true;
+                let what = if video { "Videos" } else { "Music" };
+                b.push(
+                    44.0 * s,
+                    RowKind::Header(alloc::format!(
+                        "{what} ({})",
+                        super::draw::plural(plays.len(), "play", "plays")
+                    )),
+                );
+                let mut day: Option<String> = None;
+                for p in plays {
+                    let label = day_label(lib, p.play.at);
+                    if day.as_ref() != Some(&label) {
+                        b.push(32.0 * s, RowKind::Header(label.clone()));
+                        day = Some(label);
+                    }
+                    let Some(id) = p.id else { continue };
+                    b.hist.insert(b.ents.len(), HistInfo { seq: p.play.seq, at: p.play.at, count: p.count });
+                    if video {
+                        let keep = core::mem::replace(&mut b.video_list, true);
+                        b.videos(core::iter::once(id));
+                        b.video_list = keep;
+                    } else {
+                        b.track(id);
+                    }
+                }
+            }
+            if !any {
+                b.push(
+                    300.0 * s,
+                    RowKind::Message(
+                        "Nothing played yet.".into(),
+                        "Songs and videos you play land here, newest first, once you have listened for half a minute.".into(),
+                    ),
+                );
+            }
+        }
         (View::Playlists, None) => {
             if lib.playlists().is_empty() {
                 b.push(
@@ -412,7 +480,15 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
         (View::NowPlaying | View::Visualizer, None) => {}
     }
     b.push(24.0 * s, RowKind::Gap);
-    Rows { key, rows: b.rows, ents: b.ents, total: b.y, list: b.list, video_list: ui.video_list }
+    Rows {
+        key,
+        rows: b.rows,
+        ents: b.ents,
+        total: b.y,
+        list: b.list,
+        video_list: ui.video_list,
+        hist: b.hist,
+    }
 }
 
 /// The heart of an entity drawn in `r` (a rectangle of [`Rows::ent_rect`], or the same moved by the scroll), if it has one: songs
@@ -513,4 +589,29 @@ impl Rows {
         }
         Some(best)
     }
+}
+
+const MONTHS: [&str; 12] =
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/// The heading of the day a play was on: Today, Yesterday, a weekday-less date, or Earlier when the host has no calendar.
+pub(crate) fn day_label(lib: &rvp_library::Library, at: i64) -> String {
+    match lib.days_ago(at) {
+        Some(0) => "Today".into(),
+        Some(1) => "Yesterday".into(),
+        Some(_) => {
+            let (y, m, d, ..) = lib.local_date(at);
+            alloc::format!("{d} {} {y}", MONTHS[(m as usize).clamp(1, 12) - 1])
+        }
+        None => "Earlier".into(),
+    }
+}
+
+/// "14:32" in the host's local time (empty without a calendar).
+pub(crate) fn clock_text(lib: &rvp_library::Library, at: i64) -> String {
+    if lib.days_ago(at).is_none() {
+        return String::new();
+    }
+    let (.., h, mi) = lib.local_date(at);
+    alloc::format!("{h:02}:{mi:02}")
 }

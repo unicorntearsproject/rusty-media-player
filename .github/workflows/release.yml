@@ -79,6 +79,7 @@ jobs:
             exit 1
           fi
           export GNUPGHOME="$RUNNER_TEMP/gpg-check"; mkdir -m 700 "$GNUPGHOME"
+          trap 'gpgconf --kill all >/dev/null 2>&1 || true' EXIT
           printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --batch --list-secret-keys --with-colons E13FF843723D54068E45A3FF54BF2FA407093CEE | grep -q '^fpr:'
           echo probe > "$RUNNER_TEMP/probe"
@@ -448,7 +449,7 @@ jobs:
           cargo xtask dist verify --target rustybucket --version "$v"
           ls -l target/dist/publish-rb/rusty-wave/release
       # Pinned to a commit of the shared infrastructure repository (never a branch).
-      - uses: unicorntearsproject/rba-publish-action@04bc6fd46e010d5bf6c15b24460312aae3a2eefe
+      - uses: unicorntearsproject/rba-publish-action@4040c5166b28905a7de5de017e065693ad4e890f
         with:
           tag: v${{ needs.version.outputs.version }}
           release-dir: target/dist/publish-rb/rusty-wave/release
@@ -457,3 +458,6 @@ jobs:
           dry-run: ${{ inputs.publish_dry_run && 'true' || 'false' }}
           # A manual dry run runs on a branch, where RBA's role does not apply: preflight skips AWS and the tag gate and runs every file check.
           preflight: ${{ inputs.publish_dry_run && 'true' || 'false' }}
+      - name: Stop the gpg-agent that holds the signing key
+        if: always()
+        run: gpgconf --kill all || true

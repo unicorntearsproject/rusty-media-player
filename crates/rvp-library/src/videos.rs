@@ -26,6 +26,10 @@ pub enum VideoSort {
     Added,
     /// By length.
     Length,
+    /// By how often it was played.
+    Plays,
+    /// By when it was last played.
+    LastPlayed,
 }
 
 impl Library {
@@ -55,6 +59,8 @@ impl Library {
                     VideoSort::Title => format!("{}\u{0}{:010}", natural(&fold(v.display_title())), v.id),
                     VideoSort::Added => format!("{:020}\u{0}{:010}", v.mtime_ms.max(0), v.id),
                     VideoSort::Length => format!("{:020}\u{0}{:010}", v.duration_us.max(0), v.id),
+                    VideoSort::Plays => self.plays_sort_key(v.id, v.display_title()),
+                    VideoSort::LastPlayed => self.last_played_sort_key(v.id, v.display_title()),
                 };
                 (key, v.id)
             })

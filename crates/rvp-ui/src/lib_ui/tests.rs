@@ -1830,3 +1830,86 @@ fn the_player_bar_the_dialogs_and_the_audio_panel_have_tooltips_for_every_contro
         assert!(ui.audio_tip_now().is_some(), "{c:?} has no tooltip");
     }
 }
+
+#[test]
+fn the_history_view_groups_plays_by_day_and_removes_a_row_on_delete() {
+    let mut r = Rig::new();
+    with_videos(&mut r, 2);
+    let now = 1_791_374_400i64;
+    r.lib.set_calendar(now, 0);
+    let songs: Vec<u32> = r.lib.all_tracks().iter().take(2).map(|t| t.id).collect();
+    let film = r.lib.all_videos()[0].id;
+    r.lib.record_play(songs[0], now - 5 * 86_400, 45_000, true);
+    r.lib.record_play(songs[1], now - 86_400 - 100, 31_000, false);
+    r.lib.record_play(songs[0], now - 100, 40_000, true);
+    r.lib.record_play(film, now - 50, 60_000, false);
+    // The rail has it and so does the key 0; with nothing played the view says so.
+    r.key(Key::Char('0'));
+    assert_eq!(r.ui.lib_state().view(), View::History);
+    let ents = r.ents();
+    assert_eq!(ents.len(), 4, "three song plays and a film play");
+    assert!(matches!(ents[0].kind, super::EntKind::Track { id, .. } if id == songs[0]), "newest first");
+    assert!(matches!(ents[1].kind, super::EntKind::Track { id, .. } if id == songs[1]));
+    assert!(matches!(ents[3].kind, super::EntKind::Video { .. }));
+    let rows = r.ui.lib.rows.as_ref().unwrap();
+    let heads: Vec<&str> = rows
+        .rows
+        .iter()
+        .filter_map(|x| match &x.kind {
+            super::rows::RowKind::Header(h) => Some(h.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(heads, ["Music (3 plays)", "Today", "Yesterday", "2 Oct 2026", "Videos (1 play)", "Today"]);
+    assert_eq!(rows.hist[&0].count, 2, "the song was played twice");
+    assert_eq!(rows.hist[&2].count, 2);
+    assert_eq!(rows.hist[&1].count, 1);
+    // The context menu offers to remove the row; Delete does the same.
+    let seq = rows.hist[&1].seq;
+    {
+        let ctx = LibCtx {
+            lib: &r.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
+        let items = super::menus::ent_menu(&r.ui, 1, &r.m, &ctx);
+        assert!(items.iter().any(|m| m.label == "Remove from history"));
+    }
+    r.ui.lib.sel = Some(1);
+    r.ui.lib.zone = super::Zone::Content;
+    assert_eq!(r.key(Key::Other("Delete".into())), [Action::Lib(LibAction::RemoveFromHistory(seq))]);
+    // The header's button asks to clear.
+    let rect = {
+        let ctx = LibCtx {
+            lib: &r.lib,
+            now_art: None,
+            scan: None,
+            viz: None,
+            video: None,
+            resume: crate::lib_ui::no_resume(),
+        };
+        let g = r.ui.lib_geom(&r.m, &ctx);
+        let names: Vec<_> = g.header_btns.iter().map(|b| b.label.as_str()).collect();
+        assert_eq!(names, ["Clear history"]);
+        g.header_btns[0].rect
+    };
+    let (x, y) = center(rect);
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::ClearHistory)]);
+    let _ = r.draw();
+    // Sorted by plays, the song rows say how often they were played.
+    r.ui.show_view(View::Tracks);
+    r.ui.lib.track_sort = rvp_library::TrackSort::Plays;
+    let _ = r.draw();
+}
+
+#[test]
+fn an_empty_history_says_so() {
+    let mut r = Rig::new();
+    r.key(Key::Char('0'));
+    assert_eq!(r.ui.lib_state().view(), View::History);
+    assert!(r.ents().is_empty());
+    let _ = r.draw();
+}

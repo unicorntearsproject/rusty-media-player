@@ -14,6 +14,7 @@ extern crate std;
 pub mod art;
 mod favorites;
 pub mod fold;
+mod history;
 mod index;
 mod model;
 mod persist;
@@ -26,6 +27,7 @@ mod videos;
 
 pub use art::{Image, THUMB_SIDE, Thumb};
 pub use favorites::FAVORITES_KEY;
+pub use history::{COUNT_AFTER_US, HISTORY_KEY, HistoryRow, MAX_PLAYS, Play, counts_as_play};
 pub use index::{Library, ScanReport, Search, TagPatch, TrackSort};
 pub use model::{Album, ArtId, Artist, Root, Track, TrackId, UNKNOWN_ALBUM, UNKNOWN_ARTIST, VARIOUS_ARTISTS};
 pub use persist::{INDEX_KEY, PLAYLISTS_KEY, art_key, decode_thumb, encode_thumb};

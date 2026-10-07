@@ -63,7 +63,22 @@ pub(crate) fn ent_menu(ui: &Ui, i: usize, model: &UiModel, ctx: &LibCtx<'_>) -> 
     let Some(rows) = &ui.lib.rows else { return global_menu(ui, model, ctx) };
     let Some(e) = rows.ents.get(i).copied() else { return global_menu(ui, model, ctx) };
     let lib = ctx.lib;
-    match e.kind {
+    let from_history = rows.hist.get(&i).map(|h| h.seq);
+    let mut menu = ent_menu_base(ui, e.kind, model, ctx, lib);
+    if let Some(seq) = from_history {
+        menu.push(hinted("Remove from history", "Delete", Action::Lib(LibAction::RemoveFromHistory(seq))));
+    }
+    menu
+}
+
+fn ent_menu_base(
+    ui: &Ui,
+    kind: EntKind,
+    model: &UiModel,
+    ctx: &LibCtx<'_>,
+    lib: &rvp_library::Library,
+) -> Vec<MenuItem> {
+    match kind {
         EntKind::Track { id, pos } => {
             let mut v = alloc::vec![
                 play("Play", "Enter", Scope::ListFrom(pos as u32), Enqueue::Now),
@@ -211,9 +226,15 @@ pub(crate) fn sort_menu(ui: &Ui) -> Vec<MenuItem> {
         (TrackSort::Duration, "Length"),
         (TrackSort::Year, "Year"),
         (TrackSort::Added, "Recently added"),
+        (TrackSort::Plays, "Most played"),
+        (TrackSort::LastPlayed, "Last played"),
     ] {
         // Choosing the sort that is on reverses it; a new one starts in its natural direction.
-        let asc = if by == cur.0 { !cur.1 } else { by != TrackSort::Added };
+        let asc = if by == cur.0 {
+            !cur.1
+        } else {
+            !matches!(by, TrackSort::Added | TrackSort::Plays | TrackSort::LastPlayed)
+        };
         let mut m = item(name, Action::Lib(LibAction::SortTracks(by, asc)));
         m.checked = cur.0 == by;
         v.push(m);
@@ -231,6 +252,7 @@ pub(crate) fn global_menu(_ui: &Ui, model: &UiModel, ctx: &LibCtx<'_>) -> Vec<Me
         item("Tracks", Action::ShowView(View::Tracks)),
         item("Videos", Action::ShowView(View::Videos)),
         hinted("Favorites", "9", Action::ShowView(View::Favorites)),
+        hinted("History", "0", Action::ShowView(View::History)),
         item("Playlists", Action::ShowView(View::Playlists)),
         item("Queue", Action::ShowView(View::Queue)),
         item("Visualizer", Action::ShowView(View::Visualizer)).sep(),

@@ -11,6 +11,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+mod history;
 mod library;
 mod restore;
 mod services;
@@ -161,6 +162,8 @@ pub struct App {
     svc: services::Services,
     /// The first run and the last face.
     setup: setup::Setup,
+    /// What the play history is watching.
+    tracker: history::Tracker,
     /// The Theme dialog: the box, the preview, the fetching.
     themeui: theme_ui::ThemeUi,
 }
@@ -249,6 +252,7 @@ impl App {
             hint_rev: u64::MAX,
             svc: services::Services::default(),
             setup: setup::Setup::default(),
+            tracker: history::Tracker::default(),
             themeui: theme_ui::ThemeUi::default(),
             codecs,
         }
@@ -578,6 +582,7 @@ impl App {
 
     /// Persist what must survive a page reload (a host calls this before unloading).
     pub fn save_state<H: Host<Video = FrameSink>>(&mut self, host: &mut H) {
+        self.history_finish(host);
         self.save_resume(host, true);
         let now = host.clock().now_us();
         self.save_queue(host, now, true);

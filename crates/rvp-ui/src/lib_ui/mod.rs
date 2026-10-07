@@ -51,6 +51,8 @@ pub enum View {
     Videos,
     /// The songs and videos that were hearted.
     Favorites,
+    /// What was played, newest first.
+    History,
     /// Saved playlists.
     Playlists,
     /// What plays next.
@@ -125,7 +127,7 @@ impl crate::ui::Ui {
         match self.lib.view {
             View::Videos => ctx.lib.video_count() == 0,
             View::Albums | View::Artists | View::Tracks => ctx.lib.track_count() == 0,
-            View::Favorites => false,
+            View::Favorites | View::History => false,
             View::About => false,
             _ => false,
         }
@@ -171,6 +173,10 @@ pub enum LibAction {
     ToggleFavorite(u32),
     /// Heart or un-heart every track of a scope (all hearted when any is not, else all un-hearted).
     FavoriteScope(Scope),
+    /// Forget one play of the history (its `seq`).
+    RemoveFromHistory(u64),
+    /// Ask whether to clear the whole play history.
+    ClearHistory,
     /// Sort the track list.
     SortTracks(TrackSort, bool),
     /// Show the videos as a list (`true`) or as posters (`false`).

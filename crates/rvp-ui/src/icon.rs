@@ -67,6 +67,7 @@ pub enum Icon {
     LayoutGrid,
     House,
     Heart,
+    History,
     ExternalLink,
     Tag,
 }
@@ -138,6 +139,7 @@ impl Icon {
             Icon::LayoutGrid => d::LAYOUT_GRID,
             Icon::House => d::HOUSE,
             Icon::Heart => d::HEART,
+            Icon::History => d::HISTORY,
             Icon::ExternalLink => d::EXTERNAL_LINK,
             Icon::Tag => d::TAG,
         }

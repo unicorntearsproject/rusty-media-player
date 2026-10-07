@@ -12,6 +12,7 @@ use crate::ui::{Btn, Layout, Ui};
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
+use rvp_library::{TrackSort, VideoSort};
 use theme::Rgba;
 
 /// Rectangles of the now-playing screen.
@@ -57,11 +58,44 @@ pub(crate) fn long_duration(us: i64) -> String {
     }
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
+pub(crate) fn plural(n: usize, one: &str, many: &str) -> String {
     alloc::format!("{n} {}", if n == 1 { one } else { many })
 }
 
 impl Ui {
+    /// The small print of a song or video row about its plays: the time and count in History, or the count and last day when the
+    /// Tracks or Videos view is sorted by plays.
+    fn play_note(
+        &self,
+        rows: &super::rows::Rows,
+        ei: usize,
+        id: u32,
+        lib: &rvp_library::Library,
+    ) -> Option<String> {
+        if let Some(h) = rows.hist.get(&ei) {
+            let time = super::rows::clock_text(lib, h.at);
+            let n = plural(h.count as usize, "play", "plays");
+            return Some(if time.is_empty() { n } else { alloc::format!("{time} \u{b7} {n}") });
+        }
+        let by_plays = match self.lib.view {
+            View::Tracks => matches!(self.lib.track_sort, TrackSort::Plays | TrackSort::LastPlayed),
+            View::Videos => matches!(self.lib.video_sort, VideoSort::Plays | VideoSort::LastPlayed),
+            _ => false,
+        };
+        if !by_plays {
+            return None;
+        }
+        let n = lib.play_count(id);
+        if n == 0 {
+            return Some("Not played".into());
+        }
+        let last = lib.last_played(id).map(|at| super::rows::day_label(lib, at).to_lowercase());
+        Some(match last {
+            Some(l) if l != "earlier" => alloc::format!("{} \u{b7} {l}", plural(n as usize, "play", "plays")),
+            _ => plural(n as usize, "play", "plays"),
+        })
+    }
+
     pub(crate) fn lib_layout(&self) -> Layout {
         // Toasts sit just above the bar, out of the way of the header's search box.
         Layout {
@@ -637,6 +671,14 @@ impl Ui {
                     "{} \u{b7} {}",
                     plural(lib.favorite_tracks().len(), "song", "songs"),
                     plural(lib.favorite_videos().len(), "video", "videos")
+                ),
+            ),
+            View::History => (
+                "History".into(),
+                alloc::format!(
+                    "{} \u{b7} {}",
+                    plural(lib.history_rows(false).len(), "song play", "song plays"),
+                    plural(lib.history_rows(true).len(), "video play", "video plays")
                 ),
             ),
             View::Playlists => ("Playlists".into(), plural(lib.playlists().len(), "playlist", "playlists")),
@@ -1215,7 +1257,11 @@ impl Ui {
                         1.0,
                         0.0,
                     );
-                    let sub = self.fonts.fit(Face::Sans, 12.5 * s, &video_sub(v), room.max(40.0 * s));
+                    let mut sub = video_sub(v);
+                    if let Some(n) = self.play_note(rows, ei, id, lib) {
+                        sub = if sub.is_empty() { n } else { alloc::format!("{n} \u{b7} {sub}") };
+                    }
+                    let sub = self.fonts.fit(Face::Sans, 12.5 * s, &sub, room.max(40.0 * s));
                     self.text(fb, Face::Sans, 12.5, tx, r.cy() + 11.0 * s, &sub, t::text_dim(), 1.0, 0.0);
                     let hr = super::rows::heart_rect(rows.ents[ei].kind, true, r, s).unwrap_or_default();
                     let hot = self.lib.hover == LibHit::EntHeart(ei);
@@ -1315,7 +1361,11 @@ impl Ui {
                         1.0,
                         0.0,
                     );
-                    let sub = self.fonts.fit(Face::Sans, 12.5 * s, &video_sub(v), cw);
+                    let mut sub = video_sub(v);
+                    if let Some(n) = self.play_note(rows, ei, id, lib) {
+                        sub = if sub.is_empty() { n } else { alloc::format!("{n} \u{b7} {sub}") };
+                    }
+                    let sub = self.fonts.fit(Face::Sans, 12.5 * s, &sub, cw);
                     self.text(fb, Face::Sans, 12.5, poster.x, ty + 20.0 * s, &sub, t::text_dim(), 1.0, 0.0);
                 }
             }
@@ -1399,6 +1449,7 @@ impl Ui {
                         show_artist,
                         show_album,
                         heart: Some(lib.is_favorite(tr.id)),
+                        note: self.play_note(rows, ei, tr.id, lib),
                     },
                     (hover_row, play_hot, selected, kb, ei),
                 );
@@ -1428,6 +1479,7 @@ impl Ui {
                                 show_artist: true,
                                 show_album: true,
                                 heart: Some(lib.is_favorite(tr.id)),
+                                note: None,
                             },
                             (hover_row, play_hot, selected, kb, ei),
                         );
@@ -1457,6 +1509,7 @@ impl Ui {
                                 show_artist: true,
                                 show_album: true,
                                 heart: None,
+                                note: None,
                             },
                             (hover_row, false, selected, kb, ei),
                         );
@@ -1728,7 +1781,11 @@ impl Ui {
             0.0,
         );
         if two_line {
-            let a = self.fonts.fit(Face::Sans, 12.5 * s, row.artist, cols.title.1);
+            let line = match &row.note {
+                Some(n) => alloc::format!("{} \u{b7} {n}", row.artist),
+                None => row.artist.into(),
+            };
+            let a = self.fonts.fit(Face::Sans, 12.5 * s, &line, cols.title.1);
             self.text(
                 fb,
                 Face::Sans,
@@ -1756,7 +1813,7 @@ impl Ui {
             );
         }
         if let Some(a) = cols.album {
-            let txt = self.fonts.fit(Face::Sans, 13.0 * s, row.album, a.1);
+            let txt = self.fonts.fit(Face::Sans, 13.0 * s, row.note.as_deref().unwrap_or(row.album), a.1);
             self.text(fb, Face::Sans, 13.0, x0 + a.0, r.cy(), &txt, t::text_dim(), 1.0, 0.0);
         }
         let d = dur_text(row.dur);
@@ -2587,4 +2644,6 @@ pub(crate) struct TrackRow<'a> {
     pub show_album: bool,
     /// The heart: `None` for no heart, else whether the item is a favorite.
     pub heart: Option<bool>,
+    /// A note on the plays, in place of the album (or after the artist when there is no album column).
+    pub note: Option<String>,
 }

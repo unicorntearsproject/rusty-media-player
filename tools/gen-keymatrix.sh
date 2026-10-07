@@ -5,6 +5,12 @@
 set -euo pipefail
 out="$(cd "$(dirname "$0")/.." && pwd)/crates/rvp-update/tests/data/keymatrix"
 export GNUPGHOME; GNUPGHOME="$(mktemp -d "${TMPDIR:-/tmp}/keymatrix-XXXXXX")"; chmod 700 "$GNUPGHOME"
+# The throwaway keyring has its own gpg-agent: stop it on every way out (success, failure, Ctrl+C, kill). The directory itself stays
+# (nothing here removes directories); it only holds throwaway keys.
+cleanup() { gpgconf --homedir "$GNUPGHOME" --kill all >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$out"
 G=(gpg --batch --no-tty --pinentry-mode loopback --passphrase '')
 T0=20261001T100000   # the keys are made
@@ -83,5 +89,4 @@ b64 = base64.b64encode(out).decode()
 open(sys.argv[2], 'w').write('-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n' + '\n'.join(b64[i:i + 64] for i in range(0, len(b64), 64)) + '\n-----END PGP PUBLIC KEY BLOCK-----\n')
 P
 sig "$gs" -- no-cross-certification
-gpgconf --kill all 2>/dev/null || true
 echo "wrote $out"

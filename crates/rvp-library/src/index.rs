@@ -55,6 +55,10 @@ pub enum TrackSort {
     Year,
     /// Newest first (order of discovery).
     Added,
+    /// By how often it was played.
+    Plays,
+    /// By when it was last played.
+    LastPlayed,
 }
 
 /// Matches for a search.
@@ -128,6 +132,10 @@ pub struct Library {
     /// Keys of the favorite files (see `favorites.rs`).
     pub(crate) favorites: BTreeSet<String>,
     pub(crate) favorites_dirty: bool,
+    /// What was played (see `history.rs`).
+    pub(crate) history: crate::history::History,
+    /// The host's calendar: now (seconds since 1970) and the local offset from UTC, for dating the history.
+    pub(crate) calendar: (i64, i32),
     /// What the last scan did.
     pub report: ScanReport,
 }
@@ -324,6 +332,8 @@ impl Library {
                         format!("{:06}\u{0}{}", t.year.max(0), natural(&fold(t.display_title())))
                     }
                     TrackSort::Added => format!("{:010}", t.id),
+                    TrackSort::Plays => self.plays_sort_key(t.id, t.display_title()),
+                    TrackSort::LastPlayed => self.last_played_sort_key(t.id, t.display_title()),
                 };
                 (key, t.id)
             })

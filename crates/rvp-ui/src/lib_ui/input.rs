@@ -21,7 +21,7 @@ fn home_nav() -> NavEntry {
 }
 
 /// The views the digit keys go to.
-const DIGITS: [View; 9] = [
+const DIGITS: [View; 10] = [
     View::Albums,
     View::Artists,
     View::Tracks,
@@ -31,6 +31,7 @@ const DIGITS: [View; 9] = [
     View::Visualizer,
     View::Videos,
     View::Favorites,
+    View::History,
 ];
 
 impl Ui {
@@ -1108,17 +1109,20 @@ impl Ui {
                 self.dirty = true;
             }
             (View::Videos, None, 1) => {
-                // Title, then newest first, then longest first.
+                // Title, then newest first, then longest first, then most played, then last played.
                 let (sort, asc) = match (self.lib.video_sort, self.lib.video_asc) {
                     (VideoSort::Title, _) => (VideoSort::Added, false),
                     (VideoSort::Added, _) => (VideoSort::Length, false),
-                    (VideoSort::Length, _) => (VideoSort::Title, true),
+                    (VideoSort::Length, _) => (VideoSort::Plays, false),
+                    (VideoSort::Plays, _) => (VideoSort::LastPlayed, false),
+                    (VideoSort::LastPlayed, _) => (VideoSort::Title, true),
                 };
                 self.lib.video_sort = sort;
                 self.lib.video_asc = asc;
                 self.lib.scroll = 0.0;
                 self.dirty = true;
             }
+            (View::History, None, 0) => out.push(Action::Lib(LibAction::ClearHistory)),
             (View::Favorites, None, 0) => {
                 out.push(Action::Lib(LibAction::Play(Scope::ListFrom(0), Enqueue::Now)))
             }
@@ -1338,6 +1342,10 @@ impl Ui {
                 self.show_view(View::Search);
                 return;
             }
+            Key::Char('0') if plain && !mods.shift => {
+                self.show_view(View::History);
+                return;
+            }
             Key::Char(c @ '1'..='9') if plain && !mods.shift => {
                 self.show_view(DIGITS[(*c as u8 - b'1') as usize]);
                 return;
@@ -1517,6 +1525,11 @@ impl Ui {
                         EntKind::Queue(id) => out.push(Action::RemoveItem(id)),
                         EntKind::PlEntry { pl, idx } => {
                             out.push(Action::Lib(LibAction::RemoveFromPlaylist(pl, idx as u32)))
+                        }
+                        EntKind::Track { .. } | EntKind::Video { .. } if self.lib.view == View::History => {
+                            if let Some(h) = self.lib.rows.as_ref().and_then(|r| r.hist.get(&i)) {
+                                out.push(Action::Lib(LibAction::RemoveFromHistory(h.seq)));
+                            }
                         }
                         _ => {}
                     }

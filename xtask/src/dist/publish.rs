@@ -127,12 +127,13 @@ impl Ctx {
         // The manifest names the versioned files of this publish and their hashes; it is built from the staged copies.
         let manifest_path = self.write_manifest(&stage, &assets, true)?;
         let fpr = sign::resolve_public_fpr(&self.root)?;
+        let guard = sign::GpgHome::new(self.dist().join("verify-gnupg"))?;
         for (data, sig) in [
             (stage.join(&sums_name), stage.join(format!("{sums_name}.asc"))),
             (manifest_path.clone(), stage.join(format!("{MANIFEST_NAME}.asc"))),
         ] {
             let o = Command::new("gpg")
-                .env("GNUPGHOME", self.dist().join("verify-gnupg"))
+                .env("GNUPGHOME", guard.path())
                 .args(["--batch", "--no-tty", "--status-fd", "1", "--verify"])
                 .arg(&sig)
                 .arg(&data)

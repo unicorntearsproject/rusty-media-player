@@ -50,6 +50,8 @@ pub struct AppSettings {
     pub integration: IntegrationChoice,
     /// The default-media-player offer (`Ask` until the user answered it; `Never` after a "no thanks").
     pub default_player: IntegrationChoice,
+    /// Nothing new is written to the play history (privacy); what is there stays.
+    pub history_paused: bool,
 }
 
 /// `15 s`, `1 min`, `10 min`.
@@ -69,6 +71,7 @@ impl Default for AppSettings {
             skipped: String::new(),
             integration: IntegrationChoice::default(),
             default_player: IntegrationChoice::default(),
+            history_paused: false,
         }
     }
 }
@@ -93,7 +96,7 @@ impl AppSettings {
     /// The text to keep.
     pub fn to_text(&self) -> String {
         format!(
-            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\ndefault_player={}\ntooltips={}\nviz_cycle={}\nviz_random={}\nviz_secs={}\n",
+            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\ndefault_player={}\ntooltips={}\nviz_cycle={}\nviz_random={}\nviz_secs={}\nhistory_paused={}\n",
             self.auto_check as u8,
             self.last_check,
             self.skipped.replace(['\n', '\r'], ""),
@@ -103,6 +106,7 @@ impl AppSettings {
             self.viz_cycle as u8,
             self.viz_random as u8,
             self.viz_secs,
+            self.history_paused as u8,
         )
     }
 
@@ -124,6 +128,7 @@ impl AppSettings {
                 "tooltips" => s.tooltips = v.trim() != "0",
                 "viz_cycle" => s.viz_cycle = v.trim() == "1",
                 "viz_random" => s.viz_random = v.trim() == "1",
+                "history_paused" => s.history_paused = v.trim() == "1",
                 "viz_secs" => {
                     // Only the offered lengths (a hand-edited file cannot make it flicker); anything else is the default.
                     s.viz_secs = v.trim().parse().ok().filter(|n| VIZ_CYCLE_STEPS.contains(n)).unwrap_or(60)
@@ -148,6 +153,8 @@ enum Screen {
     Theme,
     /// "Set as default media player": the checklist of media types (`true` for the first-run offer, which can be declined for good).
     Default(bool),
+    /// "Clear history?": the question before the play history is wiped.
+    ClearHistory,
 }
 
 /// What a dialog button does (kept in step with the buttons of the spec on screen).
@@ -161,6 +168,7 @@ enum Btn {
     Skip,
     AddToMenu,
     Never,
+    ClearHistoryYes,
     // The Settings dialog.
     OpenAudio,
     OpenTheme,
@@ -185,6 +193,7 @@ enum Tog {
     AppMenu,
     Tooltips,
     VizCycle,
+    HistoryPause,
     /// Media type `n` of [`MEDIA_TYPES`] in the default-player checklist.
     Type(usize),
 }
@@ -391,7 +400,9 @@ impl App {
     pub(crate) fn dialog_spec(&mut self) -> Option<DialogSpec> {
         let screen = self.svc.screen?;
         // Settings and what hangs off it work without the host's services (the audio and theme parts do); the rest needs them.
-        if !self.svc.cache.present && !matches!(screen, Screen::Settings | Screen::Theme) {
+        if !self.svc.cache.present
+            && !matches!(screen, Screen::Settings | Screen::Theme | Screen::ClearHistory)
+        {
             self.svc.screen = None;
             return None;
         }
@@ -423,6 +434,18 @@ impl App {
                         }
                     }
                 }
+            }
+            Screen::ClearHistory => {
+                spec.title = "Clear history?".into();
+                spec.body.push(
+                    "This forgets every song and video you played, with the play counts and last-played dates. Your library, \
+                     favorites and playlists stay as they are. It cannot be undone."
+                        .into(),
+                );
+                spec.buttons.push(DialogButton::new("Clear history", true));
+                buttons.push(Btn::ClearHistoryYes);
+                spec.buttons.push(DialogButton::new("Cancel", false));
+                buttons.push(Btn::Close);
             }
             Screen::Settings => {
                 spec.title = "Settings".into();
@@ -474,6 +497,12 @@ impl App {
                     on: st.viz_cycle,
                 });
                 toggles.push(Tog::VizCycle);
+                spec.toggles.push(DialogToggle {
+                    label: "Pause history".into(),
+                    desc: "Plays are not recorded while this is on. What is already in History stays until you clear it.".into(),
+                    on: st.history_paused,
+                });
+                toggles.push(Tog::HistoryPause);
                 // Coming back from one of its pages, the keyboard is on the button that opened it.
                 spec.focus_button =
                     self.svc.settings_focus.and_then(|k| buttons.iter().position(|b| *b == k));
@@ -691,6 +720,13 @@ impl App {
         self.refresh_model(now);
     }
 
+    /// The question before the play history is cleared.
+    pub(crate) fn ask_clear_history(&mut self, now: Timestamp) {
+        self.svc.notice = None;
+        self.svc.screen = Some(Screen::ClearHistory);
+        self.refresh_model(now);
+    }
+
     /// The menu entry and Ctrl+,: the Settings dialog.
     pub(crate) fn show_settings(&mut self, now: Timestamp) {
         self.svc.notice = None;
@@ -766,6 +802,14 @@ impl App {
         match btn {
             Btn::Close => {
                 self.close_dialog(host);
+                self.refresh_model(now);
+                return;
+            }
+            Btn::ClearHistoryYes => {
+                self.lib.lib.clear_history();
+                self.history_save(host);
+                self.close_dialog(host);
+                self.ui.show_toast("History cleared", now);
                 self.refresh_model(now);
                 return;
             }
@@ -869,7 +913,8 @@ impl App {
             | Btn::OpenTheme
             | Btn::ThemePreview
             | Btn::ThemeApply
-            | Btn::ThemeReset => {}
+            | Btn::ThemeReset
+            | Btn::ClearHistoryYes => {}
             Btn::OpenDefault => {
                 self.svc.settings_focus = Some(Btn::OpenDefault);
                 self.svc.default_checked = alloc::vec![true; MEDIA_TYPES.len()];
@@ -938,6 +983,10 @@ impl App {
             Tog::VizCycle => {
                 self.svc.settings.viz_cycle = !self.svc.settings.viz_cycle;
                 self.lib.viz_cycle_at = now;
+                self.save_app_settings(host);
+            }
+            Tog::HistoryPause => {
+                self.svc.settings.history_paused = !self.svc.settings.history_paused;
                 self.save_app_settings(host);
             }
             Tog::AppMenu => {

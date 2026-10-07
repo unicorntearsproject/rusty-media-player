@@ -201,9 +201,8 @@ impl Ctx {
         }
         let mut bad = check_files(&dir, &self.version)?;
         let fpr = sign::resolve_public_fpr(&self.root)?;
-        let home = self.dist().join("verify-gnupg");
-        fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-        set_mode(&home, 0o700)?;
+        let guard = sign::GpgHome::new(self.dist().join("verify-gnupg"))?;
+        let home = guard.path().to_path_buf();
         sh(Command::new("gpg")
             .env("GNUPGHOME", &home)
             .args(["--batch", "--no-tty", "--quiet", "--import"])

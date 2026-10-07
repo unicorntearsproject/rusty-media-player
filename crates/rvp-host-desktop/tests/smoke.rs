@@ -639,7 +639,7 @@ fn ctrl_comma_opens_settings_and_the_theme_dialog_is_one_step_further() {
     );
     let b = std::fs::read_to_string(report("b")).unwrap();
     assert!(b.contains("\"dialog\": null"), "{b}");
-    // The keyboard starts on the Close button (the primary one, the last); Down wraps to the first control: the two switches, then Audio
+    // The keyboard starts on the Close button (the primary one, the last); Down wraps to the first control: the three switches, then Audio
     // settings, then Theme.
     run_args(
         base(&data, &report("c")),
@@ -655,7 +655,9 @@ fn ctrl_comma_opens_settings_and_the_theme_dialog_is_one_step_further() {
             "--press",
             "3:Down",
             "--press",
-            "3.5:Enter",
+            "3.5:Down",
+            "--press",
+            "4:Enter",
             "--exit-after",
             "5",
         ],

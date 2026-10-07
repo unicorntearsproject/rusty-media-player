@@ -62,6 +62,14 @@ pub trait HostClock {
     fn now_us(&self) -> Timestamp;
     /// Ask the host to call `Player::tick` no later than `at_us`. The host may tick earlier.
     fn request_wake(&self, at_us: Timestamp);
+    /// Seconds since 1970-01-01 UTC by the host's calendar clock, or 0 when the host has none (the play history then has no dates).
+    fn unix_time(&self) -> i64 {
+        0
+    }
+    /// Seconds the local time is ahead of UTC right now (negative to the west), 0 when unknown.
+    fn utc_offset_secs(&self) -> i32 {
+        0
+    }
 }
 
 /// Random-access byte source (a file, a dropped `Blob`, a ramdisk entry).

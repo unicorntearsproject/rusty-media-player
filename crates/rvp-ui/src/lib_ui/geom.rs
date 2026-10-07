@@ -108,7 +108,7 @@ pub(crate) struct Geom {
 }
 
 /// The rail's entries, top to bottom (a `None` is a divider).
-pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 11] = [
+pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 12] = [
     Some((View::Search, "Search", Icon::Search, "/")),
     Some((View::NowPlaying, "Now playing", Icon::AudioLines, "6")),
     Some((View::Albums, "Albums", Icon::Disc3, "1")),
@@ -116,6 +116,7 @@ pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 11] = [
     Some((View::Tracks, "Tracks", Icon::Music, "3")),
     Some((View::Videos, "Videos", Icon::Film, "8")),
     Some((View::Favorites, "Favorites", Icon::Heart, "9")),
+    Some((View::History, "History", Icon::History, "0")),
     Some((View::Playlists, "Playlists", Icon::ListMusic, "4")),
     Some((View::Queue, "Queue", Icon::List, "5")),
     None,
@@ -296,11 +297,16 @@ impl Ui {
             (View::Favorites, _) if ctx.lib.favorite_count() > 0 => {
                 alloc::vec![(1, "Shuffle", Icon::Shuffle, false), (0, "Play all", Icon::Play, true)]
             }
+            (View::History, _) if ctx.lib.history_len() > 0 => {
+                alloc::vec![(0, "Clear history", Icon::Trash2, false)]
+            }
             (View::Videos, _) if ctx.lib.video_count() > 0 => {
                 let sort = match self.lib.video_sort {
                     VideoSort::Title => "Sort: Title",
                     VideoSort::Added => "Sort: Added",
                     VideoSort::Length => "Sort: Length",
+                    VideoSort::Plays => "Sort: Plays",
+                    VideoSort::LastPlayed => "Sort: Last played",
                 };
                 alloc::vec![
                     (1, sort, Icon::ChevronDown, false),
@@ -501,6 +507,8 @@ impl Ui {
             T::Duration => "Length",
             T::Year => "Year",
             T::Added => "Added",
+            T::Plays => "Plays",
+            T::LastPlayed => "Last played",
         };
         alloc::format!("Sort: {name} {}", if self.lib.track_asc { "(A-Z)" } else { "(Z-A)" })
     }
