@@ -453,7 +453,7 @@ jobs:
           cargo xtask dist verify --target rustybucket --version "$v"
           ls -l target/dist/publish-rb/rusty-wave/release
       # Pinned to a commit of the shared infrastructure repository (never a branch).
-      - uses: unicorntearsproject/rba-publish-action@4040c5166b28905a7de5de017e065693ad4e890f
+      - uses: unicorntearsproject/rba-publish-action@0c5db6ab63bfd219c35d0b0ceab920332274ea65
         with:
           tag: v${{ needs.version.outputs.version }}
           release-dir: target/dist/publish-rb/rusty-wave/release
