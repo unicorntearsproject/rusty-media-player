@@ -54,6 +54,7 @@ pub fn skip(coef: &[i32], out: &mut [i32], log2: u32, bit_depth: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn a_dc_coefficient_gives_a_flat_block() {
