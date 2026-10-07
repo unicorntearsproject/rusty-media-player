@@ -39,7 +39,7 @@ if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
   base="${DIST_BASE_URL:-https://software.rustybucket.ai/rusty-wave}"
   ver="${GITHUB_REF_NAME#v}"
   url="${base}/${ver}/rusty-wave-${ver}-SHA256SUMS"
-  code=$(curl -s -o /dev/null -I -w '%{http_code}' --max-time 20 "$url" || true)
+  code=$(curl -s -A 'rw-ci/1 curl' -o /dev/null -I -w '%{http_code}' --max-time 20 "$url" || true)
   if [[ "$code" == "200" ]]; then
     decide false "${ver} is already published at ${base} (rusty-wave-${ver}-SHA256SUMS)"
   fi

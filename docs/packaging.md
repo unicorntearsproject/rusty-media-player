@@ -40,6 +40,12 @@ signed manifest); the in-app updater reads `.../latest/rusty-wave-latest.json` a
 (the constants `MANIFEST_URL` in `crates/rvp-update/src/updater.rs` and `RB_BASE_URL` in `xtask/src/dist/manifest.rs`). Uploading is Rusty Bucket's publisher, run by the CI
 `publish` job (below); every verified build is also copied to `/home/jj/projects/_software-dist/rusty-wave/` for local testing.
 
+**User-Agent of automated requests.** The release site tells people from machines by the User-Agent: every automated request to `software.rustybucket.ai` (acceptance
+scripts, `curl` verifies, CI steps such as `tools/ci/gate.sh`) sends one that starts with `rw-`, for example `rw-acceptance/1 curl/8.x` (`curl -A 'rw-acceptance/1 curl'`).
+The installed app's updater keeps `RustyWave/<version>`. For tests and acceptance runs of the app itself, set `RVP_UPDATE_UA_PREFIX=rw-acceptance/1` and its requests
+send `rw-acceptance/1 RustyWave/<version>` (`rvp_update::user_agent`). `appimageupdatetool`/zsync2 sends its own fixed User-Agent and has no option to change it, so
+its requests during acceptance (`--update-now`, delta checks) cannot carry the `rw-` prefix.
+
 `cargo xtask dist publish --sign` first runs `dist verify` (detached signatures; the rpm and AppImage need no embedded one), takes `rusty-wave_<deb version>_amd64.deb`,
 `rusty-wave-<ver>-<release>.x86_64.rpm`, `rusty-wave-<ver>-x86_64.AppImage` and its `.zsync` (plus `-x64-Setup.exe` and `-windows-x64.zip` with `--windows`, `-macos-universal.dmg`
 with `--macos`, the Flatpak, the web zip and the tarball with their flags, only when they were built and verified in the same run), writes and signs

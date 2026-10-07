@@ -12,7 +12,7 @@ pub mod verify;
 pub mod version;
 pub use apply::Finish;
 pub use error::UpdateError;
-pub use fetch::{Cancel, Net};
+pub use fetch::{Cancel, Net, user_agent};
 pub use kind::{Env, InstallKind, Os};
 pub use manifest::{FileEntry, Manifest};
 pub use updater::{Checked, Config, MANIFEST_URL, Offer, Release, State, Updater};

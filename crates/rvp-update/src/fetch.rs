@@ -37,6 +37,15 @@ pub struct Net {
     agent: ureq::Agent,
 }
 
+/// The User-Agent of the app's requests: `RustyWave/<version>`. For tests and acceptance runs, `RVP_UPDATE_UA_PREFIX` (say
+/// `rw-acceptance/1`) is put in front, so the release site can tell automated requests (`rw-` ...) from people's.
+pub fn user_agent(version: &str) -> String {
+    match std::env::var("RVP_UPDATE_UA_PREFIX") {
+        Ok(p) if !p.trim().is_empty() => format!("{} RustyWave/{version}", p.trim()),
+        _ => format!("RustyWave/{version}"),
+    }
+}
+
 impl Net {
     /// A client that identifies itself as `user_agent` and never leaves HTTPS.
     pub fn new(user_agent: &str) -> Net {

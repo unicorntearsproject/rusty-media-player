@@ -22,7 +22,7 @@ impl Default for DesktopNet {
 impl DesktopNet {
     /// A client that says who it is.
     pub fn new() -> Self {
-        let ua = format!("RustyWave/{}", env!("CARGO_PKG_VERSION"));
+        let ua = rvp_update::user_agent(env!("CARGO_PKG_VERSION"));
         Self { agent: Arc::new(rvp_update::Net::new(&ua)), next: 0, pending: HashMap::new() }
     }
 }

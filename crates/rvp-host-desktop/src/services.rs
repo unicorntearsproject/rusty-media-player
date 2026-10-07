@@ -59,7 +59,7 @@ pub fn config(manifest: &str, restart_args: Vec<std::ffi::OsString>) -> Config {
     let env = Env::current();
     let kind = InstallKind::detect(&env, &|p: &Path| p.exists());
     let version = env!("CARGO_PKG_VERSION");
-    let ua = format!("RustyWave/{version}");
+    let ua = rvp_update::user_agent(version);
     Config {
         manifest_url: manifest.to_string(),
         current: Version::parse(version).expect("the crate version is a version"),
