@@ -24,6 +24,8 @@ mod source;
 #[cfg(target_arch = "wasm32")]
 mod threads;
 #[cfg(target_arch = "wasm32")]
+mod webcodecs;
+#[cfg(target_arch = "wasm32")]
 mod writer;
 
 #[cfg(target_arch = "wasm32")]

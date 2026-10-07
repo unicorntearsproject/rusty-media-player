@@ -33,7 +33,10 @@ pub use media::{
     Art, AudioBuffer, AudioCodec, AudioInfo, AudioParams, Chapter, ColorMatrix, ColorRange, LoudnessTags,
     Metadata, Packet, PixelFormat, StreamInfo, StreamKind, VideoCodec, VideoFrame, VideoInfo,
 };
-pub use platform::{FallbackVideo, PlatformSupport, PlatformVideo, open_video};
+pub use platform::{
+    FallbackVideo, PlatformSupport, PlatformVideo, avcc_bit_depth, codec_string, hevc_profile, open_video,
+    ours_refuses, screened,
+};
 pub use resample::Resampler;
 pub use ring::RingBuffer;
 pub use settings::{AudioSettings, LevelMode};

@@ -34,6 +34,7 @@ impl Coefs {
         let bits = match frame.format {
             PixelFormat::Yuv420p8 => 8,
             PixelFormat::Yuv420p10 => 10,
+            PixelFormat::Rgba8 => 8,
         };
         let one = (1 << 16) as f64;
         // Scale to 8-bit code values first, then to full range.
@@ -83,6 +84,14 @@ pub fn yuv420_rows_to_rgba(frame: &VideoFrame, out: &mut [u8], y0: usize, y1: us
     let (w, h) = (frame.width as usize, frame.height as usize);
     assert!(y0 % 2 == 0 && y1 <= h && y0 <= y1, "bad row band");
     assert_eq!(out.len(), (y1 - y0) * w * 4, "output band has the wrong size");
+    if frame.format == PixelFormat::Rgba8 {
+        let s0 = frame.strides[0].max(w * 4);
+        for y in y0..y1 {
+            out[(y - y0) * w * 4..(y - y0 + 1) * w * 4]
+                .copy_from_slice(&frame.planes[0][y * s0..y * s0 + w * 4]);
+        }
+        return;
+    }
     let c = Coefs::of(frame);
     #[cfg(any(all(target_arch = "wasm32", target_feature = "simd128"), target_arch = "x86_64"))]
     if c.bits == 8 {

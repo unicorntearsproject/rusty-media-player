@@ -1,6 +1,7 @@
 // Page glue for the Rust player: owns the DOM (canvas, file picker, drag and drop, fullscreen) and forwards
 // input to the wasm `WebPlayer`. All drawing happens in Rust; this file only blits and forwards.
 import { RvpAudio } from "./audio.js";
+import { RvpPlatformVideo } from "./webcodecs.js";
 import { RvpMediaSession } from "./mediasession.js";
 import { Threads } from "./threads.js";
 import { setupPwa, install, installState } from "./pwa.js";
@@ -70,6 +71,8 @@ await loadWasm();
 // The library's data (index, covers) lives in IndexedDB; it is read once here so every player instance starts with it.
 const store = await new RvpStore().open();
 const audio = new RvpAudio();
+// The browser's own video decoders (WebCodecs), for HEVC and the like; probed once, in the background.
+const platformVideo = new RvpPlatformVideo();
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 // Now-playing in the browser's media controls (lock screen, media keys) through the Media Session API.
 const media = new RvpMediaSession();
@@ -115,7 +118,7 @@ function guarded(p) {
 let player = null;
 let lastSnapshot = { state: "idle" };
 function makePlayer() {
-  const p = new glue.WebPlayer(canvas, audio, reduceMotion.matches);
+  const p = new glue.WebPlayer(canvas, audio, reduceMotion.matches, platformVideo);
   p.set_media_session(media);
   p.set_store(store);
   for (const [key, bytes] of store.mem) p.store_preload(key, bytes);
@@ -607,6 +610,8 @@ window.rvp = {
   visualizer: (on) => { visualizerOn = on; player.enable_visualizer(on); },
   vizState: () => JSON.parse(player.viz_state()),
   audio: () => audio.debug(),
+  /** What the browser's own decoders (WebCodecs) can do, for tests. */
+  platformVideo: async () => { await platformVideo.ready; return { available: platformVideo.available, supported: platformVideo.supported }; },
   audioReset: () => audio.resetStats(),
   /** RGBA bytes of a canvas region (physical pixels). */
   pixels: (x, y, w, h) => Array.from(canvas.getContext("2d").getImageData(x, y, w, h).data),

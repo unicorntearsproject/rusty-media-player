@@ -27,6 +27,8 @@ pub fn frame_raw(frame: &VideoFrame, dest: Rect, nearest: bool) -> Option<sys::V
         format: match frame.format {
             PixelFormat::Yuv420p8 => video::FORMAT_YUV420_8,
             PixelFormat::Yuv420p10 => video::FORMAT_YUV420_10,
+            // Rusty Bucket has no platform decoder, so no packed picture reaches it; say so rather than guess a layout.
+            PixelFormat::Rgba8 => return None,
         },
         matrix: match frame.matrix {
             ColorMatrix::Bt601 => video::MATRIX_BT601,

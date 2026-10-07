@@ -57,12 +57,15 @@ impl CodecFactory for DefaultCodecs {
     }
 
     fn video(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
-        let ours = match info.codec.as_str() {
-            "av1" => rvp_codec_av1::av1_decoder(info),
-            "h264" => rvp_codec_h264::h264_decoder(info),
-            "vp9" => rvp_codec_vp9::vp9_decoder(info),
-            other => Err(Error::Unsupported(format!("video codec `{other}`"))),
-        };
+        let ours = rvp_core::screened(
+            || match info.codec.as_str() {
+                "av1" => rvp_codec_av1::av1_decoder(info),
+                "h264" => rvp_codec_h264::h264_decoder(info),
+                "vp9" => rvp_codec_vp9::vp9_decoder(info),
+                other => Err(Error::Unsupported(format!("video codec `{other}`"))),
+            },
+            info,
+        );
         let mut dec = rvp_core::open_video(ours, self.platform.as_ref(), info)?;
         if info.codec == "h264" && self.platform.is_some() {
             dec = Box::new(rvp_core::FallbackVideo::new(dec, self.platform.clone(), info.clone()));

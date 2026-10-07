@@ -11,8 +11,10 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-/// The decoders linked into the browser build.
-struct WebCodecs;
+/// The decoders linked into the browser build, and the browser's own (WebCodecs) behind them for what ours do not decode.
+struct WebCodecs {
+    platform: Option<Rc<dyn rvp_core::PlatformVideo>>,
+}
 
 impl CodecFactory for WebCodecs {
     fn audio(&self, info: &StreamInfo) -> CoreResult<Box<dyn AudioDecoder>> {
@@ -21,21 +23,33 @@ impl CodecFactory for WebCodecs {
 
     fn video_light(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         // Posters: on the calling thread with the least memory, never on the worker threads the film being watched needs.
-        match info.codec.as_str() {
-            "av1" => rvp_codec_av1::av1_decoder_light(info),
-            "h264" => rvp_codec_h264::h264_decoder_with(info, None, None),
-            _ => build_video(info),
-        }
+        let ours = rvp_core::screened(
+            || match info.codec.as_str() {
+                "av1" => rvp_codec_av1::av1_decoder_light(info),
+                "h264" => rvp_codec_h264::h264_decoder_with(info, None, None),
+                _ => build_video(info),
+            },
+            info,
+        );
+        rvp_core::open_video(ours, self.platform.as_ref(), info)
     }
 
     fn video(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         // With shared memory the decoder runs on a worker thread of its own, so decoding never competes with the UI
         // thread; without it the decoder runs inside the tick as before.
-        if rvp_par::available() && matches!(info.codec.as_str(), "av1" | "h264" | "vp9") {
-            let info = info.clone();
-            return Ok(Box::new(rvp_par::ThreadedVideoDecoder::new(Box::new(move || build_video(&info)))));
-        }
-        build_video(info)
+        let ours = rvp_core::screened(
+            || {
+                if rvp_par::available() && matches!(info.codec.as_str(), "av1" | "h264" | "vp9") {
+                    let info = info.clone();
+                    return Ok(Box::new(rvp_par::ThreadedVideoDecoder::new(Box::new(move || {
+                        build_video(&info)
+                    }))) as Box<dyn VideoDecoder>);
+                }
+                build_video(info)
+            },
+            info,
+        );
+        rvp_core::open_video(ours, self.platform.as_ref(), info)
     }
 }
 
@@ -124,6 +138,7 @@ impl WebPlayer {
         canvas: web_sys::HtmlCanvasElement,
         audio: JsAudio,
         reduce_motion: bool,
+        platform: Option<crate::webcodecs::JsPlatformVideo>,
     ) -> Result<WebPlayer, JsValue> {
         std::panic::set_hook(Box::new(|info| {
             web_sys::console::error_1(&JsValue::from_str(&info.to_string()))
@@ -144,7 +159,9 @@ impl WebPlayer {
             net: crate::net::WebNet,
             writer: crate::writer::WebWriter,
         };
-        let app = App::new(Rc::new(WebCodecs), UiConfig { reduce_motion });
+        let platform: Option<Rc<dyn rvp_core::PlatformVideo>> = platform
+            .map(|js| Rc::new(crate::webcodecs::WebPlatform::new(js)) as Rc<dyn rvp_core::PlatformVideo>);
+        let app = App::new(Rc::new(WebCodecs { platform }), UiConfig { reduce_motion });
         Ok(WebPlayer { host, app, next_file: 0 })
     }
 

@@ -27,6 +27,10 @@ impl<F> WithPlatform<F> {
     }
 
     fn wrap(&self, ours: Result<Box<dyn VideoDecoder>>, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
+        let ours = match rvp_core::ours_refuses(info) {
+            Some(e) => Err(e),
+            None => ours,
+        };
         let dec = open_video(ours, self.platform.as_ref(), info)?;
         // A codec of ours that opens and then refuses the stream (10-bit H.264) moves to the platform on the first packet.
         if info.codec == "h264" && self.platform.is_some() {

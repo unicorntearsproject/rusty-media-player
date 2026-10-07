@@ -40,10 +40,96 @@ pub fn platform_codec(codec: &str) -> bool {
     matches!(codec, "hevc" | "h264")
 }
 
+/// The bit depth an `avcC` record declares for luma (8 when the record does not say: only the High profiles above 8-bit carry it).
+pub fn avcc_bit_depth(avcc: &[u8]) -> u8 {
+    // configurationVersion, profile, compatibility, level, lengthSize, then the sets of parameter sets.
+    if avcc.len() < 7 || !matches!(avcc[1], 100 | 110 | 122 | 144 | 244) {
+        return 8;
+    }
+    let mut at = 5;
+    let sps_count = (avcc[at] & 0x1f) as usize;
+    at += 1;
+    for _ in 0..sps_count {
+        let Some(n) = avcc.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else {
+            return 8;
+        };
+        at += 2 + n;
+    }
+    let Some(pps_count) = avcc.get(at).map(|b| *b as usize) else { return 8 };
+    at += 1;
+    for _ in 0..pps_count {
+        let Some(n) = avcc.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else {
+            return 8;
+        };
+        at += 2 + n;
+    }
+    // chroma_format (6 reserved bits + 2), bit_depth_luma_minus8 (5 reserved + 3).
+    avcc.get(at + 1).map_or(8, |b| 8 + (b & 7))
+}
+
+/// A stream our own decoders cannot take though they would open it: 10-bit H.264 (its parameter sets say so up front, so the choice
+/// is made before any decoder, and any thread, is built). `None` for everything else.
+pub fn ours_refuses(info: &StreamInfo) -> Option<Error> {
+    (info.codec == "h264" && avcc_bit_depth(&info.extra_data) > 8)
+        .then(|| Error::Unsupported(String::from("bit depth above 8 or lossless coding")))
+}
+
+/// The RFC 6381 codec string of a stream from its configuration record (`hvc1.1.6.L93.B0`, `avc1.6e001f`), as WebCodecs and the
+/// system decoders name a configuration. `None` when the record is missing or too short.
+pub fn codec_string(info: &StreamInfo) -> Option<String> {
+    let x = &info.extra_data;
+    match info.codec.as_str() {
+        "hevc" => {
+            // hvcC: version, space/tier/profile, 32 compatibility flags, 48 constraint flags, level.
+            if x.len() < 13 {
+                return None;
+            }
+            let space = match x[1] >> 6 {
+                1 => "A",
+                2 => "B",
+                3 => "C",
+                _ => "",
+            };
+            let (tier, profile) = (if x[1] & 0x20 != 0 { 'H' } else { 'L' }, x[1] & 0x1f);
+            let compat = u32::from_be_bytes([x[2], x[3], x[4], x[5]]).reverse_bits();
+            let mut out = format!("hvc1.{space}{profile}.{compat:x}.{tier}{}", x[12]);
+            let mut constraints: Vec<u8> = x[6..12].to_vec();
+            while constraints.last() == Some(&0) {
+                constraints.pop();
+            }
+            if constraints.is_empty() {
+                constraints.push(0);
+            }
+            for b in constraints {
+                out.push_str(&format!(".{b:X}"));
+            }
+            Some(out)
+        }
+        "h264" if x.len() >= 4 => Some(format!("avc1.{:02x}{:02x}{:02x}", x[1], x[2], x[3])),
+        _ => None,
+    }
+}
+
+/// The profile of an HEVC stream (`general_profile_idc`: 1 Main, 2 Main 10, 3 Main Still Picture), from its `hvcC`.
+pub fn hevc_profile(info: &StreamInfo) -> Option<u8> {
+    (info.codec == "hevc" && info.extra_data.len() >= 13).then(|| info.extra_data[1] & 0x1f)
+}
+
 /// The text a failed handoff adds to an `Unsupported` message: `video codec `hevc` [WebCodecs: no HEVC decoder here]`. The application
 /// reads the square brackets to say what the user can do.
 pub fn with_platform_reason(message: &str, platform: &str, why: &str) -> String {
     format!("{message} [{platform}: {why}]")
+}
+
+/// `ours` unless the stream is one of ours-refuses (see [`ours_refuses`]), in which case the refusal.
+pub fn screened(
+    ours: impl FnOnce() -> Result<Box<dyn VideoDecoder>>,
+    info: &StreamInfo,
+) -> Result<Box<dyn VideoDecoder>> {
+    match ours_refuses(info) {
+        Some(e) => Err(e),
+        None => ours(),
+    }
 }
 
 /// Build the video decoder for `info`: `ours` (the result of the codec crates), else the platform's when ours does not know the codec,
@@ -220,6 +306,48 @@ mod tests {
         fn open(&self, _: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
             Ok(Box::new(Gray(None)))
         }
+    }
+
+    #[test]
+    fn codec_strings_follow_rfc_6381() {
+        let mut i = info("hevc");
+        // Main profile, level 4.0 (120), compat flags 0x60000000, constraints 0x90 00 00 00 00 00.
+        i.extra_data = vec![1, 0x01, 0x60, 0, 0, 0, 0x90, 0, 0, 0, 0, 0, 120];
+        assert_eq!(codec_string(&i).unwrap(), "hvc1.1.6.L120.90");
+        assert_eq!(hevc_profile(&i), Some(1));
+        // Main 10, high tier, level 5.1 (153), no constraint bits.
+        i.extra_data = vec![1, 0x22, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 153];
+        assert_eq!(codec_string(&i).unwrap(), "hvc1.2.4.H153.0");
+        i.extra_data.truncate(5);
+        assert_eq!(codec_string(&i), None);
+        let mut a = info("h264");
+        a.extra_data = vec![1, 0x6e, 0x00, 0x1f, 0xff];
+        assert_eq!(codec_string(&a).unwrap(), "avc1.6e001f");
+        assert_eq!(codec_string(&info("vp9")), None);
+    }
+
+    #[test]
+    fn the_avcc_record_says_the_bit_depth_of_a_high_profile_stream() {
+        // version 1, High 4:4:4... profile 110 (High 10), compat, level 31, 4-byte lengths, one SPS of 3 bytes, one PPS of 2, then
+        // chroma_format 1 (4:2:0), bit_depth_luma_minus8 2, bit_depth_chroma_minus8 2, no extended SPS.
+        let mut r = vec![1u8, 110, 0, 31, 0xff, 0xe1, 0, 3, 0x67, 0x6e, 0x1f, 1, 0, 2, 0x68, 0xee];
+        r.extend_from_slice(&[0xfc | 1, 0xf8 | 2, 0xf8 | 2, 0]);
+        assert_eq!(avcc_bit_depth(&r), 10);
+        // The same record for an 8-bit High stream, a Main profile record (which has no such fields), and junk.
+        let mut r8 = r.clone();
+        let n = r8.len();
+        r8[n - 3] = 0xf8;
+        assert_eq!(avcc_bit_depth(&r8), 8);
+        let main = vec![1u8, 77, 0, 31, 0xff, 0xe1, 0, 3, 0x67, 0x4d, 0x1f, 1, 0, 2, 0x68, 0xee];
+        assert_eq!(avcc_bit_depth(&main), 8);
+        assert_eq!(avcc_bit_depth(&[1, 110]), 8);
+        assert_eq!(avcc_bit_depth(&r[..12]), 8, "a truncated record");
+        let mut i = info("h264");
+        i.extra_data = r;
+        assert!(matches!(ours_refuses(&i), Some(Error::Unsupported(_))));
+        i.extra_data = main;
+        assert!(ours_refuses(&i).is_none());
+        assert!(ours_refuses(&info("hevc")).is_none(), "only 10-bit H.264 is pre-screened");
     }
 
     #[test]

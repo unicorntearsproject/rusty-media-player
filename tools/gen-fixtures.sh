@@ -556,6 +556,7 @@ gen_levels() {
 # them (needs libx265; without it the set is skipped and the tests that use it skip).
 gen_hevc() {
   local d="$out/hevc"; mkdir -p "$d"
+  [[ -f "$d/.done" && -z "${RVP_FIXTURE_FORCE:-}" ]] && return 0
   local v=(-f lavfi -i "testsrc2=size=320x240:rate=25:duration=4") a=(-f lavfi -i "sine=frequency=440:sample_rate=48000:duration=4")
   local enc; enc="$(ffmpeg -hide_banner -encoders 2>/dev/null || true)"
   [[ "$enc" == *libx265* ]] || { echo "libx265 missing: no HEVC fixtures"; return 0; }
@@ -563,6 +564,7 @@ gen_hevc() {
   ff "${v[@]}" "${a[@]}" -c:v libx265 -preset veryfast -x265-params log-level=error:keyint=12 -pix_fmt yuv420p10le -tag:v hvc1 -c:a aac -b:a 64k -ac 2 -shortest "$d/hevc10_aac.mp4"
   ff "${v[@]}" "${a[@]}" -c:v libx265 -preset veryfast -x265-params log-level=error:keyint=12 -pix_fmt yuv420p -c:a flac -ac 2 -shortest "$d/hevc_flac.mkv"
   ff "${v[@]}" "${a[@]}" -c:v libx264 -preset veryfast -g 12 -pix_fmt yuv420p10le -c:a aac -b:a 64k -ac 2 -shortest "$d/h264_10bit.mp4"
+  touch "$out/hevc/.done"
 }
 
 fixture_set="${RVP_FIXTURE_SET:-all}"

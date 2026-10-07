@@ -189,6 +189,9 @@ pub enum PixelFormat {
     Yuv420p8,
     /// Planar 4:2:0, 10 bits per sample stored in 16-bit little-endian words.
     Yuv420p10,
+    /// Packed RGBA, 8 bits per channel, in `planes[0]` (the other planes are empty): what a platform decoder hands over when the system
+    /// already converted the picture (HDR mapped to SDR, any chroma layout). `matrix` and `range` are then ignored.
+    Rgba8,
 }
 
 /// YUV to RGB matrix.
