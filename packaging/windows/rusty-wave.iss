@@ -19,7 +19,7 @@
 #define AppExe "rusty-wave.exe"
 #define AppId "io.github.unicorntearsproject.RustyWave"
 #define AppPublisher "Rusty Wave contributors"
-#define AppURL "https://github.com/unicorntearsproject/rusty-video-player"
+#define AppURL "https://github.com/unicorntearsproject/rusty-media-player"
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif

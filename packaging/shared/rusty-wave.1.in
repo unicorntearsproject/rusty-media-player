@@ -96,6 +96,6 @@ Calmer animations and no beat pulses in the visualizer.
 .SH EXIT STATUS
 0 on a normal exit, 1 if the window could not be opened, 2 for a bad command line.
 .SH BUGS
-https://github.com/unicorntearsproject/rusty-video-player/issues
+https://github.com/unicorntearsproject/rusty-media-player/issues
 .SH COPYRIGHT
 MIT OR Apache-2.0.

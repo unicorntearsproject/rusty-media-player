@@ -31,11 +31,11 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/unicorntearsproject/rusty-video-player"
+repository = "https://github.com/unicorntearsproject/rusty-media-player"
 publish = false
 
 [workspace.lints.rust]
@@ -86,13 +86,30 @@ opt-level = 3
 debug-assertions = false
 overflow-checks = false
 
-# The SIMD kernels call intrinsics through thin wrappers; unoptimised, every lane operation is a real call and playback in a debug build
-# falls behind real time. These two crates (kernels and H.264) get light optimisation in dev and test builds.
+# Playback in a debug build must keep real time on a small shared CI runner (the desktop smoke tests check the clock): the crates on the
+# playback path get light optimisation in dev and test builds. The SIMD kernels also call intrinsics through thin wrappers, which unoptimised
+# are real calls per lane operation.
 [profile.dev.package.rvp-core]
 opt-level = 2
 [profile.dev.package.rvp-codec-h264]
 opt-level = 2
+[profile.dev.package.rvp-ui]
+opt-level = 2
+[profile.dev.package.rvp-app]
+opt-level = 2
+[profile.dev.package.rvp-host-desktop]
+opt-level = 2
+[profile.dev.package.rvp-par]
+opt-level = 2
 [profile.test.package.rvp-core]
 opt-level = 2
 [profile.test.package.rvp-codec-h264]
+opt-level = 2
+[profile.test.package.rvp-ui]
+opt-level = 2
+[profile.test.package.rvp-app]
+opt-level = 2
+[profile.test.package.rvp-host-desktop]
+opt-level = 2
+[profile.test.package.rvp-par]
 opt-level = 2

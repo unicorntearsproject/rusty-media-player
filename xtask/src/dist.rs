@@ -11,6 +11,7 @@ use std::process::Command;
 mod macos;
 mod manifest;
 mod publish;
+mod rbcheck;
 mod sign;
 
 const APP_ID: &str = "io.github.unicorntearsproject.RustyWave";
@@ -32,7 +33,7 @@ targets:
   stage        the installed tree (usr/...) with the stamped metadata, in target/dist/linux/stage
   tarball      rusty-wave-<ver>-linux-x86_64.tar.gz of that tree (and the source tarball the Flatpak builds from)
   deb          rusty-wave_<ver>_amd64.deb (cargo-deb)
-  rpm          rusty-wave-<ver>-1.x86_64.rpm (cargo-generate-rpm)
+  rpm          rusty-wave-<ver>-<release>.x86_64.rpm (cargo-generate-rpm; 1.0.0-rc1 is 1.0.0-0.1.rc1)
   appimage     rusty-wave-<ver>-x86_64.AppImage (appimagetool, with update information) and its .zsync (zsyncmake)
   flatpak-sources   regenerate packaging/flatpak/cargo-sources.json from Cargo.lock (flatpak-cargo-generator)
   flatpak      build the Flatpak with flatpak-builder from the working tree and bundle it (.flatpak);
@@ -45,7 +46,8 @@ targets:
   pwa          the web app (cargo xtask web) as rusty-wave-web-<ver>.zip
   apt-repo     a signed apt repository of the .deb in target/dist/apt-repo (needs --sign)
   checksums    SHA256SUMS over everything in target/dist/release (and signatures if --sign or RVP_SIGN_CMD is set)
-  verify       check every signature in target/dist against packaging/keys/rusty-wave-release.asc in a throwaway keyring
+  verify       check every signature in target/dist against packaging/keys/rusty-wave-release.asc in a throwaway keyring;
+               with --target rustybucket: check the directory `publish --target rustybucket` staged against Rusty Bucket's input contract
   manifest     rusty-wave-latest.json (the in-app updater's manifest) of what is built in target/dist/release; --base-url U sets where the
                files will be served (an https:// URL or file:///path, default the bucket); --windows, --macos, --flatpak, --web, --tarball (or --all) list those files too
   publish      copy the verified deb, rpm and AppImage (with .asc, .zsync and a versioned SHA256SUMS) to /home/jj/projects/_software-dist/rusty-wave/ and
@@ -151,6 +153,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "pwa" => cx.pwa(),
         "checksums" => cx.checksums(),
         "apt-repo" => cx.apt_repo(),
+        "verify" if cx.rustybucket => cx.verify_rustybucket(),
         "verify" => cx.verify(),
         "macos" => cx.macos(),
         "manifest" => cx.manifest(extras),
@@ -818,7 +821,7 @@ impl Ctx {
         write(
             &stage.join("README.txt"),
             format!(
-                "Rusty Wave {}\r\n\r\nPlays video and music. Run rusty-wave.exe, or use Open with on a media file.\r\nrusty-wave --help lists the options.\r\nSettings and the library index are kept in %APPDATA%\\rusty-wave\\data.\r\nhttps://github.com/unicorntearsproject/rusty-video-player\r\n",
+                "Rusty Wave {}\r\n\r\nPlays video and music. Run rusty-wave.exe, or use Open with on a media file.\r\nrusty-wave --help lists the options.\r\nSettings and the library index are kept in %APPDATA%\\rusty-wave\\data.\r\nhttps://github.com/unicorntearsproject/rusty-media-player\r\n",
                 self.version
             )
             .as_bytes(),
@@ -1058,6 +1061,7 @@ impl Ctx {
                 }
             }
         }
+        flatpak_sources_cover_lockfile(&self.root)?;
         println!("metadata ok ({} media types)", types.len());
         Ok(())
     }
@@ -1100,6 +1104,33 @@ impl Ctx {
         }
         print!("{sums}");
         Ok(())
+    }
+}
+
+/// Every registry crate in Cargo.lock has an entry in `packaging/flatpak/cargo-sources.json` (the Flatpak builds offline from it): a new
+/// dependency without `cargo xtask dist flatpak-sources` breaks only the CI Flatpak job, so `dist check` catches it first.
+fn flatpak_sources_cover_lockfile(root: &Path) -> Result<(), String> {
+    let lock = fs::read_to_string(root.join("Cargo.lock")).map_err(|e| e.to_string())?;
+    let sources = fs::read_to_string(root.join("packaging/flatpak/cargo-sources.json")).map_err(|e| e.to_string())?;
+    let mut missing = Vec::new();
+    for block in lock.split("[[package]]").skip(1) {
+        let field = |k: &str| {
+            block.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix(" = \"")?.strip_suffix('"')).map(str::to_string)
+        };
+        let (Some(name), Some(version), Some(source)) = (field("name"), field("version"), field("source")) else {
+            continue;
+        };
+        if source.starts_with("registry+") && !sources.contains(&format!("\"cargo/vendor/{name}-{version}\"")) {
+            missing.push(format!("{name} {version}"));
+        }
+    }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "packaging/flatpak/cargo-sources.json is out of date, missing: {}; run `cargo xtask dist flatpak-sources`",
+            missing.join(", ")
+        ))
     }
 }
 
@@ -1159,6 +1190,11 @@ mod tests {
 #[cfg(test)]
 mod version_tests {
     use super::*;
+
+    #[test]
+    fn the_flatpak_sources_cover_every_locked_crate() {
+        flatpak_sources_cover_lockfile(&Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
+    }
 
     #[test]
     fn a_release_candidate_is_spelled_the_way_each_package_system_orders_it() {

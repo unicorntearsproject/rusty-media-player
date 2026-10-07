@@ -8,7 +8,9 @@
 # CI only runs on changes: the first job (`gate`) skips everything when this commit already built successfully (manual runs) or the tag's
 # release already has its files; `force` overrides. No schedules.
 #
-# Signing is optional and uses repository secrets when they exist (see docs/packaging.md); without them the files are unsigned.
+# Every release file gets a detached .asc by the release key (the repository secret RELEASE_GPG_PRIVATE_KEY, a signing-only subkey): there is no
+# unsigned path, and a missing key fails the first job. The publish job lays the files out as Rusty Bucket's publisher requires (docs/packaging.md,
+# "Rusty Bucket's release site") and hands them to its action. Windows and macOS code signing stay optional (their own secrets).
 name: Release
 
 on:
@@ -22,6 +24,10 @@ on:
         default: ''
       force:
         description: 'Run even if this commit already built successfully'
+        type: boolean
+        default: false
+      publish_dry_run:
+        description: 'Also run the publish job as a dry run (version must be the one in Cargo.toml): signs, lays out and checks the release directory and runs the RBA action with dry-run, writing nothing'
         type: boolean
         default: false
 
@@ -45,7 +51,7 @@ jobs:
     outputs:
       run: ${{ steps.g.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: g
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,11 +66,28 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Everything is signed, so a release (or a publish dry run) without the key fails here, not after an hour of builds.
+      - name: The release signing key is there and can sign
+        if: github.ref_type == 'tag' || inputs.publish_dry_run
+        shell: bash
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$GPG_PRIVATE_KEY" ]]; then
+            echo "::error::the repository secret RELEASE_GPG_PRIVATE_KEY is not set: every release file must be signed"
+            exit 1
+          fi
+          export GNUPGHOME="$RUNNER_TEMP/gpg-check"; mkdir -m 700 "$GNUPGHOME"
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --list-secret-keys --with-colons E13FF843723D54068E45A3FF54BF2FA407093CEE | grep -q '^fpr:'
+          echo probe > "$RUNNER_TEMP/probe"
+          gpg --batch --armor --detach-sign --local-user E13FF843723D54068E45A3FF54BF2FA407093CEE --output "$RUNNER_TEMP/probe.asc" "$RUNNER_TEMP/probe"
       - id: v
         shell: bash
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          PUBLISH_DRY_RUN: ${{ inputs.publish_dry_run }}
         run: |
           cargo_version=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml | head -1)
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -75,6 +98,10 @@ jobs:
             fi
           else
             v="${INPUT_VERSION:-${cargo_version}-ci}"
+            if [[ "$PUBLISH_DRY_RUN" == "true" && "$v" != "$cargo_version" ]]; then
+              echo "::error::a publish dry run needs version = Cargo.toml's $cargo_version (the deb and rpm carry it)"
+              exit 1
+            fi
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "Building $v"
@@ -85,17 +112,17 @@ jobs:
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04   # glibc 2.35: the binary runs on that and anything newer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libasound2-dev libdbus-1-dev libxkbcommon-dev libwayland-dev \
             xvfb xauth ffmpeg python3 zsync desktop-file-utils appstream squashfs-tools file fuse3 libfuse2 playerctl dbus-x11 fonts-noto-cjk libxkbcommon-x11-0 libx11-6 libxcursor1 libxi6 libxrandr2 libwayland-client0
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{ env.RVP_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-deb
       - name: Check the metadata
@@ -110,31 +137,32 @@ jobs:
           cargo xtask dist stage --version "$v"
           cargo xtask dist tarball --version "$v" --no-build
           cargo xtask dist deb --version "$v" --no-build
-          cargo xtask dist appimage --version "$v" --no-build
-      - uses: actions/upload-artifact@v4
+          cargo xtask dist appimage --version "$v" --no-build --target rustybucket
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-stage
           path: target/dist/linux/stage
           retention-days: 3
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-packages
           path: |
             target/dist/release/*.deb
             target/dist/release/*.AppImage
+            target/dist/release/*.AppImage.zsync
             target/dist/release/rusty-wave-*-linux-x86_64.tar.gz
 
   rpm:
     name: .rpm
     needs: [gate, version, linux]
     if: needs.gate.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: fedora:44   # rpm's own dependency scan (find-requires) reads the binary and writes the exact requirements
     steps:
       - name: Tools
         run: dnf install -y git tar gzip rust cargo rpm-build which
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: linux-stage
           path: target/dist/linux/stage
@@ -151,7 +179,7 @@ jobs:
         run: |
           dnf install -y ./target/dist/release/*.rpm xorg-x11-server-Xvfb xauth libX11 libXcursor libXi libXrandr libwayland-client
           rusty-wave --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rpm
           path: target/dist/release/*.rpm
@@ -162,10 +190,10 @@ jobs:
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Write the manifest and the source tarball
         run: cargo xtask dist flatpak --prepare-only --version "${{ needs.version.outputs.version }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flatpak-input
           path: |
@@ -177,13 +205,13 @@ jobs:
     name: Flatpak
     needs: [gate, version, flatpak-prepare]
     if: needs.gate.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: flatpak-input
           path: flatpak-input
@@ -195,14 +223,14 @@ jobs:
           cp flatpak-input/target/dist/release/*-src.tar.gz target/dist/release/
           # The manifest names these by absolute path of the runner that wrote it; rewrite them for this workspace.
           sed -i "s#/home/runner/work/[^/]*/[^/]*#$GITHUB_WORKSPACE#g" target/dist/flatpak/*.yml
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
         with:
           bundle: io.github.unicorntearsproject.RustyWave-${{ needs.version.outputs.version }}.flatpak
           manifest-path: target/dist/flatpak/io.github.unicorntearsproject.RustyWave.yml
           cache-key: flatpak-builder-${{ github.sha }}
           arch: x86_64
           branch: stable
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: flatpak
           path: '*.flatpak'
@@ -211,16 +239,16 @@ jobs:
     name: Windows exe, zip and installer
     needs: [gate, version]
     if: needs.gate.outputs.run == 'true'
-    runs-on: windows-latest
+    runs-on: windows-2025
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{ env.RVP_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Signing (only when the repository has a certificate)
@@ -254,7 +282,7 @@ jobs:
           "$RUNNER_TEMP/rusty-wave/rusty-wave.exe" --no-audio --no-media-keys --data-dir "$RUNNER_TEMP/rvpdata" --exit-after 4 --report "$RUNNER_TEMP/report.json"
           cat "$RUNNER_TEMP/report.json"
           "$RUNNER_TEMP/rusty-wave/unins000.exe" //VERYSILENT //SUPPRESSMSGBOXES
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows
           path: |
@@ -267,12 +295,12 @@ jobs:
     if: needs.gate.outputs.run == 'true'
     runs-on: macos-14   # Apple Silicon; the x86_64 half of the universal binary is cross-compiled
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{ env.RVP_TOOLCHAIN }}
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Check the metadata (Info.plist agrees with the installer's file types)
         run: cargo xtask dist check --version "${{ needs.version.outputs.version }}"
       - name: Unit tests of the desktop host
@@ -328,7 +356,7 @@ jobs:
           "$app" --no-audio --no-media-keys --data-dir "$RUNNER_TEMP/rvpdata" --exit-after 4 --report "$RUNNER_TEMP/report.json"
           cat "$RUNNER_TEMP/report.json"
           hdiutil detach "$RUNNER_TEMP/rw"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: macos
           path: target/dist/release/*.dmg
@@ -339,19 +367,19 @@ jobs:
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{ env.RVP_TOOLCHAIN }}
           targets: wasm32-unknown-unknown
       # The threaded wasm build (`pkg-mt/`, part of the web zip) rebuilds the standard library with atomics: nightly and rust-src.
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: nightly
           components: rust-src
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
       - name: Tools
@@ -376,14 +404,14 @@ jobs:
           npx playwright test pwa.spec.js
       - name: Zip
         run: cargo xtask dist pwa --version "${{ needs.version.outputs.version }}" --no-build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pwa
           path: target/dist/release/*web*.zip
 
   publish:
     name: Publish the release
-    if: needs.gate.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/v')
+    if: needs.gate.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/v') || inputs.publish_dry_run)
     needs: [gate, version, linux, rpm, flatpak, windows, macos, pwa]
     runs-on: ubuntu-22.04
     # The shared publish action signs in to Rusty Bucket's release site with this job's OIDC token (no long-lived secret for that), and
@@ -391,30 +419,38 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      RELEASE_KEY: E13FF843723D54068E45A3FF54BF2FA407093CEE
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
-          path: dist
+          toolchain: ${{ env.RVP_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: target/dist/release
           merge-multiple: true
           pattern: '{linux-packages,rpm,flatpak,windows,macos,pwa}'
-      - name: Checksums
-        run: |
-          cd dist
-          rm -f SHA256SUMS
-          sha256sum ./* > SHA256SUMS
-          cat SHA256SUMS
-      - name: Sign the checksums (only when the repository has a GPG key)
+      - name: Import the release signing key (no key, no release)
         env:
           GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
         run: |
-          if [[ -n "$GPG_PRIVATE_KEY" ]]; then
-            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign dist/SHA256SUMS
-          fi
+          test -n "$GPG_PRIVATE_KEY" || { echo "::error::RELEASE_GPG_PRIVATE_KEY is not set"; exit 1; }
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --list-secret-keys "$RELEASE_KEY"
+      - name: Sign every file, lay out the release directory and check it against the contract
+        run: |
+          ls -l target/dist/release
+          v="${{ needs.version.outputs.version }}"
+          cargo xtask dist checksums --sign-key "$RELEASE_KEY" --version "$v"
+          cargo xtask dist publish --target rustybucket --all --sign-key "$RELEASE_KEY" --version "$v"
+          cargo xtask dist verify --target rustybucket --version "$v"
+          ls -l target/dist/publish-rb/rusty-wave/release
       # Pinned to a commit of the shared infrastructure repository (never a branch).
-      - uses: unicorntearsproject/rba-infra/.github/actions/publish-release@bb6e713dd8253504dd9755908e8e7059f26097be
+      - uses: unicorntearsproject/rba-infra/.github/actions/publish-release@791d5111a630cd864558bb0895668d7972c23dd3
         with:
-          tag: ${{ github.ref_name }}
-          release-dir: dist
+          tag: v${{ needs.version.outputs.version }}
+          release-dir: target/dist/publish-rb/rusty-wave/release
           dispatch-token: ${{ secrets.RBA_WAVE_DISPATCH_TOKEN }}
+          dry-run: ${{ inputs.publish_dry_run && 'true' || 'false' }}

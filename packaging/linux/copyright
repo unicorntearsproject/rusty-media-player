@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: rusty-wave
-Upstream-Contact: https://github.com/unicorntearsproject/rusty-video-player/issues
-Source: https://github.com/unicorntearsproject/rusty-video-player
+Upstream-Contact: https://github.com/unicorntearsproject/rusty-media-player/issues
+Source: https://github.com/unicorntearsproject/rusty-media-player
 
 Files: *
 Copyright: Rusty Wave contributors

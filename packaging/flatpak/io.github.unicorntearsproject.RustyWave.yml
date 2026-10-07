@@ -53,7 +53,7 @@ modules:
     sources:
       # @APP-SOURCE@
       - type: git
-        url: https://github.com/unicorntearsproject/rusty-video-player.git
+        url: https://github.com/unicorntearsproject/rusty-media-player.git
         tag: v0.0.2
       # @END-APP-SOURCE@
       - cargo-sources.json

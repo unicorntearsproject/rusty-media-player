@@ -63,15 +63,18 @@ pub(super) fn assets(ver: &str, x: Extras) -> Vec<Asset> {
         Asset {
             key: "linux-deb",
             arch: "amd64",
-            name: format!("rusty-wave_{ver}_amd64.deb"),
+            name: format!("rusty-wave_{}_amd64.deb", ver.replacen('-', "~", 1)),
             alias: "rusty-wave-latest_amd64.deb".into(),
             zsync: None,
         },
         Asset {
             key: "linux-rpm",
             arch: "x86_64",
-            name: format!("rusty-wave-{ver}-1.x86_64.rpm"),
-            alias: "rusty-wave-latest-1.x86_64.rpm".into(),
+            name: {
+                let (v, r) = rpm_parts(ver);
+                format!("rusty-wave-{v}-{r}.x86_64.rpm")
+            },
+            alias: "rusty-wave-latest.x86_64.rpm".into(),
             zsync: None,
         },
     ];
@@ -399,7 +402,7 @@ mod tests {
         assert_eq!(base[0].alias, "rusty-wave-latest-x86_64.AppImage");
         assert_eq!(base[0].zsync.as_deref(), Some("rusty-wave-0.0.3-x86_64.AppImage.zsync"));
         assert_eq!(base[1].alias, "rusty-wave-latest_amd64.deb");
-        assert_eq!(base[2].alias, "rusty-wave-latest-1.x86_64.rpm");
+        assert_eq!(base[2].alias, "rusty-wave-latest.x86_64.rpm");
         let all = assets("0.0.3", Extras::ALL);
         let keys: Vec<_> = all.iter().map(|a| a.key).collect();
         assert_eq!(

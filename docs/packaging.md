@@ -8,7 +8,7 @@ Rusty Wave ships as a native desktop app (Linux and Windows; macOS in beta) and 
 | Binary + installed tree | `dist stage` | Rust; `--container` for a portable binary | `target/dist/linux/stage/usr/...` |
 | Tarball | `dist tarball` | | `rusty-wave-<ver>-linux-x86_64.tar.gz` (and `rusty-wave-<ver>-src.tar.gz`) |
 | .deb | `dist deb` | `cargo install cargo-deb` | `rusty-wave_<ver>_amd64.deb` |
-| .rpm | `dist rpm` | `cargo install cargo-generate-rpm`, rpm tools | `rusty-wave-<ver>-1.x86_64.rpm` |
+| .rpm | `dist rpm` | `cargo install cargo-generate-rpm`, rpm tools | `rusty-wave-<ver>-<release>.x86_64.rpm` |
 | AppImage | `dist appimage` | `appimagetool` (downloaded to `~/.local/bin` on first use), `zsyncmake` (`apt install zsync`, `dnf install zsync`) | `rusty-wave-<ver>-x86_64.AppImage` and `rusty-wave-<ver>-x86_64.AppImage.zsync` |
 | Flatpak | `dist flatpak [--sign]` | `flatpak-builder`, the 25.08 runtime, SDK and `rust-stable` extension | `io.github.unicorntearsproject.RustyWave-<ver>.flatpak` (with `--sign` also `.flatpakrepo`, `.flatpakref` and the repo in `<staging>/flatpak/repo`, staging being `/mnt/scratch/rvp-scratch/staging` or `$RVP_STAGING_DIR`) |
 | Windows exe + zip | `dist windows` | MSVC or GNU toolchain; on Linux the wine image (podman) | `rusty-wave-<ver>-windows-x64.zip` |
@@ -39,20 +39,20 @@ Per the project's distribution rule, each verified build goes to `/home/jj/proje
 The bucket (us-east-1) is publicly readable through its bucket policy, so a file is served at `https://ut-software-dist.s3.amazonaws.com/<key>` (the
 constant `DIST_BASE_URL` in `xtask/src/dist/manifest.rs`; the AppImage's update information and the manifest start with it).
 
-`cargo xtask dist publish --sign` first runs `dist verify`, takes `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-1.x86_64.rpm`, `rusty-wave-<ver>-x86_64.AppImage`
+`cargo xtask dist publish --sign` first runs `dist verify`, takes `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-<release>.x86_64.rpm`, `rusty-wave-<ver>-x86_64.AppImage`
 and its `.zsync` (plus `-x64-Setup.exe` and `-windows-x64.zip` with `--windows`, `-macos-universal.dmg` with `--macos`, only when they were built and verified in the same run),
 writes and signs `rusty-wave-<ver>-SHA256SUMS` over exactly those files, builds and signs the manifest, and checks both destinations (`ls` and `aws s3api head-object`
 per file): if any *versioned* file of this version exists in either, it stops before copying anything. Bump `version` in `Cargo.toml` for the next publish.
 `--dry-run` does all checks and copies nothing. Build the files with `dist stage --container`, then `dist deb|rpm|appimage --no-build --sign`, then
 `dist checksums --sign` (move old files out of `target/dist/release`, `linux/stage` and `appimage` first: stale files from an earlier name would be packaged or fail `verify`).
 
-**`--target rustybucket`** (prepared, not in use: the default target stays the `ut-software-dist` bucket until told otherwise) lays the same signed release out for
+**`--target rustybucket`** (what the CI `publish` job runs; the local default target stays the `ut-software-dist` bucket) lays the same signed release out for
 Rusty Bucket's release site instead of uploading it: `target/dist/publish-rb/rusty-wave/<version>/` holds the versioned files (every artifact with its `.asc`, and the
 versioned `SHA256SUMS`), `.../latest/` the `latest` aliases and the signed `rusty-wave-latest.json`. The manifest's URLs are `https://software.rustybucket.ai/rusty-wave/<version>/<file>`
 for every file, and only `zsync_url` names the alias (`.../latest/rusty-wave-latest-x86_64.AppImage.zsync`). The AppImage built with `dist appimage --target rustybucket` embeds that
 `latest/` zsync address as its update information, and its `.zsync` carries the absolute versioned AppImage URL (`.../<version>/rusty-wave-<version>-x86_64.AppImage`) with the
 `Length:` and `SHA-1`, so the `latest/` copy of the `.zsync` is byte for byte the versioned one. Uploading is Rusty Bucket's script
-(`../rusty-bucket-aws/infra/scripts/publish-release.sh`); nothing here runs it.
+(`../rusty-bucket-aws/infra/scripts/publish-release.sh`, or CI's pinned action); nothing here runs it. The directory that script takes is `target/dist/publish-rb/rusty-wave/release/`: exactly the versioned files, the `.zsync`, `rusty-wave-<v>-SHA256SUMS` (bare names), `rusty-wave-latest.json`, and a detached `.asc` next to each, by the release key (or its signing subkey); no `-latest` files, no subdirectories. `dist publish --target rustybucket` writes it and checks it against that contract (`xtask/src/dist/rbcheck.rs`, from `../rusty-bucket-aws/infra/docs/operations/publish-release.md`, "What the release directory must contain"); `dist verify --target rustybucket` repeats the check. Package spellings follow the contract: `rusty-wave_1.0.0~rc2_amd64.deb`, `rusty-wave-1.0.0-0.1.rc2.x86_64.rpm`; write pre-release counters as `rc.10`, not `rc10`.
 
 **Stable `latest` aliases.** After every versioned file is uploaded and confirmed by `head-object` (size must match), publish uploads byte copies under stable names
 (the only objects it ever overwrites; `Cache-Control: public, max-age=300`, versioned files get `immutable`), the manifest last, so a half-failed publish never points
@@ -62,7 +62,7 @@ for every file, and only `zsync_url` names the alias (`.../latest/rusty-wave-lat
 | --- | --- |
 | `rusty-wave-latest-x86_64.AppImage` (+ `.asc`) | the versioned AppImage |
 | `rusty-wave-latest-x86_64.AppImage.zsync` (+ `.asc`) | the versioned `.zsync` |
-| `rusty-wave-latest_amd64.deb`, `rusty-wave-latest-1.x86_64.rpm` (+ `.asc`) | the deb, the rpm |
+| `rusty-wave-latest_amd64.deb`, `rusty-wave-latest.x86_64.rpm` (+ `.asc`) | the deb, the rpm |
 | `rusty-wave-latest-x64-Setup.exe`, `rusty-wave-latest-windows-x64.zip` (+ `.asc`) | with `--windows` |
 | `rusty-wave-latest-macos-universal.dmg` (+ `.asc`) | with `--macos` |
 | `io.github.unicorntearsproject.RustyWave-latest.flatpak` (+ `.asc`) | the Flatpak bundle, with `--flatpak` |
@@ -223,7 +223,7 @@ threads fail falls back to `pkg/` and still starts offline next time). The page 
 Nothing runs on a push or a pull request, and nothing on a schedule (`dist check` fails if a workflow has a `schedule:` trigger). CI only runs on changes: the first job of
 both workflows, `gate` (`tools/ci/gate.sh`, needs `actions: read`), skips every other job when the same workflow already succeeded on this commit (manual runs) or, for a tag
 run, when that tag's release already has assets; a skipped workflow is green. The `force` input of a manual run overrides the gate. A manual run is a dry run: it builds and tests every format under the version you type and keeps the files as
-workflow artifacts. A tag run's last job (`publish`) gathers the files, writes `SHA256SUMS` (signed when a key is configured) and hands them to the shared `publish-release` action of `unicorntearsproject/rba-infra` (pinned to a commit), which publishes them to Rusty Bucket's release site with the job's OIDC token (`id-token: write`, `contents: read`, no `environment:`) and dispatches the web player's update with `RBA_WAVE_DISPATCH_TOKEN`. Jobs: gate, Linux (metadata check, Xvfb smoke tests with
+workflow artifacts. A tag run's last job (`publish`) gathers the files, signs every file (a detached `.asc`, no unsigned path: a missing key fails the first job), lays the release directory out with `dist publish --target rustybucket --all`, checks it with `dist verify --target rustybucket` and hands it to the shared `publish-release` action of `unicorntearsproject/rba-infra` (pinned to a commit), which publishes them to Rusty Bucket's release site with the job's OIDC token (`id-token: write`, `contents: read`, no `environment:`) and dispatches the web player's update with `RBA_WAVE_DISPATCH_TOKEN`. Jobs: gate, Linux (metadata check, Xvfb smoke tests with
 `playerctl`, deb, AppImage, tarball), rpm (Fedora container, install test), Flatpak (flatpak-builder action), Windows (exe, zip, installer, silent install
 test), macOS (universal app and dmg on `macos-14`, Developer ID signing and notarization only when the Apple secrets exist, mount and `--version` smoke test), PWA (build and Playwright), publish.
 
@@ -241,8 +241,10 @@ It is a dedicated key (not the Unicorn Viz one) and mirrors how that one is kept
 (protected by the account and disk, as `unicorn-viz`'s is; add one with `gpg --edit-key E13FF843723D54068E45A3FF54BF2FA407093CEE passwd` and gpg-agent
 will ask), the revocation certificate that `gpg` wrote at creation, and the public key committed. Outside the repository, in `~/.local/share/rusty-wave-release/`
 (directory 0700, files 0600): `revocation-<fingerprint>.rev` (publish it only to revoke the key) and `rusty-wave-release-secret.asc` (a secret export, for
-backup or for CI). Move both to offline storage; never commit them. The repository secret `RELEASE_GPG_PRIVATE_KEY` for CI is not set and nothing
-uploads a secret; `release.yml` signs `SHA256SUMS` only if the maintainer adds that secret. To extend the expiry before 2028:
+backup or for CI). Move both to offline storage; never commit them. CI signs with a **signing-only subkey** of this key (ed25519, `[S]`, created 2026-10-07, expires 2028-10-06, fingerprint `2FD1848657B706A3576877E071DB2DB049A19B84`), exported with
+`gpg --export-secret-subkeys` (the primary is a stub) and stored as the repository secret `RELEASE_GPG_PRIVATE_KEY` (no passphrase); the primary never leaves the maintainer's keyring.
+The public key in `packaging/keys/` carries the subkey, cross-certified; signatures by it verify with the primary's fingerprint (the last field of gpg's `VALIDSIG` line), and
+signatures made earlier by the primary still verify. To extend the expiry before 2028:
 `gpg --quick-set-expire <fingerprint> 2y` and re-export `packaging/keys/*`.
 
 **Signing locally**: `cargo xtask dist <target> --sign` (key from `RVP_GPG_KEY` or `--sign-key`, default the one in `packaging/keys`; its secret half

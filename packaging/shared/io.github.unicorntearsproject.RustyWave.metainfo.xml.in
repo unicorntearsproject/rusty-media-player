@@ -26,9 +26,9 @@
   </description>
   <launchable type="desktop-id">io.github.unicorntearsproject.RustyWave.desktop</launchable>
   <icon type="stock">io.github.unicorntearsproject.RustyWave</icon>
-  <url type="homepage">https://github.com/unicorntearsproject/rusty-video-player</url>
-  <url type="bugtracker">https://github.com/unicorntearsproject/rusty-video-player/issues</url>
-  <url type="vcs-browser">https://github.com/unicorntearsproject/rusty-video-player</url>
+  <url type="homepage">https://github.com/unicorntearsproject/rusty-media-player</url>
+  <url type="bugtracker">https://github.com/unicorntearsproject/rusty-media-player/issues</url>
+  <url type="vcs-browser">https://github.com/unicorntearsproject/rusty-media-player</url>
   <categories>
     <category>AudioVideo</category>
     <category>Audio</category>
@@ -71,19 +71,19 @@
   </provides>
   <screenshots>
     <screenshot type="default">
-      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-video-player/main/docs/screenshots/desktop/01-library-albums.png</image>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-media-player/main/docs/screenshots/desktop/01-library-albums.png</image>
       <caption>The music library: albums with their cover art</caption>
     </screenshot>
     <screenshot>
-      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-video-player/main/docs/screenshots/desktop/02-now-playing.png</image>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-media-player/main/docs/screenshots/desktop/02-now-playing.png</image>
       <caption>Now playing, with what comes next</caption>
     </screenshot>
     <screenshot>
-      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-video-player/main/docs/screenshots/desktop/03-visualizer.png</image>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-media-player/main/docs/screenshots/desktop/03-visualizer.png</image>
       <caption>The audio visualizer, full window</caption>
     </screenshot>
     <screenshot>
-      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-video-player/main/docs/screenshots/desktop/04-video.png</image>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/unicorntearsproject/rusty-media-player/main/docs/screenshots/desktop/04-video.png</image>
       <caption>The video player</caption>
     </screenshot>
   </screenshots>

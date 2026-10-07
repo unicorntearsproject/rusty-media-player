@@ -3,7 +3,7 @@
 //! either place. Only the stable `latest` aliases (and the update manifest) are overwritten, and only last, after every versioned file is in
 //! place and checked with `head-object`, so a half-failed publish never points `latest` at missing files.
 //!
-//! Published (names carry the version, as the files come out of the build): `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-1.x86_64.rpm`,
+//! Published (names carry the version, as the files come out of the build): `rusty-wave_<ver>_amd64.deb`, `rusty-wave-<ver>-<release>.x86_64.rpm`,
 //! `rusty-wave-<ver>-x86_64.AppImage` and its `.zsync`, a detached `.asc` for each, `rusty-wave-<ver>-SHA256SUMS` and its `.asc`. The Windows
 //! installer and zip go along only with `--windows`, the macOS dmg only with `--macos`, the Flatpak bundle with `--flatpak`, the web app zip
 //! with `--web`, the Linux tarball with `--tarball` (`--all` for the lot; say so only when they were built and verified in the same run). Aliases (`rusty-wave-latest-...`, byte copies with copies of the signatures) and `rusty-wave-latest.json` with its `.asc` follow.
@@ -127,9 +127,16 @@ impl Ctx {
         for (_, alias) in &plan.aliases {
             copy(&stage.join(alias), &site.join("latest").join(alias))?;
         }
+        // The directory their publisher takes: the versioned files, the signed manifest, and nothing else.
+        let rel = self.rb_release_dir();
+        for f in plan.versioned.iter().chain([MANIFEST_NAME.to_string(), format!("{MANIFEST_NAME}.asc")].iter()) {
+            copy(&stage.join(f), &rel.join(f))?;
+        }
+        self.verify_rustybucket()?;
         println!("{}", site.display());
         println!(
-            "upload with ../rusty-bucket-aws/infra/scripts/publish-release.sh (Rusty Bucket's script; not run by this command)"
+            "upload with ../rusty-bucket-aws/infra/scripts/publish-release.sh {} (Rusty Bucket's script; not run by this command)",
+            rel.display()
         );
         Ok(())
     }
@@ -148,7 +155,7 @@ impl Ctx {
             ));
         }
         // 1. Everything in target/dist/release verifies against the committed public key (a throwaway keyring).
-        self.verify()?;
+        self.verify_with(!self.rustybucket)?;
         // 2. The files of this version.
         let assets = manifest::assets(ver, x);
         let plan = plan(ver, &assets);
@@ -188,7 +195,7 @@ impl Ctx {
                 .arg(&data)
                 .output()
                 .map_err(|e| e.to_string())?;
-            if !String::from_utf8_lossy(&o.stdout).contains(&format!("VALIDSIG {fpr}")) {
+            if !super::rbcheck::valid_sig_by(&String::from_utf8_lossy(&o.stdout), &fpr) {
                 return Err(format!(
                     "publish: the signature {} does not verify against the public key",
                     sig.display()

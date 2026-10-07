@@ -6,7 +6,7 @@
 //! and a detached `.asc` for every artifact and `SHA256SUMS`. `verify` checks all of it against the public key in a throwaway keyring.
 use super::*;
 
-const KEY_ASC: &str = "packaging/keys/rusty-wave-release.asc";
+pub(super) const KEY_ASC: &str = "packaging/keys/rusty-wave-release.asc";
 const KEY_GPG: &str = "packaging/keys/rusty-wave-release.gpg";
 
 /// The full fingerprint to sign with: `explicit`, else `RVP_GPG_KEY`, else the key in `packaging/keys/rusty-wave-release.asc`. Its secret half must be in
@@ -124,7 +124,7 @@ impl Ctx {
         sh(&mut c)?;
         let url = self.repo_url.clone().unwrap_or_else(|| format!("file://{}", repo.display()));
         let gpg_b64 = capture(Command::new("base64").arg("-w0").arg(&pubkey))?.trim().to_string();
-        let home_page = "https://github.com/unicorntearsproject/rusty-video-player";
+        let home_page = "https://github.com/unicorntearsproject/rusty-media-player";
         write(
             &self.out().join(format!("{APP_ID}.flatpakrepo")),
             format!(
@@ -148,6 +148,11 @@ impl Ctx {
     /// Check every signature under `target/dist` against the public key in the repository, with a throwaway keyring and rpm database, so
     /// it proves what a user with only the published key sees. Missing artifacts are skipped; finding nothing signed is an error.
     pub(super) fn verify(&self) -> Result<(), String> {
+        self.verify_with(true)
+    }
+
+    /// `verify`; `embedded` also requires the signatures inside the rpm and the AppImage (a release built in CI gets only detached ones).
+    pub(super) fn verify_with(&self, embedded: bool) -> Result<(), String> {
         let fpr = resolve_public_fpr(&self.root)?;
         let home = self.dist().join("verify-gnupg");
         fs::create_dir_all(&home).map_err(|e| e.to_string())?;
@@ -160,7 +165,7 @@ impl Ctx {
                 .output()
                 .map_err(|e| e.to_string())?;
             let text = String::from_utf8_lossy(&o.stdout).into_owned();
-            if o.status.success() && text.contains(&format!("VALIDSIG {fpr}")) {
+            if o.status.success() && super::rbcheck::valid_sig_by(&text, &fpr) {
                 Ok(text)
             } else {
                 Err(format!("{}{}", text, String::from_utf8_lossy(&o.stderr)))
@@ -221,7 +226,7 @@ impl Ctx {
         // rpm: embedded signature, checked against a private rpm database that holds only our key.
         let rpms: Vec<&PathBuf> =
             names.iter().filter(|p| p.extension().is_some_and(|e| e == "rpm")).collect();
-        if !rpms.is_empty() && have("rpm") && have("rpmkeys") {
+        if embedded && !rpms.is_empty() && have("rpm") && have("rpmkeys") {
             let db = self.dist().join("verify-rpmdb");
             fs::create_dir_all(&db).map_err(|e| e.to_string())?;
             sh(Command::new("rpmkeys")
@@ -249,7 +254,7 @@ impl Ctx {
             }
         }
         // AppImage: the signature appimagetool embeds.
-        for f in names.iter().filter(|p| p.extension().is_some_and(|e| e == "AppImage")) {
+        for f in names.iter().filter(|p| embedded && p.extension().is_some_and(|e| e == "AppImage")) {
             let r = capture(
                 Command::new("python3")
                     .arg(self.root.join("tools/packaging/verify-appimage-sig.py"))
