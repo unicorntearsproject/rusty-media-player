@@ -161,7 +161,12 @@ impl<T> Dpb<T> {
         }
         let find_lt = |entries: &[DpbEntry<T>], poc: i32, msb: bool| {
             entries.iter().position(|e| {
-                e.marking != Marking::Unused && if msb { e.poc == poc } else { e.poc.rem_euclid(max_lsb as i32) == poc.rem_euclid(max_lsb as i32) }
+                e.marking != Marking::Unused
+                    && if msb {
+                        e.poc == poc
+                    } else {
+                        e.poc.rem_euclid(max_lsb as i32) == poc.rem_euclid(max_lsb as i32)
+                    }
             })
         };
         // Long-term first: a picture that is long-term now stays out of the short-term search.
@@ -176,7 +181,9 @@ impl<T> Dpb<T> {
                 lt_found.push((curr, idx, poc));
             }
         }
-        let st = |entries: &[DpbEntry<T>], poc: i32| entries.iter().position(|e| e.marking == Marking::ShortTerm && e.poc == poc);
+        let st = |entries: &[DpbEntry<T>], poc: i32| {
+            entries.iter().position(|e| e.marking == Marking::ShortTerm && e.poc == poc)
+        };
         let mut st_found: Vec<(u8, Option<usize>, i32)> = Vec::new();
         for (kind, list) in [(0u8, &rps.st_curr_before), (1, &rps.st_curr_after), (2, &rps.st_foll)] {
             for &poc in list.iter() {
@@ -251,7 +258,12 @@ impl<T> Dpb<T> {
 
     /// "Bumping" (C.5.2.4): output the waiting picture with the smallest POC. Returns its index in the buffer.
     pub fn bump_index(&self) -> Option<usize> {
-        self.entries.iter().enumerate().filter(|(_, e)| e.needed_for_output).min_by_key(|(_, e)| e.poc).map(|(i, _)| i)
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.needed_for_output)
+            .min_by_key(|(_, e)| e.poc)
+            .map(|(i, _)| i)
     }
 
     /// Whether the buffer must bump before the current picture (C.5.2.2): too many pictures wait, the latency limit is reached, or the
@@ -292,7 +304,11 @@ pub fn build_ref_lists(h: &SliceHeader, set: &RefSet) -> [Vec<RefIdx>; 2] {
     for l in 0..if h.slice_type == SliceType::B { 2 } else { 1 } {
         let n = h.num_ref_idx[l] as usize;
         let temp_len = n.max(total);
-        let (first, second) = if l == 0 { (&set.st_curr_before, &set.st_curr_after) } else { (&set.st_curr_after, &set.st_curr_before) };
+        let (first, second) = if l == 0 {
+            (&set.st_curr_before, &set.st_curr_after)
+        } else {
+            (&set.st_curr_after, &set.st_curr_before)
+        };
         let mut temp: Vec<RefIdx> = Vec::with_capacity(temp_len);
         while temp.len() < temp_len {
             for &i in first.iter().chain(second.iter()).chain(set.lt_curr.iter()) {
@@ -345,7 +361,13 @@ mod tests {
             d.entries.push(entry(p, Marking::ShortTerm, false));
         }
         d.entries.push(entry(-30, Marking::ShortTerm, false));
-        let rps = Rps { st_curr_before: alloc::vec![4, 2], st_curr_after: alloc::vec![8], st_foll: alloc::vec![0], lt_curr: alloc::vec![(-30, true)], lt_foll: alloc::vec![] };
+        let rps = Rps {
+            st_curr_before: alloc::vec![4, 2],
+            st_curr_after: alloc::vec![8],
+            st_foll: alloc::vec![0],
+            lt_curr: alloc::vec![(-30, true)],
+            lt_foll: alloc::vec![],
+        };
         let set = d.apply_rps(&rps, 64, false);
         assert_eq!(set.missing, 0);
         assert_eq!(set.pics.len(), 5);

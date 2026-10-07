@@ -124,6 +124,9 @@ mod tests {
 
     #[test]
     fn logs() {
-        assert_eq!([ceil_log2(1), ceil_log2(2), ceil_log2(3), ceil_log2(4), ceil_log2(5), ceil_log2(510)], [0, 1, 2, 2, 3, 9]);
+        assert_eq!(
+            [ceil_log2(1), ceil_log2(2), ceil_log2(3), ceil_log2(4), ceil_log2(5), ceil_log2(510)],
+            [0, 1, 2, 2, 3, 9]
+        );
     }
 }

@@ -6,8 +6,8 @@ use rvp_codec_hevc::ps::{ScalingList, Sps};
 use rvp_codec_hevc::slice::SliceType;
 use rvp_codec_hevc::stream::{Backend, HevcStream, Picture};
 use rvp_core::{
-    ColorMatrix, ColorRange, Error, Packet, PixelFormat, PlatformSupport, PlatformVideo, Result as CoreResult, StreamInfo, VideoDecoder,
-    VideoFrame,
+    ColorMatrix, ColorRange, Error, Packet, PixelFormat, PlatformSupport, PlatformVideo,
+    Result as CoreResult, StreamInfo, VideoDecoder, VideoFrame,
 };
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -95,7 +95,8 @@ struct PictureHevc {
 }
 
 impl PictureHevc {
-    const INVALID: Self = Self { picture_id: VA_INVALID_ID, pic_order_cnt: 0, flags: PIC_INVALID, reserved: [0; 4] };
+    const INVALID: Self =
+        Self { picture_id: VA_INVALID_ID, pic_order_cnt: 0, flags: PIC_INVALID, reserved: [0; 4] };
 }
 
 #[repr(C)]
@@ -397,7 +398,7 @@ impl PlatformVideo for VaapiPlatform {
 
     fn open(&self, info: &StreamInfo) -> CoreResult<Box<dyn VideoDecoder>> {
         let va = self.va().map_err(|e| Error::Unsupported(format!("video codec `hevc` [VA-API: {e}]")))?;
-        let backend = VaBackend { va, state: None, free: Rc::new(RefCell::new(Vec::new())), next_pts: 0 };
+        let backend = VaBackend { va, state: None, free: Rc::new(RefCell::new(Vec::new())) };
         let stream = HevcStream::new(backend, &info.extra_data)?;
         Ok(Box::new(VaDecoder { stream }))
     }
@@ -455,12 +456,15 @@ struct VaBackend {
     va: Rc<Va>,
     state: Option<State>,
     free: Rc<RefCell<Vec<u32>>>,
-    next_pts: i64,
 }
 
 impl VaBackend {
     fn start(&mut self, sps: &Sps) -> Result<(), Error> {
-        let (profile, rt) = if sps.bit_depth_luma == 10 { (VA_PROFILE_HEVC_MAIN10, VA_RT_FORMAT_YUV420_10) } else { (VA_PROFILE_HEVC_MAIN, VA_RT_FORMAT_YUV420) };
+        let (profile, rt) = if sps.bit_depth_luma == 10 {
+            (VA_PROFILE_HEVC_MAIN10, VA_RT_FORMAT_YUV420_10)
+        } else {
+            (VA_PROFILE_HEVC_MAIN, VA_RT_FORMAT_YUV420)
+        };
         if let Some(s) = &self.state {
             if s.width == sps.width && s.height == sps.height && s.profile == profile {
                 return Ok(());
@@ -478,20 +482,51 @@ impl VaBackend {
         let mut want = ConfigAttrib { kind: VA_CONFIG_ATTRIB_RT_FORMAT, value: rt };
         let mut config = 0;
         // SAFETY: valid display and attribute.
-        let st = unsafe { (va.api.create_config)(va.dpy, profile, VA_ENTRYPOINT_VLD, &mut want, 1, &mut config) };
+        let st =
+            unsafe { (va.api.create_config)(va.dpy, profile, VA_ENTRYPOINT_VLD, &mut want, 1, &mut config) };
         va.check("vaCreateConfig", st)?;
         let n = sps.dpb_size() + sps.max_num_reorder_pics as usize + 6;
         let mut surfaces = vec![0u32; n];
         // SAFETY: `surfaces` has room for `n` ids.
-        let st = unsafe { (va.api.create_surfaces)(va.dpy, rt, sps.width, sps.height, surfaces.as_mut_ptr(), n as u32, std::ptr::null_mut(), 0) };
+        let st = unsafe {
+            (va.api.create_surfaces)(
+                va.dpy,
+                rt,
+                sps.width,
+                sps.height,
+                surfaces.as_mut_ptr(),
+                n as u32,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
         va.check("vaCreateSurfaces", st)?;
         let mut context = 0;
         // SAFETY: `surfaces` holds `n` valid ids.
-        let st = unsafe { (va.api.create_context)(va.dpy, config, sps.width as c_int, sps.height as c_int, VA_PROGRESSIVE, surfaces.as_mut_ptr(), n as c_int, &mut context) };
+        let st = unsafe {
+            (va.api.create_context)(
+                va.dpy,
+                config,
+                sps.width as c_int,
+                sps.height as c_int,
+                VA_PROGRESSIVE,
+                surfaces.as_mut_ptr(),
+                n as c_int,
+                &mut context,
+            )
+        };
         va.check("vaCreateContext", st)?;
         self.free.borrow_mut().clear();
         self.free.borrow_mut().extend(surfaces.iter().copied());
-        self.state = Some(State { config, context, surfaces, width: sps.width, height: sps.height, profile, image: None });
+        self.state = Some(State {
+            config,
+            context,
+            surfaces,
+            width: sps.width,
+            height: sps.height,
+            profile,
+            image: None,
+        });
         Ok(())
     }
 
@@ -514,7 +549,15 @@ impl VaBackend {
         let mut id = 0;
         // SAFETY: `data` points at `count` elements of the size passed.
         let st = unsafe {
-            (self.va.api.create_buffer)(self.va.dpy, context, kind, std::mem::size_of::<T>() as u32, count, data as *const T as *mut c_void, &mut id)
+            (self.va.api.create_buffer)(
+                self.va.dpy,
+                context,
+                kind,
+                std::mem::size_of::<T>() as u32,
+                count,
+                data as *const T as *mut c_void,
+                &mut id,
+            )
         };
         self.va.check("vaCreateBuffer", st)?;
         Ok(id)
@@ -610,7 +653,12 @@ fn pic_params(pic: &Picture<'_, Surface>) -> PicParams {
         row_height_minus1[i] = (*r).saturating_sub(1) as u16;
     }
     PicParams {
-        curr_pic: PictureHevc { picture_id: pic.surface.id, pic_order_cnt: pic.poc, flags: 0, reserved: [0; 4] },
+        curr_pic: PictureHevc {
+            picture_id: pic.surface.id,
+            pic_order_cnt: pic.poc,
+            flags: 0,
+            reserved: [0; 4],
+        },
         reference_frames: refs,
         pic_width_in_luma_samples: sps.width as u16,
         pic_height_in_luma_samples: sps.height as u16,
@@ -800,16 +848,19 @@ impl Backend for VaBackend {
             Error::Unsupported(_) => rvp_codec_hevc::Error::Unsupported("the GPU cannot decode this stream"),
             _ => rvp_codec_hevc::Error::Invalid("the GPU decoder could not be set up"),
         })?;
-        let id = self.free.borrow_mut().pop().ok_or(rvp_codec_hevc::Error::Invalid("out of decoder surfaces"))?;
+        let id =
+            self.free.borrow_mut().pop().ok_or(rvp_codec_hevc::Error::Invalid("out of decoder surfaces"))?;
         Ok(Rc::new(SurfaceInner { id, pool: self.free.clone() }))
     }
 
     fn decode(&mut self, pic: &Picture<'_, Surface>) -> rvp_codec_hevc::Result<()> {
-        self.decode_inner(pic).map_err(|_| rvp_codec_hevc::Error::Invalid("the GPU decoder rejected a picture"))
+        self.decode_inner(pic)
+            .map_err(|_| rvp_codec_hevc::Error::Invalid("the GPU decoder rejected a picture"))
     }
 
     fn read(&mut self, surface: &Surface, sps: &Sps) -> rvp_codec_hevc::Result<VideoFrame> {
-        self.read_inner(surface, sps).map_err(|_| rvp_codec_hevc::Error::Invalid("reading a decoded picture back from the GPU failed"))
+        self.read_inner(surface, sps)
+            .map_err(|_| rvp_codec_hevc::Error::Invalid("reading a decoded picture back from the GPU failed"))
     }
 }
 
@@ -836,9 +887,17 @@ impl VaBackend {
             }
             // SAFETY: `slice_params_v` is a contiguous array of `len` SliceParams.
             let sp_bytes = unsafe {
-                std::slice::from_raw_parts(slice_params_v.as_ptr() as *const u8, slice_params_v.len() * std::mem::size_of::<SliceParams>())
+                std::slice::from_raw_parts(
+                    slice_params_v.as_ptr() as *const u8,
+                    slice_params_v.len() * std::mem::size_of::<SliceParams>(),
+                )
             };
-            ids.push(self.raw_buffer(ctx, BUF_SLICE_PARAMETER, sp_bytes, std::mem::size_of::<SliceParams>() as u32)?);
+            ids.push(self.raw_buffer(
+                ctx,
+                BUF_SLICE_PARAMETER,
+                sp_bytes,
+                std::mem::size_of::<SliceParams>() as u32,
+            )?);
             ids.push(self.raw_buffer(ctx, BUF_SLICE_DATA, &data, data.len() as u32)?);
             let va = &self.va;
             // SAFETY: the buffers were created on this context just now.
@@ -871,19 +930,24 @@ impl VaBackend {
             let mut formats = vec![ImageFormat::default(); max];
             let mut n = 0;
             // SAFETY: room for `max` formats.
-            va.check("vaQueryImageFormats", unsafe { (va.api.query_image_formats)(va.dpy, formats.as_mut_ptr(), &mut n) })?;
-            let mut fmt = *formats[..n.max(0) as usize]
-                .iter()
-                .find(|f| f.fourcc == fourcc)
-                .ok_or(Error::Unsupported(String::from("the GPU has no readable picture format for this stream")))?;
+            va.check("vaQueryImageFormats", unsafe {
+                (va.api.query_image_formats)(va.dpy, formats.as_mut_ptr(), &mut n)
+            })?;
+            let mut fmt = *formats[..n.max(0) as usize].iter().find(|f| f.fourcc == fourcc).ok_or(
+                Error::Unsupported(String::from("the GPU has no readable picture format for this stream")),
+            )?;
             let mut img = Image::default();
             // SAFETY: valid display, format and out pointer.
-            va.check("vaCreateImage", unsafe { (va.api.create_image)(va.dpy, &mut fmt, state.width as c_int, state.height as c_int, &mut img) })?;
+            va.check("vaCreateImage", unsafe {
+                (va.api.create_image)(va.dpy, &mut fmt, state.width as c_int, state.height as c_int, &mut img)
+            })?;
             state.image = Some((img, fourcc));
         }
         let (img, _) = state.image.as_ref().copied().ok_or(Error::Invalid(String::from("no image")))?;
         // SAFETY: valid display, surface and image of the surface's size.
-        va.check("vaGetImage", unsafe { (va.api.get_image)(va.dpy, surface.id, 0, 0, state.width, state.height, img.image_id) })?;
+        va.check("vaGetImage", unsafe {
+            (va.api.get_image)(va.dpy, surface.id, 0, 0, state.width, state.height, img.image_id)
+        })?;
         let mut ptr: *mut c_void = std::ptr::null_mut();
         // SAFETY: the image's buffer id is valid.
         va.check("vaMapBuffer", unsafe { (va.api.map_buffer)(va.dpy, img.buf, &mut ptr) })?;
@@ -916,6 +980,7 @@ fn convert(data: &[u8], img: &Image, sps: &Sps, ten: bool) -> Result<VideoFrame,
         (_, f) => (ColorMatrix::Bt709, f),
     };
     let range = if range { ColorRange::Full } else { ColorRange::Limited };
+    let hdr = ten && rvp_core::hdr::is_hdr(sps.colour.transfer, sps.colour.matrix);
     if !ten {
         let mut y = vec![0u8; w * h];
         let (mut u, mut v) = (vec![0u8; cw * ch], vec![0u8; cw * ch]);
@@ -930,7 +995,16 @@ fn convert(data: &[u8], img: &Image, sps: &Sps, ten: bool) -> Result<VideoFrame,
                 v[r * cw + c] = data[src + 2 * c + 1];
             }
         }
-        return Ok(VideoFrame { width: w as u32, height: h as u32, format: PixelFormat::Yuv420p8, matrix, range, planes: [y, u, v], strides: [w, cw, cw], pts: 0 });
+        return Ok(VideoFrame {
+            width: w as u32,
+            height: h as u32,
+            format: PixelFormat::Yuv420p8,
+            matrix,
+            range,
+            planes: [y, u, v],
+            strides: [w, cw, cw],
+            pts: 0,
+        });
     }
     // P010: ten bits in the top of 16-bit words; ours are the low ten bits.
     let rd = |off: usize| u16::from_le_bytes([data[off], data[off + 1]]) >> 6;
@@ -949,5 +1023,30 @@ fn convert(data: &[u8], img: &Image, sps: &Sps, ten: bool) -> Result<VideoFrame,
             v[(r * cw + c) * 2..(r * cw + c) * 2 + 2].copy_from_slice(&rd(src + c * 4 + 2).to_le_bytes());
         }
     }
-    Ok(VideoFrame { width: w as u32, height: h as u32, format: PixelFormat::Yuv420p10, matrix, range, planes: [y, u, v], strides: [w * 2, cw * 2, cw * 2], pts: 0 })
+    let frame = VideoFrame {
+        width: w as u32,
+        height: h as u32,
+        format: PixelFormat::Yuv420p10,
+        matrix,
+        range,
+        planes: [y, u, v],
+        strides: [w * 2, cw * 2, cw * 2],
+        pts: 0,
+    };
+    if !hdr {
+        return Ok(frame);
+    }
+    // HDR (PQ or HLG): mapped to SDR here, so the screen shows a picture that looks right.
+    let mut rgba = vec![0u8; w * h * 4];
+    rvp_core::hdr::tonemap_to_rgba(&frame, sps.colour.transfer, &mut rgba);
+    Ok(VideoFrame {
+        width: w as u32,
+        height: h as u32,
+        format: PixelFormat::Rgba8,
+        matrix,
+        range,
+        planes: [rgba, Vec::new(), Vec::new()],
+        strides: [w * 4, 0, 0],
+        pts: 0,
+    })
 }

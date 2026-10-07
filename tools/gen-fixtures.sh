@@ -564,6 +564,19 @@ gen_hevc() {
   ff "${v[@]}" "${a[@]}" -c:v libx265 -preset veryfast -x265-params log-level=error:keyint=12 -pix_fmt yuv420p10le -tag:v hvc1 -c:a aac -b:a 64k -ac 2 -shortest "$d/hevc10_aac.mp4"
   ff "${v[@]}" "${a[@]}" -c:v libx265 -preset veryfast -x265-params log-level=error:keyint=12 -pix_fmt yuv420p -c:a flac -ac 2 -shortest "$d/hevc_flac.mkv"
   ff "${v[@]}" "${a[@]}" -c:v libx264 -preset veryfast -g 12 -pix_fmt yuv420p10le -c:a aac -b:a 64k -ac 2 -shortest "$d/h264_10bit.mp4"
+  # Streams that use more of the standard: several slices, weighted prediction and scaling lists, open GOP with RASL pictures, many
+  # reference pictures with long B pyramids, a larger CTB, tiny and odd sizes (cropping).
+  local n=(-f lavfi -i "testsrc2=size=640x360:rate=25:duration=5,noise=alls=12:allf=t")
+  local x=(-c:v libx265 -preset veryfast -pix_fmt yuv420p -tag:v hvc1 -an)
+  ff "${n[@]}" "${x[@]}" -x265-params log-level=error:keyint=25:slices=4 "$d/hevc_slices.mp4"
+  ff "${n[@]}" "${x[@]}" -x265-params log-level=error:keyint=25:weightp=1:weightb=1:scaling-list=default "$d/hevc_weighted.mp4"
+  ff "${n[@]}" "${x[@]}" -x265-params log-level=error:keyint=30:min-keyint=10:open-gop=1:bframes=8:ref=5:b-pyramid=1 "$d/hevc_opengop.mp4"
+  ff "${n[@]}" "${x[@]}" -x265-params log-level=error:keyint=50:ctu=32:rd=3:cu-lossless=0:lookahead-slices=0 "$d/hevc_ctu32.mp4"
+  ff -f lavfi -i "testsrc2=size=202x118:rate=25:duration=3,noise=alls=12:allf=t" "${x[@]}" -x265-params log-level=error:keyint=12 "$d/hevc_odd.mp4"
+  ff "${n[@]}" -c:v libx265 -preset veryfast -pix_fmt yuv420p10le -tag:v hvc1 -an -x265-params log-level=error:keyint=25:slices=3:weightp=1 "$d/hevc10_slices.mp4"
+  # HDR10 (PQ, BT.2020) and HLG, Main 10.
+  ff "${n[@]}" -c:v libx265 -preset veryfast -pix_fmt yuv420p10le -tag:v hvc1 -an -x265-params "log-level=error:keyint=25:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited" "$d/hevc10_hdr.mp4"
+  ff "${n[@]}" -c:v libx265 -preset veryfast -pix_fmt yuv420p10le -tag:v hvc1 -an -x265-params "log-level=error:keyint=25:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited" "$d/hevc10_hlg.mp4"
   touch "$out/hevc/.done"
 }
 

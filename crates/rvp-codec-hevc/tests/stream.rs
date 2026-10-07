@@ -20,9 +20,15 @@ fn fixtures() -> Option<PathBuf> {
     if std::env::var_os("RVP_SKIP_FIXTURES").is_some() {
         return None;
     }
-    let dir = std::env::var_os("RVP_FIXTURES").map(PathBuf::from).unwrap_or_else(|| root().join("target/fixtures"));
+    let dir =
+        std::env::var_os("RVP_FIXTURES").map(PathBuf::from).unwrap_or_else(|| root().join("target/fixtures"));
     ONCE.call_once(|| {
-        let st = Command::new("bash").arg(root().join("tools/gen-fixtures.sh")).arg(&dir).env("RVP_FIXTURE_SET", "hevc").status().expect("gen-fixtures");
+        let st = Command::new("bash")
+            .arg(root().join("tools/gen-fixtures.sh"))
+            .arg(&dir)
+            .env("RVP_FIXTURE_SET", "hevc")
+            .status()
+            .expect("gen-fixtures");
         assert!(st.success());
     });
     let d = dir.join("hevc");

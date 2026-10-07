@@ -162,7 +162,8 @@ impl SliceHeader {
         if pps_id > 63 {
             return Err(Error::Invalid("slice_pic_parameter_set_id"));
         }
-        let (pps, sps) = pps_of(pps_id as u8).ok_or(Error::Invalid("slice refers to a parameter set that is missing"))?;
+        let (pps, sps) =
+            pps_of(pps_id as u8).ok_or(Error::Invalid("slice refers to a parameter set that is missing"))?;
         let mut dependent = false;
         let mut segment_address = 0;
         if !first {
@@ -175,7 +176,8 @@ impl SliceHeader {
             }
         }
         let mut h = if dependent {
-            let p = prev.ok_or(Error::Invalid("a dependent slice segment without an independent one before it"))?;
+            let p =
+                prev.ok_or(Error::Invalid("a dependent slice segment without an independent one before it"))?;
             let mut h = p.clone();
             h.nal = nalh;
             h.first_slice_segment_in_pic = first;
@@ -185,7 +187,16 @@ impl SliceHeader {
             h.entry_points = Vec::new();
             h
         } else {
-            Self::parse_independent(&mut r, nalh, first, no_output_of_prior_pics, pps_id as u8, segment_address, &pps, &sps)?
+            Self::parse_independent(
+                &mut r,
+                nalh,
+                first,
+                no_output_of_prior_pics,
+                pps_id as u8,
+                segment_address,
+                &pps,
+                &sps,
+            )?
         };
         if pps.tiles_enabled || pps.entropy_coding_sync_enabled {
             let n = r.ue()?;
@@ -254,7 +265,11 @@ impl SliceHeader {
                 if sps.st_rps.len() > 1 {
                     st_rps_idx = r.bits(ceil_log2(sps.st_rps.len() as u32))?;
                 }
-                st_rps = sps.st_rps.get(st_rps_idx as usize).ok_or(Error::Invalid("short_term_ref_pic_set_idx"))?.clone();
+                st_rps = sps
+                    .st_rps
+                    .get(st_rps_idx as usize)
+                    .ok_or(Error::Invalid("short_term_ref_pic_set_idx"))?
+                    .clone();
             }
             if sps.long_term_ref_pics_present {
                 let n_sps = if !sps.lt_ref_pics.is_empty() { r.ue()? as usize } else { 0 };
@@ -264,7 +279,11 @@ impl SliceHeader {
                 }
                 for i in 0..n_sps + n_pics {
                     let (lsb, used) = if i < n_sps {
-                        let idx = if sps.lt_ref_pics.len() > 1 { r.bits(ceil_log2(sps.lt_ref_pics.len() as u32))? as usize } else { 0 };
+                        let idx = if sps.lt_ref_pics.len() > 1 {
+                            r.bits(ceil_log2(sps.lt_ref_pics.len() as u32))? as usize
+                        } else {
+                            0
+                        };
                         *sps.lt_ref_pics.get(idx).ok_or(Error::Invalid("lt_idx_sps"))?
                     } else {
                         let lsb = r.bits(sps.max_poc_lsb.trailing_zeros())?;
@@ -276,7 +295,12 @@ impl SliceHeader {
                     if i != 0 && i != n_sps {
                         cycle += long_term[i - 1].delta_poc_msb_cycle;
                     }
-                    long_term.push(LongTerm { poc_lsb: lsb, used_by_curr: used, msb_present, delta_poc_msb_cycle: cycle });
+                    long_term.push(LongTerm {
+                        poc_lsb: lsb,
+                        used_by_curr: used,
+                        msb_present,
+                        delta_poc_msb_cycle: cycle,
+                    });
                 }
             }
             if sps.temporal_mvp_enabled {
@@ -327,7 +351,10 @@ impl SliceHeader {
             header_emulation_bytes: 0,
         };
         if slice_type != SliceType::I {
-            h.num_ref_idx = [pps.num_ref_idx_l0_default_active_minus1 + 1, if slice_type == SliceType::B { pps.num_ref_idx_l1_default_active_minus1 + 1 } else { 0 }];
+            h.num_ref_idx = [
+                pps.num_ref_idx_l0_default_active_minus1 + 1,
+                if slice_type == SliceType::B { pps.num_ref_idx_l1_default_active_minus1 + 1 } else { 0 },
+            ];
             if r.flag()? {
                 h.num_ref_idx[0] = r.ue()? as u8 + 1;
                 if slice_type == SliceType::B {
@@ -375,7 +402,9 @@ impl SliceHeader {
                     }
                 }
             }
-            if (pps.weighted_pred && slice_type == SliceType::P) || (pps.weighted_bipred && slice_type == SliceType::B) {
+            if (pps.weighted_pred && slice_type == SliceType::P)
+                || (pps.weighted_bipred && slice_type == SliceType::B)
+            {
                 h.pred_weights = Some(parse_pred_weights(r, &h)?);
             }
             let m = r.ue()?;
@@ -421,7 +450,12 @@ fn parse_pred_weights(r: &mut BitReader, h: &SliceHeader) -> Result<PredWeights>
         let luma_flags: Vec<bool> = (0..n).map(|_| r.flag()).collect::<Result<_>>()?;
         let chroma_flags: Vec<bool> = (0..n).map(|_| r.flag()).collect::<Result<_>>()?;
         for i in 0..n {
-            let mut w = Weight { luma_weight: 1 << luma_log2, luma_offset: 0, chroma_weight: [1 << chroma_log2; 2], chroma_offset: [0; 2] };
+            let mut w = Weight {
+                luma_weight: 1 << luma_log2,
+                luma_offset: 0,
+                chroma_weight: [1 << chroma_log2; 2],
+                chroma_offset: [0; 2],
+            };
             if luma_flags[i] {
                 w.luma_weight += r.se()?;
                 w.luma_offset = r.se()?;
@@ -432,7 +466,8 @@ fn parse_pred_weights(r: &mut BitReader, h: &SliceHeader) -> Result<PredWeights>
                     let doff = r.se()?;
                     w.chroma_weight[j] = (1 << chroma_log2) + dw;
                     // (7-56) with wpOffsetHalfRangeC = 128.
-                    w.chroma_offset[j] = (128 + doff - ((128 * w.chroma_weight[j]) >> chroma_log2)).clamp(-128, 127);
+                    w.chroma_offset[j] =
+                        (128 + doff - ((128 * w.chroma_weight[j]) >> chroma_log2)).clamp(-128, 127);
                 }
             }
             weights[l].push(w);

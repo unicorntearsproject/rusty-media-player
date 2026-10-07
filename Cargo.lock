@@ -3087,6 +3087,7 @@ dependencies = [
  "rvp-codec-hevc",
  "rvp-codec-vp9",
  "rvp-core",
+ "rvp-demux",
  "rvp-host",
  "rvp-library",
  "rvp-par",

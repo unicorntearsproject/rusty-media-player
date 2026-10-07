@@ -106,10 +106,16 @@ impl<B: Backend> HevcStream<B> {
             s.length_size = (hvcc[21] & 3) as usize + 1;
             let mut at = 23;
             for _ in 0..hvcc[22] {
-                let Some(n) = hvcc.get(at + 1..at + 3).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else { break };
+                let Some(n) = hvcc.get(at + 1..at + 3).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize)
+                else {
+                    break;
+                };
                 at += 3;
                 for _ in 0..n {
-                    let Some(len) = hvcc.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else { break };
+                    let Some(len) = hvcc.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize)
+                    else {
+                        break;
+                    };
                     at += 2;
                     if let Some(u) = hvcc.get(at..at + len) {
                         s.parameter_set(u)?;
@@ -181,7 +187,8 @@ impl<B: Backend> HevcStream<B> {
                 Ok(())
             }
             _ if h.is_slice() => {
-                let pending_prev = self.pending.as_ref().and_then(|p| p.headers.last().filter(|h| !h.dependent).cloned());
+                let pending_prev =
+                    self.pending.as_ref().and_then(|p| p.headers.last().filter(|h| !h.dependent).cloned());
                 let header = {
                     let (sps, pps) = (&self.sps, &self.pps);
                     let lookup = |id: u8| -> Option<(Pps, Sps)> {
@@ -289,7 +296,11 @@ impl<B: Backend> HevcStream<B> {
         // The set's indices into the buffer moved with the sweep: look the references up again by POC.
         let set = relocate(&self.dpb, &set);
         self.active_sps = Some(sps.id);
-        while self.dpb.must_bump(sps.max_num_reorder_pics as usize, sps.max_latency_increase_plus1, sps.dpb_size()) {
+        while self.dpb.must_bump(
+            sps.max_num_reorder_pics as usize,
+            sps.max_latency_increase_plus1,
+            sps.dpb_size(),
+        ) {
             self.bump()?;
         }
         // The decode itself.
@@ -328,7 +339,14 @@ impl<B: Backend> HevcStream<B> {
         // The picture joins the buffer.
         let output = h0.pic_output_flag && !(nal.is_rasl() && self.skip_rasl);
         self.dpb.count_latency(poc);
-        self.dpb.entries.push(DpbEntry { poc, marking: Marking::ShortTerm, needed_for_output: output, latency: 0, payload: surface, pts: p.pts });
+        self.dpb.entries.push(DpbEntry {
+            poc,
+            marking: Marking::ShortTerm,
+            needed_for_output: output,
+            latency: 0,
+            payload: surface,
+            pts: p.pts,
+        });
         if nal.tid == 0 && !nal.is_rasl() && !nal.is_radl() && !nal.is_sub_layer_non_ref() {
             self.poc.remember(poc, max_lsb);
         }

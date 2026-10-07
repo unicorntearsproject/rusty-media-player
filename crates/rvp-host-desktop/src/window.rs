@@ -50,7 +50,8 @@ pub fn run(opts: Options, data_dir: PathBuf) -> i32 {
             Some(crate::services::DesktopServices::new(&manifest, std::env::args_os().skip(1).collect()));
     }
     let restart = host.services.as_ref().map(|s| s.restart_flag());
-    let mut app = App::new(Rc::new(DesktopCodecs), UiConfig { reduce_motion: reduce_motion() });
+    let mut app =
+        App::new(Rc::new(DesktopCodecs::with_system_decoders()), UiConfig { reduce_motion: reduce_motion() });
     app.ui_mut().set_font_loader(crate::fonts::system_font_loader());
     let _ = pool;
     let mut handler = Handler {

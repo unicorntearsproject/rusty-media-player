@@ -41,6 +41,9 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation"] }
 
+[dev-dependencies]
+rvp-demux.workspace = true
+
 [build-dependencies]
 embed-resource = "3"
 
