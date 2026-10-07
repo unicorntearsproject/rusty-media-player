@@ -118,3 +118,33 @@ fn x265_streams_come_out_whole_and_in_presentation_order() {
         assert!(null.slices >= 100);
     }
 }
+
+#[test]
+#[ignore]
+fn print_sps() {
+    let Ok(path) = std::env::var("RVP_HEVC_FILE") else { return };
+    let data = std::fs::read(&path).unwrap();
+    block_on(async {
+        let d = open(MemSource::new(data)).await.unwrap();
+        let info = d.streams().iter().find(|s| s.kind == StreamKind::Video).unwrap().clone();
+        for (k, u) in rvp_codec_hevc::ps::hvcc_units(&info.extra_data) {
+            if k == 33 {
+                let (mut r, mut rem) = (Vec::new(), Vec::new());
+                rvp_codec_hevc::nal::unescape(&u[2..], &mut r, &mut rem);
+                let s = Sps::parse(&r).unwrap();
+                println!(
+                    "th_inter={} th_intra={} log2 cb {}..{} tb {}..{} amp={} sao={} tmvp={}",
+                    s.max_th_depth_inter,
+                    s.max_th_depth_intra,
+                    s.log2_min_cb,
+                    s.log2_ctb,
+                    s.log2_min_tb,
+                    s.log2_max_tb,
+                    s.amp_enabled,
+                    s.sao_enabled,
+                    s.temporal_mvp_enabled
+                );
+            }
+        }
+    });
+}

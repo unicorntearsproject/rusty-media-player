@@ -1,8 +1,10 @@
 //! Slice segment data: the coding tree, coding units, prediction and transform units, and the reconstruction that follows each.
-use super::frame::Frame;
+use super::frame::{ColMotion, Frame, Mv};
+use super::inter;
 use super::intra::{self, Refs};
+use super::mv::PartMode;
 use super::pic::*;
-use super::{invalid, transform, unsupported};
+use super::{invalid, transform};
 use crate::cabac::{Cabac, Contexts};
 use crate::ctx;
 use crate::ps::{Pps, ScalingList, Sps};
@@ -52,6 +54,17 @@ pub(super) struct Dec<'a> {
     scaling: Option<[Vec<Factors>; 4]>,
     x_ctb: usize,
     y_ctb: usize,
+    /// POC of each entry of the two reference picture lists, and whether it is a long-term picture.
+    pub ref_poc: [Vec<i32>; 2],
+    pub ref_lt: [Vec<bool>; 2],
+    /// Index into `refs` of the collocated picture.
+    pub col_frame: Option<usize>,
+    pub no_backward_pred: bool,
+    pub cur_poc: i32,
+    cu_part: PartMode,
+    cu_depth: u32,
+    pred_a: Vec<i32>,
+    pred_b: Vec<i32>,
 }
 
 impl<'a> Dec<'a> {
@@ -61,7 +74,7 @@ impl<'a> Dec<'a> {
         pps: &'a Pps,
         hdr: &'a SliceHeader,
         ref_lists: &'a [Vec<usize>; 2],
-        _pic: &Picture<'_, super::Surface>,
+        pic: &Picture<'_, super::Surface>,
         refs: &'a [&'a Frame],
         st: &'a mut PicState,
         cur: &'a mut Frame,
@@ -75,6 +88,21 @@ impl<'a> Dec<'a> {
             scaling_factors(lists.unwrap_or(&ScalingList::default_lists()))
         });
         let cabac = Cabac::new(rbsp, hdr.data_offset_rbsp);
+        let mut ref_poc: [Vec<i32>; 2] = [Vec::new(), Vec::new()];
+        let mut ref_lt: [Vec<bool>; 2] = [Vec::new(), Vec::new()];
+        for l in 0..2 {
+            for &i in &ref_lists[l] {
+                ref_poc[l].push(pic.refs[i].poc);
+                ref_lt[l].push(pic.refs[i].long_term);
+            }
+        }
+        let col_frame = if hdr.temporal_mvp && hdr.slice_type != SliceType::I {
+            let l = if hdr.slice_type == SliceType::B && !hdr.collocated_from_l0 { 1 } else { 0 };
+            ref_lists[l].get(hdr.collocated_ref_idx as usize).copied()
+        } else {
+            None
+        };
+        let no_backward_pred = ref_poc.iter().flatten().all(|p| *p <= pic.poc);
         Self {
             sps,
             pps,
@@ -105,6 +133,15 @@ impl<'a> Dec<'a> {
             scaling,
             x_ctb: 0,
             y_ctb: 0,
+            ref_poc,
+            ref_lt,
+            col_frame,
+            no_backward_pred,
+            cur_poc: pic.poc,
+            cu_part: PartMode::P2Nx2N,
+            cu_depth: 0,
+            pred_a: vec![0; 64 * 64],
+            pred_b: vec![0; 64 * 64],
         }
     }
 
@@ -316,6 +353,10 @@ impl<'a> Dec<'a> {
         Ok(())
     }
 
+    pub(super) fn cell_mode(&self, x: i32, y: i32) -> u8 {
+        self.cell(x, y).mode
+    }
+
     fn cell(&self, x: i32, y: i32) -> Cell {
         self.pic.cells[(y as usize >> 2) * self.pic.w4 + (x as usize >> 2)]
     }
@@ -416,8 +457,17 @@ impl<'a> Dec<'a> {
             c.skip = skip;
             c.flags = if bypass { F_BYPASS } else { 0 };
         });
+        self.cu_depth = depth;
+        self.mark_edges(x0, y0, size, size, true);
+        self.mark_edges(x0, y0, size, size, false);
+        let cb = (x0, y0, size);
         if skip {
-            return unsupported("inter pictures");
+            self.cu_intra = false;
+            self.cu_part = PartMode::P2Nx2N;
+            self.set_cells(x0, y0, size, |c| c.mode = 2);
+            self.prediction_unit(cb, (x0, y0, size, size), 0, PartMode::P2Nx2N, true)?;
+            self.finish_cu_qp(x0, y0, size);
+            return Ok(());
         }
         let intra = if self.hdr.slice_type != SliceType::I {
             self.cabac.decision(&mut self.ctx, ctx::PRED_MODE) == 1
@@ -427,16 +477,22 @@ impl<'a> Dec<'a> {
         self.cu_intra = intra;
         let min_cb = self.sps.log2_min_cb as u32;
         let mut nxn = false;
+        let mut part = PartMode::P2Nx2N;
         if intra {
             if log2 == min_cb {
                 nxn = self.cabac.decision(&mut self.ctx, ctx::PART_MODE) == 0;
             }
+            if nxn {
+                part = PartMode::PNxN;
+            }
         } else {
-            return unsupported("inter pictures");
+            part = self.parse_part_mode_inter(log2, min_cb);
         }
-        self.set_cells(x0, y0, size, |c| c.mode = 1);
-        // Mark the coding block's edges as prediction block edges.
-        self.mark_edges(x0, y0, size, size, false);
+        self.cu_part = part;
+        self.set_cells(x0, y0, size, |c| c.mode = if intra { 1 } else { 2 });
+        if !intra {
+            return self.inter_cu(cb, part);
+        }
         let mut pcm = false;
         if !nxn
             && self.sps.pcm_enabled
@@ -447,12 +503,7 @@ impl<'a> Dec<'a> {
         }
         if pcm {
             self.pcm_samples(x0, y0, log2)?;
-            self.set_cells(x0, y0, size, |c| {
-                c.intra_mode = 1;
-                if false {
-                    c.flags |= F_PCM_NOFILTER;
-                }
-            });
+            self.set_cells(x0, y0, size, |c| c.intra_mode = 1);
             if self.sps.pcm_loop_filter_disabled {
                 self.set_cells(x0, y0, size, |c| c.flags |= F_PCM_NOFILTER);
             }
@@ -520,6 +571,321 @@ impl<'a> Dec<'a> {
         self.transform_tree(x0, y0, x0, y0, log2, 0, 0, max_depth, nxn, [true, true])?;
         self.finish_cu_qp(x0, y0, size);
         Ok(())
+    }
+
+    /// `part_mode` of an inter coding unit (9.3.3.7).
+    fn parse_part_mode_inter(&mut self, log2: u32, min_cb: u32) -> PartMode {
+        let ctxs = ctx::PART_MODE;
+        if self.cabac.decision(&mut self.ctx, ctxs) == 1 {
+            return PartMode::P2Nx2N;
+        }
+        let bin1 = self.cabac.decision(&mut self.ctx, ctxs + 1) == 1;
+        if log2 == min_cb {
+            if log2 == 3 {
+                return if bin1 { PartMode::P2NxN } else { PartMode::PNx2N };
+            }
+            if bin1 {
+                return PartMode::P2NxN;
+            }
+            return if self.cabac.decision(&mut self.ctx, ctxs + 2) == 1 {
+                PartMode::PNx2N
+            } else {
+                PartMode::PNxN
+            };
+        }
+        if !self.sps.amp_enabled {
+            return if bin1 { PartMode::P2NxN } else { PartMode::PNx2N };
+        }
+        let bin2 = self.cabac.decision(&mut self.ctx, ctxs + 3) == 1;
+        if bin1 {
+            if bin2 {
+                PartMode::P2NxN
+            } else if self.cabac.bypass() == 0 {
+                PartMode::P2NxnU
+            } else {
+                PartMode::P2NxnD
+            }
+        } else if bin2 {
+            PartMode::PNx2N
+        } else if self.cabac.bypass() == 0 {
+            PartMode::PnLx2N
+        } else {
+            PartMode::PnRx2N
+        }
+    }
+
+    /// The rest of an inter coding unit: its prediction units, `rqt_root_cbf` and the transform tree.
+    fn inter_cu(&mut self, cb: (i32, i32, i32), part: PartMode) -> Result<()> {
+        let (x0, y0, s) = cb;
+        let (h2, q) = (s / 2, s / 4);
+        let parts: &[(i32, i32, i32, i32)] = match part {
+            PartMode::P2Nx2N => &[(0, 0, s, s)],
+            PartMode::P2NxN => &[(0, 0, s, h2), (0, h2, s, h2)],
+            PartMode::PNx2N => &[(0, 0, h2, s), (h2, 0, h2, s)],
+            PartMode::PNxN => &[(0, 0, h2, h2), (h2, 0, h2, h2), (0, h2, h2, h2), (h2, h2, h2, h2)],
+            PartMode::P2NxnU => &[(0, 0, s, q), (0, q, s, s - q)],
+            PartMode::P2NxnD => &[(0, 0, s, s - q), (0, s - q, s, q)],
+            PartMode::PnLx2N => &[(0, 0, q, s), (q, 0, s - q, s)],
+            PartMode::PnRx2N => &[(0, 0, s - q, s), (s - q, 0, q, s)],
+        };
+        let mut merge_first = false;
+        for (i, &(dx, dy, w, h)) in parts.iter().enumerate() {
+            let m = self.prediction_unit(cb, (x0 + dx, y0 + dy, w, h), i, part, false)?;
+            if i == 0 {
+                merge_first = m;
+            }
+        }
+        let rqt_root_cbf = if !(part == PartMode::P2Nx2N && merge_first) {
+            self.cabac.decision(&mut self.ctx, ctx::RQT_ROOT_CBF) == 1
+        } else {
+            true
+        };
+        if rqt_root_cbf {
+            let log2 = s.trailing_zeros();
+            self.transform_tree(
+                x0,
+                y0,
+                x0,
+                y0,
+                log2,
+                0,
+                0,
+                self.sps.max_th_depth_inter as u32,
+                false,
+                [true, true],
+            )?;
+        }
+        self.finish_cu_qp(x0, y0, s);
+        Ok(())
+    }
+
+    /// One prediction unit: parse its motion (or the merge index), derive the vectors and predict its samples. Returns `merge_flag`.
+    fn prediction_unit(
+        &mut self,
+        cb: (i32, i32, i32),
+        pb: (i32, i32, i32, i32),
+        part_idx: usize,
+        part: PartMode,
+        skip: bool,
+    ) -> Result<bool> {
+        let (xpb, ypb, w, h) = pb;
+        let max_cand = 5 - self.hdr.five_minus_max_num_merge_cand as usize;
+        let merge = skip || self.cabac.decision(&mut self.ctx, ctx::MERGE_FLAG) == 1;
+        let motion = if merge {
+            let mut idx = 0usize;
+            if max_cand > 1 {
+                if self.cabac.decision(&mut self.ctx, ctx::MERGE_IDX) == 1 {
+                    idx = 1;
+                    while idx < max_cand - 1 && self.cabac.bypass() == 1 {
+                        idx += 1;
+                    }
+                }
+            }
+            self.merge_motion(cb, pb, part_idx, part, idx)
+        } else {
+            let b_slice = self.hdr.slice_type == SliceType::B;
+            // inter_pred_idc: 0 list 0, 1 list 1, 2 both.
+            let idc = if !b_slice {
+                0
+            } else if w + h != 12
+                && self.cabac.decision(&mut self.ctx, ctx::INTER_PRED_IDC + self.cu_depth as usize) == 1
+            {
+                2
+            } else {
+                self.cabac.decision(&mut self.ctx, ctx::INTER_PRED_IDC + 4)
+            };
+            let mut m = MvField::NONE;
+            let mut mvd = [Mv::default(); 2];
+            let mut mvp_flag = [0usize; 2];
+            for l in 0..2usize {
+                if (l == 0 && idc == 1) || (l == 1 && idc == 0) {
+                    continue;
+                }
+                let n_ref = self.hdr.num_ref_idx[l] as usize;
+                let mut r = 0usize;
+                if n_ref > 1 {
+                    // TR with cMax = n_ref - 1: two context-coded bins, then bypass.
+                    while r < n_ref - 1 {
+                        let bit = if r < 2 {
+                            self.cabac.decision(&mut self.ctx, ctx::REF_IDX + r)
+                        } else {
+                            self.cabac.bypass()
+                        };
+                        if bit == 0 {
+                            break;
+                        }
+                        r += 1;
+                    }
+                }
+                m.ref_idx[l] = r as i8;
+                if l == 1 && self.hdr.mvd_l1_zero && idc == 2 {
+                    mvd[1] = Mv::default();
+                } else {
+                    mvd[l] = self.mvd_coding();
+                }
+                mvp_flag[l] = self.cabac.decision(&mut self.ctx, ctx::MVP_FLAG) as usize;
+            }
+            for l in 0..2usize {
+                if m.ref_idx[l] >= 0 {
+                    let mvp = self.amvp(cb, pb, part_idx, l, m.ref_idx[l] as usize, mvp_flag[l]);
+                    m.mv[l] = Mv { x: mvp.x.wrapping_add(mvd[l].x), y: mvp.y.wrapping_add(mvd[l].y) };
+                    m.ref_poc[l] = self.ref_poc[l][m.ref_idx[l] as usize];
+                }
+            }
+            m
+        };
+        for l in 0..2 {
+            if motion.ref_idx[l] >= 0 && motion.ref_idx[l] as usize >= self.ref_lists[l].len() {
+                return invalid("reference index outside the list");
+            }
+        }
+        self.mark_edges(xpb, ypb, w, h, false);
+        self.store_motion(xpb, ypb, w, h, &motion);
+        self.predict_inter(xpb, ypb, w, h, &motion)?;
+        Ok(merge)
+    }
+
+    /// `mvd_coding()` (7.3.8.9).
+    fn mvd_coding(&mut self) -> Mv {
+        let g0x = self.cabac.decision(&mut self.ctx, ctx::MVD_GREATER0) == 1;
+        let g0y = self.cabac.decision(&mut self.ctx, ctx::MVD_GREATER0) == 1;
+        let g1x = g0x && self.cabac.decision(&mut self.ctx, ctx::MVD_GREATER1) == 1;
+        let g1y = g0y && self.cabac.decision(&mut self.ctx, ctx::MVD_GREATER1) == 1;
+        let comp = |dec: &mut Self, g0: bool, g1: bool| -> i32 {
+            if !g0 {
+                return 0;
+            }
+            let mut abs = 1i32;
+            if g1 {
+                // abs_mvd_minus2: EG1.
+                let mut k = 1u32;
+                let mut v = 0i32;
+                while dec.cabac.bypass() == 1 && k < 30 {
+                    v += 1 << k;
+                    k += 1;
+                }
+                v += dec.cabac.bypass_bits(k) as i32;
+                abs = v + 2;
+            }
+            if dec.cabac.bypass() == 1 { -abs } else { abs }
+        };
+        let x = comp(self, g0x, g1x);
+        let y = comp(self, g0y, g1y);
+        Mv { x: x as i16, y: y as i16 }
+    }
+
+    fn store_motion(&mut self, x: i32, y: i32, w: i32, h: i32, m: &MvField) {
+        let (xs, ys) = (x as usize >> 2, y as usize >> 2);
+        let (xe, ye) = ((x + w) as usize >> 2, (y + h) as usize >> 2);
+        let mut col = ColMotion::default();
+        for l in 0..2 {
+            if m.ref_idx[l] >= 0 {
+                col.mv[l] = m.mv[l];
+                col.ref_poc[l] = m.ref_poc[l];
+                col.flags |= 1 << l;
+                if self.ref_lt[l][m.ref_idx[l] as usize] {
+                    col.flags |= 4 << l;
+                }
+            }
+        }
+        for yy in ys..ye {
+            for xx in xs..xe {
+                self.pic.mvf[yy * self.pic.w4 + xx] = *m;
+                self.cur.motion[yy * self.cur.w4 + xx] = col;
+            }
+        }
+    }
+
+    /// Predict the samples of an inter prediction block into the picture (8.5.3.3).
+    fn predict_inter(&mut self, x: i32, y: i32, w: i32, h: i32, m: &MvField) -> Result<()> {
+        let bd = self.bit_depth;
+        let explicit = (self.hdr.slice_type == SliceType::P && self.pps.weighted_pred)
+            || (self.hdr.slice_type == SliceType::B && self.pps.weighted_bipred);
+        for c in 0..3usize {
+            let luma = c == 0;
+            let (bx, by, bw, bh) = if luma {
+                (x, y, w as usize, h as usize)
+            } else {
+                (x / 2, y / 2, w as usize / 2, h as usize / 2)
+            };
+            let mut have = [false; 2];
+            for l in 0..2usize {
+                if m.ref_idx[l] < 0 {
+                    continue;
+                }
+                let r = self.refs[self.ref_lists[l][m.ref_idx[l] as usize]];
+                let mv = m.mv[l];
+                let (ix, iy, fx, fy) = if luma {
+                    (
+                        bx + (mv.x as i32 >> 2),
+                        by + (mv.y as i32 >> 2),
+                        (mv.x & 3) as usize,
+                        (mv.y & 3) as usize,
+                    )
+                } else {
+                    (
+                        bx + (mv.x as i32 >> 3),
+                        by + (mv.y as i32 >> 3),
+                        (mv.x & 7) as usize,
+                        (mv.y & 7) as usize,
+                    )
+                };
+                let out = if l == 0 { &mut self.pred_a } else { &mut self.pred_b };
+                inter::interpolate(&r.planes[c], ix, iy, fx, fy, bw, bh, luma, bd, out);
+                have[l] = true;
+            }
+            let wts = |dec: &Self, l: usize| -> Option<inter::Weight> {
+                let pw = dec.hdr.pred_weights.as_ref()?;
+                let e = pw.weights[l].get(dec.hdr_ref_idx(m, l))?;
+                let shift = bd as i32 - 8;
+                Some(if luma {
+                    inter::Weight { w: e.luma_weight, o: e.luma_offset << shift }
+                } else {
+                    inter::Weight { w: e.chroma_weight[c - 1], o: e.chroma_offset[c - 1] << shift }
+                })
+            };
+            let denom = |dec: &Self| -> u32 {
+                dec.hdr
+                    .pred_weights
+                    .as_ref()
+                    .map_or(0, |p| if luma { p.luma_log2_denom as u32 } else { p.chroma_log2_denom as u32 })
+            };
+            let ex_bi = if explicit && have[0] && have[1] {
+                wts(self, 0).zip(wts(self, 1)).map(|(a, b)| (denom(self), a, b))
+            } else {
+                None
+            };
+            let ex_uni =
+                |dec: &Self, l: usize| if explicit { wts(dec, l).map(|a| (denom(dec), a)) } else { None };
+            let ex0 = ex_uni(self, 0);
+            let ex1 = ex_uni(self, 1);
+            let plane = &mut self.cur.planes[c];
+            match (have[0], have[1]) {
+                (true, true) => inter::put_bi(
+                    plane,
+                    bx as usize,
+                    by as usize,
+                    bw,
+                    bh,
+                    &self.pred_a,
+                    &self.pred_b,
+                    bd,
+                    ex_bi,
+                ),
+                (true, false) => {
+                    inter::put_uni(plane, bx as usize, by as usize, bw, bh, &self.pred_a, bd, ex0)
+                }
+                (false, true) => {
+                    inter::put_uni(plane, bx as usize, by as usize, bw, bh, &self.pred_b, bd, ex1)
+                }
+                _ => return invalid("a prediction block with no reference"),
+            }
+        }
+        Ok(())
+    }
+
+    fn hdr_ref_idx(&self, m: &MvField, l: usize) -> usize {
+        m.ref_idx[l].max(0) as usize
     }
 
     fn finish_cu_qp(&mut self, x0: i32, y0: i32, size: i32) {
@@ -623,6 +989,8 @@ impl<'a> Dec<'a> {
         parent_cbf: [bool; 2],
     ) -> Result<()> {
         let sps = self.sps;
+        let inter_split =
+            sps.max_th_depth_inter == 0 && !self.cu_intra && self.cu_part != PartMode::P2Nx2N && depth == 0;
         let split = if log2 <= sps.log2_max_tb as u32
             && log2 > sps.log2_min_tb as u32
             && depth < max_depth
@@ -630,7 +998,7 @@ impl<'a> Dec<'a> {
         {
             self.cabac.decision(&mut self.ctx, ctx::SPLIT_TRANSFORM + (5 - log2) as usize) == 1
         } else {
-            log2 > sps.log2_max_tb as u32 || (intra_split && depth == 0)
+            log2 > sps.log2_max_tb as u32 || (intra_split && depth == 0) || inter_split
         };
         let mut cbf = [false, false];
         if log2 > 2 {
