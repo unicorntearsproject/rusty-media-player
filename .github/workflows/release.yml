@@ -448,10 +448,11 @@ jobs:
           cargo xtask dist verify --target rustybucket --version "$v"
           ls -l target/dist/publish-rb/rusty-wave/release
       # Pinned to a commit of the shared infrastructure repository (never a branch).
-      - uses: unicorntearsproject/rba-infra/.github/actions/publish-release@32b54f70f05c1433c2a8e72de9c6ad38a0e0fac0
+      - uses: unicorntearsproject/rba-publish-action@29d19bfe4b79d132f2ffc6c93fab730cfd94b9fd
         with:
           tag: v${{ needs.version.outputs.version }}
           release-dir: target/dist/publish-rb/rusty-wave/release
+          role-arn: ${{ secrets.RBA_PUBLISH_ROLE_ARN }}
           dispatch-token: ${{ secrets.RBA_WAVE_DISPATCH_TOKEN }}
           dry-run: ${{ inputs.publish_dry_run && 'true' || 'false' }}
           # A manual dry run runs on a branch, where RBA's role does not apply: preflight skips AWS and the tag gate and runs every file check.
