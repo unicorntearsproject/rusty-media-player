@@ -288,7 +288,7 @@ fields are only ever added:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `version` | string | The app's version, `1.0.0-rc3` (a pre-release keeps its suffix). |
+| `version` | string | The app's version, `1.0.0-rc4` (a pre-release keeps its suffix). |
 | `ready` | boolean | `true` once the player runs; `false` while the page restarts it after a crash (then `state` is `"recovering"` and the rest is the last known). |
 | `state` | string | `idle`, `opening`, `paused`, `buffering`, `playing`, `ended`, `failed`, or `recovering` (the page is restarting the player). |
 | `position_us` | integer | Playback position of the current item, microseconds (0 when idle). |

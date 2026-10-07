@@ -45,7 +45,11 @@ def main():
         open(os.path.join(d, "digest"), "wb").write(digest)
         r = gpg("--status-fd", "1", "--verify", os.path.join(d, "sig.asc"), os.path.join(d, "digest"))
         subprocess.run(["gpgconf", "--kill", "all"], env=env)
-        if f"VALIDSIG {fpr}" not in r.stdout:
+        # Made by the release key itself or by one of its signing subkeys (then the primary's fingerprint is the last field).
+        words = [l.split()[1] for l in r.stdout.splitlines() if l.startswith("[GNUPG:] ") and len(l.split()) > 1]
+        refused = {"BADSIG", "ERRSIG", "EXPSIG", "EXPKEYSIG", "REVKEYSIG", "NO_PUBKEY", "FAILURE"}
+        valid = [l.split()[2:] for l in r.stdout.splitlines() if l.startswith("[GNUPG:] VALIDSIG ")]
+        if refused & set(words) or words.count("GOODSIG") != 1 or len(valid) != 1 or valid[0][-1] != fpr:
             sys.exit(f"bad signature:\n{r.stdout}{r.stderr}")
     print(f"{os.path.basename(path)}: embedded signature OK (key {fpr})")
 

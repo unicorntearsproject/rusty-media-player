@@ -240,7 +240,8 @@ impl Ctx {
                 check(
                     format!("rpm -K {name}"),
                     o.and_then(|t| {
-                        if t.contains(&fpr.to_lowercase())
+                        if release_fprs(&self.root)
+                            .is_ok_and(|all| all.iter().any(|f| t.contains(f.as_str())))
                             && t.contains("signature")
                             && !t.contains("NOT OK")
                             && !t.contains("BAD")
@@ -369,6 +370,20 @@ impl Ctx {
         println!("{ok} ok, {} failed (key {fpr})", bad.len());
         if bad.is_empty() { Ok(()) } else { Err(format!("failed: {}", bad.join(", "))) }
     }
+}
+
+/// Every fingerprint in the repository's public key, lower-case: the primary key and its signing subkeys (a signature made by a subkey
+/// shows the subkey's, not the primary's).
+pub(super) fn release_fprs(root: &Path) -> Result<Vec<String>, String> {
+    let out = capture(
+        Command::new("gpg").args(["--batch", "--show-keys", "--with-colons"]).arg(root.join(KEY_ASC)),
+    )?;
+    Ok(out
+        .lines()
+        .filter(|l| l.starts_with("fpr:"))
+        .filter_map(|l| l.split(':').nth(9))
+        .map(str::to_lowercase)
+        .collect())
 }
 
 /// The fingerprint of the public key in the repository.

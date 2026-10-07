@@ -9,15 +9,40 @@
 use super::manifest::{self, Extras, MANIFEST_NAME, RB_BASE_URL, ZSYNC_ALIAS};
 use super::*;
 
-/// Whether gpg's `--status-fd` output has a `VALIDSIG` made by the key `fpr`: as the signing key itself or, for a signature made by a signing
-/// subkey, as the primary key (the last field of the line).
+/// What is wrong with gpg's `--status-fd` output for a signature that must be by the release key `fpr`, or `Ok`: exactly one signature, one
+/// `GOODSIG` and one `VALIDSIG`, none of the refusals gpg reports (`BADSIG`, `ERRSIG`, `EXPSIG`, `EXPKEYSIG`, `REVKEYSIG`, `NO_PUBKEY`,
+/// `FAILURE`), and the primary key's fingerprint as the last field of the `VALIDSIG` line (the first field is the signing subkey's own).
+pub(super) fn signature_problem(status: &str, fpr: &str) -> Result<(), String> {
+    const REFUSED: [&str; 7] =
+        ["BADSIG", "ERRSIG", "EXPSIG", "EXPKEYSIG", "REVKEYSIG", "NO_PUBKEY", "FAILURE"];
+    let word =
+        |l: &&str| l.strip_prefix("[GNUPG:] ").and_then(|r| r.split_whitespace().next()).map(str::to_string);
+    let lines: Vec<&str> = status.lines().collect();
+    for l in &lines {
+        if let Some(w) = word(l) {
+            if REFUSED.contains(&w.as_str()) {
+                return Err(format!("gpg says {w}"));
+            }
+        }
+    }
+    let count = |w: &str| lines.iter().filter(|l| word(l).as_deref() == Some(w)).count();
+    if count("GOODSIG") != 1 || count("VALIDSIG") != 1 {
+        return Err(format!(
+            "{} GOODSIG and {} VALIDSIG lines, exactly one signature is required",
+            count("GOODSIG"),
+            count("VALIDSIG")
+        ));
+    }
+    let valid = lines.iter().find(|l| word(l).as_deref() == Some("VALIDSIG")).unwrap();
+    if valid.split_whitespace().last() != Some(fpr) {
+        return Err(format!("not made by {fpr} or one of its subkeys"));
+    }
+    Ok(())
+}
+
+/// Whether the signature is by the release key `fpr` (see `signature_problem`).
 pub(super) fn valid_sig_by(status: &str, fpr: &str) -> bool {
-    status.lines().any(|l| {
-        l.strip_prefix("[GNUPG:] VALIDSIG ").is_some_and(|rest| {
-            let f: Vec<&str> = rest.split_whitespace().collect();
-            f.first() == Some(&fpr) || f.last() == Some(&fpr)
-        })
-    })
+    signature_problem(status, fpr).is_ok()
 }
 
 /// The problems a release directory has against the contract, offline and without gpg (names, sums, manifest, zsync). Empty when it is fine.
@@ -198,13 +223,10 @@ impl Ctx {
                 .output()
                 .map_err(|e| e.to_string())?;
             let status = String::from_utf8_lossy(&o.stdout);
-            if !o.status.success() || !valid_sig_by(&status, &fpr) {
-                bad.push(format!("{sig}: does not verify against the release key {fpr}"));
-            }
-            // Exactly one signature per file: signing twice into one `.asc` would be refused.
-            let n = status.lines().filter(|l| l.starts_with("[GNUPG:] VALIDSIG ")).count();
-            if n != 1 {
-                bad.push(format!("{sig}: holds {n} signatures, the publisher wants exactly one"));
+            if !o.status.success() {
+                bad.push(format!("{sig}: gpg could not verify it"));
+            } else if let Err(why) = signature_problem(&status, &fpr) {
+                bad.push(format!("{sig}: {why}"));
             }
         }
         if bad.is_empty() {
@@ -225,18 +247,33 @@ impl Ctx {
 mod tests {
     use super::*;
 
+    const PRIMARY: &str = "E13FF843723D54068E45A3FF54BF2FA407093CEE";
+    const SUB: &str = "2FD1848657B706A3576877E071DB2DB049A19B84";
+
+    fn good(by: &str) -> String {
+        format!(
+            "[GNUPG:] NEWSIG\n[GNUPG:] GOODSIG 71DB2DB049A19B84 x\n[GNUPG:] VALIDSIG {by} 2026-10-07 1 0 4 0 22 10 00 {PRIMARY}\n"
+        )
+    }
+
     #[test]
-    fn a_subkey_signature_counts_for_its_primary_key() {
-        let primary = "E13FF843723D54068E45A3FF54BF2FA407093CEE";
-        let sub = "2FD1848657B706A3576877E071DB2DB049A19B84";
-        let by_sub = format!(
-            "[GNUPG:] GOODSIG 71DB2DB049A19B84 x\n[GNUPG:] VALIDSIG {sub} 2026-10-07 1 0 4 0 22 10 00 {primary}\n"
-        );
-        let by_primary = format!("[GNUPG:] VALIDSIG {primary} 2026-10-05 1 0 4 0 22 10 00 {primary}\n");
-        assert!(valid_sig_by(&by_sub, primary));
-        assert!(valid_sig_by(&by_primary, primary));
-        assert!(!valid_sig_by(&by_sub, "0000000000000000000000000000000000000000"));
-        assert!(!valid_sig_by("[GNUPG:] BADSIG 1 x\n", primary));
+    fn a_signature_by_the_primary_or_by_its_subkey_is_accepted_and_nothing_else_is() {
+        assert!(valid_sig_by(&good(SUB), PRIMARY));
+        assert!(valid_sig_by(&good(PRIMARY), PRIMARY));
+        // Another key's signature, including one whose subkey merely shares the fingerprint position.
+        assert!(!valid_sig_by(&good(SUB), "0000000000000000000000000000000000000000"));
+        assert!(!valid_sig_by("[GNUPG:] BADSIG 1 x\n", PRIMARY));
+        // Two signatures in one file, or any of gpg's refusals next to a good one.
+        let two = format!("{}{}", good(SUB), good(PRIMARY));
+        assert!(signature_problem(&two, PRIMARY).unwrap_err().contains("exactly one"));
+        for bad in ["BADSIG", "ERRSIG", "EXPSIG", "EXPKEYSIG", "REVKEYSIG", "NO_PUBKEY", "FAILURE"] {
+            let s = format!("{}[GNUPG:] {bad} 1 x\n", good(SUB));
+            assert!(signature_problem(&s, PRIMARY).unwrap_err().contains(bad), "{bad}");
+        }
+        // The primary must be the LAST field: a line that only starts with it (the primary signing itself is fine, a foreign subkey is not).
+        let foreign =
+            format!("[GNUPG:] GOODSIG 1 x\n[GNUPG:] VALIDSIG {PRIMARY} 2026-10-07 1 0 4 0 22 10 00 {SUB}\n");
+        assert!(signature_problem(&foreign, PRIMARY).is_err());
     }
 
     /// A complete, fake release directory for `v` (contents are junk; the names, sums, manifest and zsync header are what the check reads).

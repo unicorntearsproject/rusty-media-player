@@ -4,7 +4,8 @@
 //! detached signature over its exact bytes verifies with it. The signature must carry that key's fingerprint, must not be older
 //! than the key, and must not be newer than the key's expiry; the key itself must not be revoked. The release is signed in CI by a
 //! signing-only subkey of the release key: a signature by a subkey that belongs to the release key counts for it, as long as the subkey is
-//! not revoked and was valid (not yet expired) when it signed.
+//! not revoked, carries the primary's binding and its own cross-certification, and was neither expired when it signed nor is now. Exactly one
+//! signature per file: a detached signature holding two or more is refused outright, even if one of them is good.
 use pgp::composed::{Deserializable, DetachedSignature, SignedPublicKey};
 use pgp::packet::SignatureType;
 use pgp::types::KeyDetails;
@@ -27,8 +28,12 @@ pub enum VerifyError {
     WrongKey,
     /// The signature does not match the data (or is not from the key).
     Mismatch,
-    /// The signature is dated before the key existed or after it expired.
+    /// The signature is dated before the key existed or after it expired, or the key (or subkey) has expired since.
     OutOfValidity,
+    /// The signature was made by a subkey that has been revoked.
+    SubkeyRevoked,
+    /// The signature was made by a subkey the release key does not vouch for (no valid binding or cross-certification, or not for signing).
+    UnboundSubkey,
 }
 
 impl std::fmt::Display for VerifyError {
@@ -40,6 +45,10 @@ impl std::fmt::Display for VerifyError {
             VerifyError::WrongKey => f.write_str("the signature was not made by the release key"),
             VerifyError::Mismatch => f.write_str("the signature does not match the file"),
             VerifyError::OutOfValidity => f.write_str("the signature is outside the release key's validity"),
+            VerifyError::SubkeyRevoked => f.write_str("the signature was made by a revoked subkey"),
+            VerifyError::UnboundSubkey => {
+                f.write_str("the signature was made by a subkey the release key does not vouch for")
+            }
         }
     }
 }
@@ -88,11 +97,46 @@ impl Verifier {
             .min()
     }
 
-    /// Check `armored_sig` (an ASCII-armored detached signature) over `data`.
+    /// Check `armored_sig` (an ASCII-armored detached signature) over `data`, with the clock as it is now.
     pub fn verify_detached(&self, data: &[u8], armored_sig: &[u8]) -> Result<(), VerifyError> {
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        self.verify_detached_at(data, armored_sig, now)
+    }
+
+    /// The most recent valid binding of `sub` to the primary key, if the subkey may sign for it: a subkey binding signature by the primary
+    /// that verifies, says the subkey is for signing, and carries the subkey's own cross-certification of the primary (an embedded primary
+    /// key binding signature that verifies). `Some(expiry)` is when the subkey stops being valid, if it does.
+    fn signing_binding(&self, sub: &pgp::composed::SignedPublicSubKey) -> Option<Option<u64>> {
+        let created = u64::from(sub.key.created_at().as_secs());
+        let best = sub
+            .signatures
+            .iter()
+            .filter(|s| s.typ() == Some(SignatureType::SubkeyBinding))
+            .filter(|s| s.verify_subkey_binding(&self.key.primary_key, &sub.key).is_ok())
+            .filter(|s| s.key_flags().sign())
+            .filter(|s| {
+                s.embedded_signature()
+                    .is_some_and(|e| e.verify_primary_key_binding(&sub.key, &self.key.primary_key).is_ok())
+            })
+            .max_by_key(|s| s.created().map_or(0, |t| t.as_secs()))?;
+        Some(best.key_expiration_time().map(|d| created + u64::from(d.as_secs())))
+    }
+
+    /// `verify_detached` at a given time (seconds since the epoch): a key or subkey that has expired by `now` refuses everything it signed.
+    pub fn verify_detached_at(&self, data: &[u8], armored_sig: &[u8], now: u64) -> Result<(), VerifyError> {
         let text = std::str::from_utf8(armored_sig).map_err(|e| VerifyError::BadSignature(e.to_string()))?;
-        let (sig, _) =
-            DetachedSignature::from_string(text).map_err(|e| VerifyError::BadSignature(e.to_string()))?;
+        let (sigs, _) = DetachedSignature::from_string_many(text)
+            .map_err(|e| VerifyError::BadSignature(e.to_string()))?;
+        let mut sigs =
+            sigs.collect::<Result<Vec<_>, _>>().map_err(|e| VerifyError::BadSignature(e.to_string()))?;
+        if sigs.len() != 1 {
+            return Err(VerifyError::BadSignature(format!(
+                "it holds {} signatures, exactly one is required",
+                sigs.len()
+            )));
+        }
+        let sig = sigs.remove(0);
         let issuers = sig.signature.issuer_fingerprint();
         // The issuer, when the signature names one, is the release key or one of its subkeys.
         let is_ours = |f: &[u8]| {
@@ -104,38 +148,31 @@ impl Verifier {
         }
         let made = sig.signature.created().map(|t| u64::from(t.as_secs()));
         let made = made.ok_or_else(|| VerifyError::BadSignature("it has no creation time".into()))?;
+        // The primary key bounds everything: not before it existed, not after it expired, and not expired now.
         if made < u64::from(self.key.primary_key.created_at().as_secs())
-            || self.expires_at().is_some_and(|e| made > e)
+            || self.expires_at().is_some_and(|e| made > e || now > e)
         {
             return Err(VerifyError::OutOfValidity);
         }
         if sig.verify(&self.key.primary_key, data).is_ok() {
             return Ok(());
         }
-        let mut out_of_validity = false;
         for sub in &self.key.public_subkeys {
+            if sig.verify(&sub.key, data).is_err() {
+                continue;
+            }
+            // This subkey made the signature: is it one the release key vouches for, and in force?
             if sub.signatures.iter().any(|s| s.typ() == Some(SignatureType::SubkeyRevocation)) {
-                continue;
+                return Err(VerifyError::SubkeyRevoked);
             }
-            // A subkey's own validity: not before it was made, not after the expiry its binding signature gives it.
+            let Some(expires) = self.signing_binding(sub) else { return Err(VerifyError::UnboundSubkey) };
             let created = u64::from(sub.key.created_at().as_secs());
-            let expires = sub
-                .signatures
-                .iter()
-                .filter_map(|s| s.key_expiration_time())
-                .map(|d| created + u64::from(d.as_secs()))
-                .min();
-            if made < created || expires.is_some_and(|e| made > e) {
-                if sig.verify(&sub.key, data).is_ok() {
-                    out_of_validity = true;
-                }
-                continue;
+            if made < created || expires.is_some_and(|e| made > e || now > e) {
+                return Err(VerifyError::OutOfValidity);
             }
-            if sig.verify(&sub.key, data).is_ok() {
-                return Ok(());
-            }
+            return Ok(());
         }
-        Err(if out_of_validity { VerifyError::OutOfValidity } else { VerifyError::Mismatch })
+        Err(VerifyError::Mismatch)
     }
 }
 
@@ -175,7 +212,8 @@ pub(crate) mod testkit {
 
     /// A key whose signing is done by a subkey (the primary only certifies), as the release key's CI signing key.
     pub fn key_with_signing_subkey(user: &str) -> TestKey {
-        let sub = SubkeyParamsBuilder::default().key_type(KeyType::Ed25519Legacy).can_sign(true).build().unwrap();
+        let sub =
+            SubkeyParamsBuilder::default().key_type(KeyType::Ed25519Legacy).can_sign(true).build().unwrap();
         let params = SecretKeyParamsBuilder::default()
             .key_type(KeyType::Ed25519Legacy)
             .can_certify(true)
