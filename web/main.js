@@ -607,6 +607,7 @@ window.rvp = {
   visualizer: (on) => { visualizerOn = on; player.enable_visualizer(on); },
   vizState: () => JSON.parse(player.viz_state()),
   audio: () => audio.debug(),
+  audioReset: () => audio.resetStats(),
   /** RGBA bytes of a canvas region (physical pixels). */
   pixels: (x, y, w, h) => Array.from(canvas.getContext("2d").getImageData(x, y, w, h).data),
   canvasSize: () => [canvas.width, canvas.height],

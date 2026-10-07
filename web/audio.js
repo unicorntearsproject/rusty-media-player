@@ -18,16 +18,21 @@ export class RvpAudio {
     this.volume = 1;
     this.rep = { played: 0, time: 0, size: 0, gen: 0, paused: true };
     this.sp = null; // script-processor ring
+    this.hint = "playback";
     this.#create();
   }
 
   #create() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
+    // "playback": a media player wants an output buffer that rides over a busy machine, not the shortest delay (the player's clock knows the
+    // output latency, so picture and sound stay together either way). `?audiohint=interactive` in the address restores the short one (tests).
+    const hint = new URLSearchParams(location.search).get("audiohint") || "playback";
+    this.hint = hint;
     try {
-      this.ctx = new AC({ latencyHint: "interactive", sampleRate: 48000 });
+      this.ctx = new AC({ latencyHint: hint, sampleRate: 48000 });
     } catch {
-      this.ctx = new AC({ latencyHint: "interactive" });
+      this.ctx = new AC({ latencyHint: hint });
     }
     this.gain = this.ctx.createGain();
     this.gain.gain.value = this.volume;
@@ -154,6 +159,12 @@ export class RvpAudio {
     if (this.mode === "script") { this.sp.r = 0; this.sp.n = 0; this.sp.played = 0; }
   }
 
+  /** Restart the worklet's underrun and lateness counters (the fill level's low-water mark too). */
+  resetStats() {
+    if (this.mode === "worklet") this.node.port.postMessage({ t: "stats" });
+    this.rep = { ...this.rep, underFrames: 0, underRuns: 0, low: -1 };
+  }
+
   setPaused(paused) {
     this.paused = paused;
     if (this.mode === "worklet") this.node.port.postMessage({ t: "state", paused });
@@ -169,6 +180,9 @@ export class RvpAudio {
       mode: this.mode, state: this.ctx ? this.ctx.state : "none", sampleRate: this.sampleRate(),
       time: this.ctx ? this.ctx.currentTime : 0,
       played: this.played(), latency: this.latency(), paused: this.paused, volume: this.volume,
+      // What the worklet reports about its ring: frames queued now, the fewest it held since the flush, and the silences it had to play.
+      ring: this.rep.size ?? 0, ringLow: this.rep.low ?? -1, underFrames: this.rep.underFrames ?? 0, underRuns: this.rep.underRuns ?? 0,
+      hint: this.hint, baseLatency: this.ctx ? this.ctx.baseLatency : 0,
     };
   }
 }

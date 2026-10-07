@@ -44,7 +44,10 @@ const GROW_RETRY_US: i64 = 250_000;
 /// Decoded video frames kept ready for presentation.
 const MAX_VIDEO_FRAMES: usize = 6;
 /// Decoded audio kept ahead of the output stage, microseconds.
-const AUDIO_AHEAD_US: i64 = 500_000;
+const AUDIO_AHEAD_US: i64 = 800_000;
+/// Packets the audio decoder takes in one turn of the scheduler: when the host's frames come late (a slow redraw in a browser) one turn must
+/// refill what the late frame let drain, not a single packet's worth.
+const AUDIO_PACKETS_PER_TURN: usize = 16;
 /// Audio we want queued (pending + sink) before starting playback, microseconds.
 const START_BUFFER_US: i64 = 100_000;
 /// Audio-only seeks start this much earlier and discard up to the target, so codecs with overlap state
@@ -555,23 +558,24 @@ async fn audio_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
                 }
             }
         }
-        let packet = {
-            let mut s = sh.borrow_mut();
-            if s.generation != epoch {
-                epoch = s.generation;
-                dec.flush();
-            }
-            if s.audio_dec_us >= AUDIO_AHEAD_US {
-                None
-            } else {
-                let p = s.audio_in.pop_front();
-                if p.is_none() && s.demux_done && !s.seeking {
-                    s.audio_done = true;
+        for _ in 0..AUDIO_PACKETS_PER_TURN {
+            let packet = {
+                let mut s = sh.borrow_mut();
+                if s.generation != epoch {
+                    epoch = s.generation;
+                    dec.flush();
                 }
-                p
-            }
-        };
-        if let Some(p) = packet {
+                if s.audio_dec_us >= AUDIO_AHEAD_US {
+                    None
+                } else {
+                    let p = s.audio_in.pop_front();
+                    if p.is_none() && s.demux_done && !s.seeking {
+                        s.audio_done = true;
+                    }
+                    p
+                }
+            };
+            let Some(p) = packet else { break };
             // A packet that fails to decode is dropped; playback continues with the next one.
             if dec.send_packet(&p).is_ok() {
                 let mut bufs: Vec<AudioBuffer> = Vec::new();
