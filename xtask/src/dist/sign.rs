@@ -331,7 +331,11 @@ impl Ctx {
                 // File managers and AppImageLauncher read `.DirIcon` out of the image for its thumbnail.
                 let work = self.dist().join("verify-appimage-icon");
                 let r = fs::create_dir_all(&work).map_err(|e| e.to_string()).and_then(|()| {
-                    sh(Command::new(f).current_dir(&work).args(["--appimage-extract", ".DirIcon"]))?;
+                    // A copy that can run: artifacts downloaded in CI lose the executable bit.
+                    let copy = work.join("image.AppImage");
+                    fs::copy(f, &copy).map_err(|e| e.to_string())?;
+                    set_mode(&copy, 0o755)?;
+                    sh(Command::new(&copy).current_dir(&work).args(["--appimage-extract", ".DirIcon"]))?;
                     let b = fs::read(work.join("squashfs-root/.DirIcon"))
                         .map_err(|e| format!(".DirIcon: {e}"))?;
                     let sizes = png_sizes(&b);
