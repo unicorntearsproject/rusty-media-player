@@ -49,7 +49,7 @@ fn decode(path: &Path) -> Result<(Vec<rvp_core::VideoFrame>, bool), String> {
     block_on(async {
         let mut d = open(MemSource::new(data)).await.map_err(|e| e.to_string())?;
         let info = d.streams().iter().find(|s| s.kind == StreamKind::Video).unwrap().clone();
-        let plat = rvp_host_desktop::platform::system_video().ok_or("no platform decoder on this system")?;
+        let plat = rvp_platform_video::system_video().ok_or("no platform decoder on this system")?;
         match plat.supports(&info) {
             PlatformSupport::Yes => {}
             PlatformSupport::No(why) => return Err(why),

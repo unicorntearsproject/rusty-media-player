@@ -3084,13 +3084,12 @@ dependencies = [
  "rvp-codec-audio",
  "rvp-codec-av1",
  "rvp-codec-h264",
- "rvp-codec-hevc",
  "rvp-codec-vp9",
  "rvp-core",
- "rvp-demux",
  "rvp-host",
  "rvp-library",
  "rvp-par",
+ "rvp-platform-video",
  "rvp-ui",
  "rvp-update",
  "softbuffer",
@@ -3172,6 +3171,16 @@ name = "rvp-par"
 version = "1.0.0-rc8"
 dependencies = [
  "rvp-codec-h264",
+ "rvp-core",
+ "rvp-demux",
+ "rvp-host",
+]
+
+[[package]]
+name = "rvp-platform-video"
+version = "1.0.0-rc8"
+dependencies = [
+ "rvp-codec-hevc",
  "rvp-core",
  "rvp-demux",
  "rvp-host",

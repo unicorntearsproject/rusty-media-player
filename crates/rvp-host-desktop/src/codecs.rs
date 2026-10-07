@@ -13,7 +13,7 @@ pub struct DesktopCodecs {
 impl DesktopCodecs {
     /// With the platform decoders of this system.
     pub fn with_system_decoders() -> Self {
-        Self { platform: crate::platform::system_video() }
+        Self { platform: rvp_platform_video::system_video() }
     }
 
     /// Only our own decoders (tests).

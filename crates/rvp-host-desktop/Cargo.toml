@@ -22,7 +22,7 @@ rvp-library.workspace = true
 rvp-codec-audio.workspace = true
 rvp-codec-av1.workspace = true
 rvp-codec-h264.workspace = true
-rvp-codec-hevc.workspace = true
+rvp-platform-video.workspace = true
 rvp-codec-vp9.workspace = true
 rvp-update = { path = "../rvp-update" }
 winit = "0.30"
@@ -40,9 +40,6 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_Foundation"] }
-
-[dev-dependencies]
-rvp-demux.workspace = true
 
 [build-dependencies]
 embed-resource = "3"

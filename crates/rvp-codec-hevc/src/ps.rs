@@ -794,3 +794,32 @@ impl Pps {
 pub fn slice_address_bits(sps: &Sps) -> u32 {
     ceil_log2(sps.pic_size_in_ctbs())
 }
+
+/// The NAL units (with their two-byte headers) in an `hvcC` record, as (type, unit) in the order the record lists them.
+pub fn hvcc_units(hvcc: &[u8]) -> Vec<(u8, &[u8])> {
+    let mut out = Vec::new();
+    if hvcc.len() < 23 {
+        return out;
+    }
+    let mut at = 23;
+    for _ in 0..hvcc[22] {
+        let Some(head) = hvcc.get(at..at + 3) else { break };
+        let (kind, n) = (head[0] & 0x3f, u16::from_be_bytes([head[1], head[2]]) as usize);
+        at += 3;
+        for _ in 0..n {
+            let Some(len) = hvcc.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else { return out };
+            at += 2;
+            match hvcc.get(at..at + len) {
+                Some(u) => out.push((kind, u)),
+                None => return out,
+            }
+            at += len;
+        }
+    }
+    out
+}
+
+/// The NAL length field size of an `hvcC` or `avcC` record (1 to 4 bytes).
+pub fn hvcc_length_size(record: &[u8]) -> usize {
+    record.get(21).map_or(4, |b| (b & 3) as usize + 1)
+}

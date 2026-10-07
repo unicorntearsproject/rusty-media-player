@@ -10,6 +10,7 @@ members = [
     "crates/rvp-codec-audio",
     "crates/rvp-codec-h264",
     "crates/rvp-codec-hevc",
+    "crates/rvp-platform-video",
     "crates/rvp-codec-hevc",
     "crates/rvp-codec-av1",
     "crates/rvp-codec-vp9",
@@ -52,6 +53,7 @@ rvp-codec-audio = { path = "crates/rvp-codec-audio" }
 rvp-codec-av1 = { path = "crates/rvp-codec-av1" }
 rvp-codec-h264 = { path = "crates/rvp-codec-h264" }
 rvp-codec-hevc = { path = "crates/rvp-codec-hevc" }
+rvp-platform-video = { path = "crates/rvp-platform-video" }
 rvp-codec-vp9 = { path = "crates/rvp-codec-vp9" }
 rvp-demux = { path = "crates/rvp-demux" }
 rvp-subs = { path = "crates/rvp-subs" }

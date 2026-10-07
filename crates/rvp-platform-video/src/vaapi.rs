@@ -2,11 +2,12 @@
 //! it (or without a GPU that decodes HEVC) just says so. The stream layer (`rvp-codec-hevc`) does the parameter sets, reference
 //! pictures and output order; this module hands each picture to the GPU as VA-API buffers and reads the finished surface back.
 #![allow(unsafe_code)]
+use crate::SemiPlanar;
 use rvp_codec_hevc::ps::{ScalingList, Sps};
 use rvp_codec_hevc::slice::SliceType;
 use rvp_codec_hevc::stream::{Backend, HevcStream, Picture};
 use rvp_core::{
-    ColorMatrix, ColorRange, Error, Packet, PixelFormat, PlatformSupport, PlatformVideo,
+    Error, Packet, PlatformSupport, PlatformVideo,
     Result as CoreResult, StreamInfo, VideoDecoder, VideoFrame,
 };
 use std::cell::RefCell;
@@ -962,91 +963,19 @@ impl VaBackend {
     }
 }
 
-/// NV12 or P010 to planar 4:2:0, cropped to the conformance window.
+/// NV12 or P010 to a frame, cropped to the conformance window.
 fn convert(data: &[u8], img: &Image, sps: &Sps, ten: bool) -> Result<VideoFrame, Error> {
     let (w, h) = sps.display_size();
-    let (w, h) = ((w & !1) as usize, (h & !1) as usize);
-    let (cl, ct) = (sps.crop[0] as usize, sps.crop[2] as usize);
-    let (cw, ch) = (w / 2, h / 2);
-    let (p0, o0) = (img.pitches[0] as usize, img.offsets[0] as usize);
-    let (p1, o1) = (img.pitches[1] as usize, img.offsets[1] as usize);
-    let bytes = if ten { 2 } else { 1 };
-    if o0 + p0 * (ct + h) > data.len() || o1 + p1 * (ct / 2 + ch) > data.len() {
-        return Err(Error::Invalid(String::from("the GPU's picture is smaller than expected")));
-    }
-    let (matrix, range) = match (sps.colour.matrix, sps.colour.full_range) {
-        (9 | 10, f) => (ColorMatrix::Bt2020, f),
-        (6 | 5, f) => (ColorMatrix::Bt601, f),
-        (_, f) => (ColorMatrix::Bt709, f),
-    };
-    let range = if range { ColorRange::Full } else { ColorRange::Limited };
-    let hdr = ten && rvp_core::hdr::is_hdr(sps.colour.transfer, sps.colour.matrix);
-    if !ten {
-        let mut y = vec![0u8; w * h];
-        let (mut u, mut v) = (vec![0u8; cw * ch], vec![0u8; cw * ch]);
-        for r in 0..h {
-            let src = o0 + (ct + r) * p0 + cl;
-            y[r * w..(r + 1) * w].copy_from_slice(&data[src..src + w]);
-        }
-        for r in 0..ch {
-            let src = o1 + (ct / 2 + r) * p1 + (cl / 2) * 2;
-            for c in 0..cw {
-                u[r * cw + c] = data[src + 2 * c];
-                v[r * cw + c] = data[src + 2 * c + 1];
-            }
-        }
-        return Ok(VideoFrame {
-            width: w as u32,
-            height: h as u32,
-            format: PixelFormat::Yuv420p8,
-            matrix,
-            range,
-            planes: [y, u, v],
-            strides: [w, cw, cw],
-            pts: 0,
-        });
-    }
-    // P010: ten bits in the top of 16-bit words; ours are the low ten bits.
-    let rd = |off: usize| u16::from_le_bytes([data[off], data[off + 1]]) >> 6;
-    let mut y = vec![0u8; w * h * 2];
-    let (mut u, mut v) = (vec![0u8; cw * ch * 2], vec![0u8; cw * ch * 2]);
-    for r in 0..h {
-        let src = o0 + (ct + r) * p0 + cl * bytes;
-        for c in 0..w {
-            y[(r * w + c) * 2..(r * w + c) * 2 + 2].copy_from_slice(&rd(src + c * 2).to_le_bytes());
-        }
-    }
-    for r in 0..ch {
-        let src = o1 + (ct / 2 + r) * p1 + (cl / 2) * 2 * bytes;
-        for c in 0..cw {
-            u[(r * cw + c) * 2..(r * cw + c) * 2 + 2].copy_from_slice(&rd(src + c * 4).to_le_bytes());
-            v[(r * cw + c) * 2..(r * cw + c) * 2 + 2].copy_from_slice(&rd(src + c * 4 + 2).to_le_bytes());
-        }
-    }
-    let frame = VideoFrame {
-        width: w as u32,
-        height: h as u32,
-        format: PixelFormat::Yuv420p10,
-        matrix,
-        range,
-        planes: [y, u, v],
-        strides: [w * 2, cw * 2, cw * 2],
-        pts: 0,
-    };
-    if !hdr {
-        return Ok(frame);
-    }
-    // HDR (PQ or HLG): mapped to SDR here, so the screen shows a picture that looks right.
-    let mut rgba = vec![0u8; w * h * 4];
-    rvp_core::hdr::tonemap_to_rgba(&frame, sps.colour.transfer, &mut rgba);
-    Ok(VideoFrame {
-        width: w as u32,
-        height: h as u32,
-        format: PixelFormat::Rgba8,
-        matrix,
-        range,
-        planes: [rgba, Vec::new(), Vec::new()],
-        strides: [w * 4, 0, 0],
-        pts: 0,
-    })
+    crate::semi_planar_frame(
+        data,
+        SemiPlanar {
+            width: (w & !1) as usize,
+            height: (h & !1) as usize,
+            crop: (sps.crop[0] as usize, sps.crop[2] as usize),
+            y: (img.offsets[0] as usize, img.pitches[0] as usize),
+            uv: (img.offsets[1] as usize, img.pitches[1] as usize),
+            ten,
+            colour: sps.colour,
+        },
+    )
 }
