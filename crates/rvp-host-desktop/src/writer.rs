@@ -77,8 +77,8 @@ pub fn replace_file(target: &Path, data: &[u8]) -> Result<(), String> {
     if let Err(e) = result {
         let _ = std::fs::remove_file(&tmp);
         return Err(match e.kind() {
-            std::io::ErrorKind::PermissionDenied => "the folder or the file is read-only".to_string(),
-            _ => format!("writing failed ({e})"),
+            std::io::ErrorKind::PermissionDenied => "the folder or the file is read-only (change its permissions, or copy it somewhere you can write)".to_string(),
+            _ => format!("writing failed ({e}); check that the drive is connected and has room"),
         });
     }
     // Keep the change on disk before saying it is done (the folder entry of the rename).

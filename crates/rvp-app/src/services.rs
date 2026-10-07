@@ -873,7 +873,9 @@ impl App {
             Btn::Cancel => svc.cancel_update(),
             Btn::Restart => {
                 if let Err(e) = svc.restart() {
-                    self.svc.notice = Some(format!("Couldn't restart: {e}"));
+                    self.svc.notice = Some(format!(
+                        "Couldn't restart: {e}. Close Rusty Wave and open it again to start the new version."
+                    ));
                 }
                 // On success the host quits.
             }
@@ -891,7 +893,9 @@ impl App {
                     self.close_dialog(host);
                     self.ui.show_toast("Added to the app menu", now);
                 }
-                Err(e) => self.svc.notice = Some(format!("Couldn't add it: {e}")),
+                Err(e) => {
+                    self.svc.notice = Some(format!("Couldn't add it: {e}. You can try again from Settings."))
+                }
             },
             Btn::Never => {
                 // A "no thanks" to either offer is final: it is not asked again, the Settings dialog has the button.
@@ -960,7 +964,11 @@ impl App {
                         self.save_app_settings(host);
                         self.svc.notice = Some(text);
                     }
-                    Err(e) => self.svc.notice = Some(format!("Couldn't set it: {e}")),
+                    Err(e) => {
+                        self.svc.notice = Some(format!(
+                            "Couldn't set it: {e}. You can set Rusty Wave as the default yourself in your system's default-apps settings."
+                        ))
+                    }
                 }
             }
         }

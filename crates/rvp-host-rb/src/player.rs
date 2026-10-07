@@ -103,7 +103,7 @@ impl RbPlayer {
             p.app.set_fullscreen_state(true);
         }
         match launch_reason {
-            launch::AFTER_TRAP => p.toast("The player crashed and was restarted."),
+            launch::AFTER_TRAP => p.toast("Something went wrong inside the player, so it restarted. If it keeps happening, reopen the file."),
             launch::AFTER_KILL => p.toast("The player was restarted."),
             _ => {}
         }
@@ -140,7 +140,7 @@ impl RbPlayer {
         self.host.viz.flush();
         if let Some(e) = self.host.audio.take_failure() {
             api::warn(&format!("the audio stream failed: {}", api::code_name(e)));
-            self.toast("The audio device went away.");
+            self.toast("The audio device went away. Press play to start it again.");
         }
         self.update_cursor();
         self.update_power();

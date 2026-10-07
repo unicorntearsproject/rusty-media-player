@@ -134,7 +134,7 @@ async function recover(err) {
   const now = performance.now();
   recoverStamps = recoverStamps.filter((t) => now - t < 60_000);
   if (recoverStamps.length >= 3) {
-    statusEl.textContent = "The player stopped after repeated crashes. Reload the page.";
+    statusEl.textContent = "The player stopped after repeated crashes. Reload the page; if it keeps happening, try another file.";
     console.error("rusty-wave: giving up after repeated crashes", err);
     return undefined;
   }
@@ -151,8 +151,9 @@ async function recover(err) {
       relistFolders();
       recoveries++;
       if (openedFiles.length) player.open_files(openedFiles, false);
-      player.toast("The player crashed and was restarted.");
-      statusEl.textContent = "The player crashed and was restarted.";
+      const msg = "Something went wrong inside the player, so it restarted and put you back where you were. If it keeps happening, reload the page.";
+      player.toast(msg);
+      statusEl.textContent = msg;
     } catch (e) {
       console.error("rusty-wave: could not restart after the crash", e);
     } finally {
@@ -294,7 +295,7 @@ coverInput.addEventListener("change", async () => {
   const f = coverInput.files && coverInput.files[0];
   if (!f) return;
   if (f.size > 8 << 20) {
-    player.toast("That picture is too big (8 MB at most)");
+    player.toast("That picture is bigger than 8 MB. Pick a smaller one, or shrink it first.");
     return;
   }
   player.cover_picked(f.name, new Uint8Array(await f.arrayBuffer()));

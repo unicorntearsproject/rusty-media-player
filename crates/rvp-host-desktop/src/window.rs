@@ -455,7 +455,7 @@ impl Handler {
         if self.host.audio.failed() {
             // The device went away (unplugged, the sound server restarted): open it again at the next play.
             let now = rvp_host::HostClock::now_us(&self.host.clock);
-            self.app.ui_mut().show_toast("The audio device went away.", now);
+            self.app.ui_mut().show_toast("The audio device went away (unplugged, or the sound server restarted). Press play to start it again.", now);
         }
     }
 

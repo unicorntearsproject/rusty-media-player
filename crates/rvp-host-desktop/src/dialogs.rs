@@ -120,7 +120,10 @@ impl Dialogs {
                 let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                 match std::fs::metadata(&path) {
                     Ok(m) if m.len() > 8 << 20 => {
-                        let _ = tx.send(Picked::Saved("That picture is too big (8 MB at most)".into()));
+                        let _ = tx.send(Picked::Saved(
+                            "That picture is bigger than 8 MB. Pick a smaller one, or shrink it first."
+                                .into(),
+                        ));
                     }
                     _ => {
                         if let Ok(bytes) = std::fs::read(&path) {
@@ -147,7 +150,7 @@ impl Dialogs {
                         "Saved {}",
                         path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
                     ),
-                    Err(e) => format!("Couldn't save: {e}"),
+                    Err(e) => format!("Couldn't save the file ({e}). Check that the folder is still there and that you can write to it, then try again."),
                 };
                 let _ = tx.send(Picked::Saved(msg));
             }

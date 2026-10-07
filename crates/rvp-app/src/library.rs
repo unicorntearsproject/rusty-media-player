@@ -429,7 +429,7 @@ impl App {
         self.ui.show_toast(&msg, now);
         if rep.failed > 0 {
             self.ui.show_toast(
-                &format!("{} files could not be read and were skipped.", rep.failed),
+                &format!("{} couldn't be read, so {} not in your library. They may be damaged or in a format Rusty Wave doesn't read; everything else was added.", crate::plural(rep.failed as usize, "file", "files"), if rep.failed == 1 { "it is" } else { "they are" }),
                 now + 1_500_000,
             );
         }
