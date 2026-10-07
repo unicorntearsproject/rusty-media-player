@@ -149,3 +149,51 @@ pub extern "C" fn smoke_present_bench(w: u32, h: u32, dw: u32, dh: u32, reps: u3
     }
     sum
 }
+
+/// How many visualizer effects there are (for the benchmark loop in `tools/wasm-selftest.mjs`).
+#[unsafe(no_mangle)]
+pub extern "C" fn smoke_viz_count() -> u32 {
+    rvp_viz::EFFECTS.len() as u32
+}
+
+/// Draw `frames` frames of visualizer effect number `effect` into a `w` x `h` window against a synthetic beat (the player's own draw
+/// path); the JavaScript side times the call. Returns a checksum of the last picture so nothing is optimised away.
+#[unsafe(no_mangle)]
+pub extern "C" fn smoke_viz_bench(effect: u32, w: u32, h: u32, frames: u32) -> u32 {
+    use rvp_host::{VIZ_BANDS, VizSummary};
+    let mut v = rvp_viz::Viz::new();
+    v.effect = rvp_viz::EFFECTS[effect as usize % rvp_viz::EFFECTS.len()];
+    let mut now = 0i64;
+    for f in 0..frames {
+        let t = f as f32 / 30.0;
+        let mut bands = [0.0f32; VIZ_BANDS];
+        for (i, b) in bands.iter_mut().enumerate() {
+            *b = ((0.8 - i as f32 / VIZ_BANDS as f32 * 0.7) * (0.6 + 0.4 * (t * 3.0 + i as f32 * 0.7).sin()))
+                .clamp(0.0, 1.0);
+        }
+        for k in 0..3 {
+            v.feed(
+                &VizSummary {
+                    pts_us: now + k * 10_700,
+                    level: 0.35,
+                    peak: 0.6,
+                    bands,
+                    bass: 0.7,
+                    mid: 0.5,
+                    treble: 0.4,
+                    onset: (t * 2.0).fract() < 0.05 && k == 0,
+                    onset_strength: 1.0,
+                    tempo_bpm: 120.0,
+                },
+                false,
+            );
+        }
+        v.render(
+            w as usize,
+            h as usize,
+            &rvp_viz::FrameInput { now_us: now, playing: true, reduce_motion: false, scope: &[] },
+        );
+        now += 33_000;
+    }
+    v.picture().0.iter().step_by(97).fold(0u32, |a, &b| a.wrapping_mul(31).wrapping_add(b as u32))
+}

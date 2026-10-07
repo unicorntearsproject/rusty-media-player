@@ -23,4 +23,21 @@ if (process.argv.includes("--bench")) {
     }
     console.log(`present ${w}x${h} -> ${dw}x${dh}: ${out.join(", ")}`);
   }
+  // The visualizer effects, as the player draws them (a 1080p window, a synthetic beat): milliseconds per frame.
+  const names = ["Spectrum", "Scope", "Tunnel", "Starfield", "Plasma", "Bass machine", "Unicorn Tears", "Disco ball", "Bass cathedral", "Sun Ship 3000"];
+  const n = x.smoke_viz_count();
+  for (const [w, h] of [[1920, 1080], [1280, 720]]) {
+    const out = [];
+    for (let e = 0; e < n; e++) {
+      x.smoke_viz_bench(e, w, h, 10);
+      let best = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const t = performance.now();
+        x.smoke_viz_bench(e, w, h, 20);
+        best = Math.min(best, (performance.now() - t) / 20);
+      }
+      out.push(`${names[e] ?? e} ${best.toFixed(2)}`);
+    }
+    console.log(`visualizer ${w}x${h} (ms per frame): ${out.join(", ")}`);
+  }
 }

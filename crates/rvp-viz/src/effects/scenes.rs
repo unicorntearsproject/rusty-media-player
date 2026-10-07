@@ -1,4 +1,4 @@
-//! Three scenes in the spirit of the Unicorn Viz effects, drawn on the CPU: the **Bass machine** (a subwoofer, a boombox and a record player,
+//! Scenes in the spirit of the Unicorn Viz effects, drawn on the CPU: the **Bass machine** (a subwoofer, a boombox and a record player,
 //! each wired to the live spectrum), **Unicorn Tears** (iridescent teardrops falling through a deep star field) and the **Disco ball** (a
 //! mirror-tiled ball that throws sweeping squares of light across the room, with beams and a dance floor).
 //!
@@ -15,12 +15,45 @@ const TAU: f32 = core::f32::consts::TAU;
 const SCENE_SECS: f32 = 22.0;
 /// The fade through the dark between scenes, seconds.
 const SCENE_FADE: f32 = 1.4;
+/// Mirror tiles of the disco ball, round and from pole to pole.
+const TILES_U: usize = 28;
+const TILES_V: usize = 14;
+/// Sparkles drifting in the disco ball's room.
+const ROOM_SPARKS: usize = 150;
 
 /// An expanding pressure ring thrown out by a speaker port on the beat.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::effects) struct Ring {
     r: f32,
     life: f32,
+}
+
+/// A drip of light on the speaker wall: `kind` 0 hangs from the top edge and falls, 1 runs down a side edge, 2 is a splash thrown up from the
+/// bottom edge. `x`, `y` in pixels of the picture, `vy` pixels a second down.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::effects) struct Drip {
+    x: f32,
+    y: f32,
+    vx: f32,
+    vy: f32,
+    len: f32,
+    hue: u8,
+    kind: u8,
+}
+
+/// Most drips alive at once (so the cost per frame is bounded however loud the music is).
+const MAX_DRIPS: usize = 72;
+/// For the tests: the cap on drips.
+#[cfg(test)]
+pub(super) const MAX_DRIPS_FOR_TESTS: usize = MAX_DRIPS;
+/// Twinkling sparkles around the wall's edges.
+const EDGE_SPARKS: usize = 110;
+
+#[cfg(test)]
+impl Drip {
+    pub(super) fn kind_for_tests(&self) -> u8 {
+        self.kind
+    }
 }
 
 /// What the three scenes remember between frames.
@@ -53,6 +86,17 @@ pub(super) struct SceneState {
     /// Which style of room the ball is in (changes with the Bass machine's clock, never twice in a row).
     room: u8,
     room_t: f32,
+    /// The disco ball's beat flash, 1 on the hit and decaying; and a count of beats (which facets flash changes with it).
+    beat_flash: f32,
+    beat_count: u32,
+    /// Drips running down and falling off the speaker wall's edges.
+    pub(in crate::effects) drips: Vec<Drip>,
+    /// Seconds until the next idle drip.
+    drip_in: f32,
+    /// The Bass cathedral's tables and flight.
+    pub(super) cath: super::cathedral::Cath,
+    /// Sun Ship 3000's battle.
+    pub(super) ship: super::sunship::Ship,
 }
 
 fn hash2(a: u32, b: u32) -> f32 {
@@ -110,6 +154,89 @@ impl Viz {
         }
         st.rings.retain(|r| r.life > 0.0);
         st.cascade = (st.cascade + dt * 1.6).min(1.0);
+        st.beat_flash = (st.beat_flash - dt * 5.0).max(0.0);
+        // Speaker wall drips: they fall, and where they land they splash up.
+        let (bwf, bhf) = (self.bw as f32, self.bh as f32);
+        let g_acc = bhf * 0.9;
+        let mut splashes: Vec<Drip> = Vec::new();
+        for d in &mut st.drips {
+            match d.kind {
+                0 => {
+                    d.vy += g_acc * dt;
+                    d.y += d.vy * dt;
+                }
+                1 => {
+                    d.vy = (d.vy + g_acc * 0.25 * dt).min(bhf * 0.55);
+                    d.y += d.vy * dt;
+                }
+                _ => {
+                    d.vy += g_acc * 1.4 * dt;
+                    d.y += d.vy * dt;
+                    d.x += d.vx * dt;
+                }
+            }
+            if d.kind != 2 && d.y >= bhf - 2.0 {
+                d.y = f32::MAX; // landed: gone, and it throws a few drops up
+                if d.kind == 0 {
+                    splashes.push(*d);
+                }
+            }
+            if d.kind == 2 && d.vy > 0.0 && d.y >= bhf - 2.0 {
+                d.y = f32::MAX;
+            }
+        }
+        st.drips.retain(|d| d.y < f32::MAX && d.x > -4.0 && d.x < bwf + 4.0);
+        for (n, d) in splashes.iter().enumerate() {
+            for k in 0..2 {
+                if st.drips.len() < MAX_DRIPS {
+                    let side = if k == 0 { -1.0 } else { 1.0 };
+                    st.drips.push(Drip {
+                        x: d.x,
+                        y: bhf - 3.0,
+                        vx: side * bhf * (0.10 + 0.18 * hash2(n as u32, k as u32 + 3)),
+                        vy: -bhf * (0.28 + 0.3 * hash2(n as u32 + 9, k as u32)),
+                        len: 3.0,
+                        hue: d.hue,
+                        kind: 2,
+                    });
+                }
+            }
+        }
+        // New drips: a slow trickle always, more with the bass, a burst on the beat (none in calm mode, which also trickles slower).
+        st.drip_in -= dt * (0.9 + bass * 5.0) * calm;
+        let mut spawn = 0;
+        if st.drip_in <= 0.0 {
+            st.drip_in = 0.35;
+            spawn += 1;
+        }
+        if fresh && calm >= 1.0 {
+            spawn += 6;
+        }
+        for k in 0..spawn {
+            if st.drips.len() >= MAX_DRIPS {
+                break;
+            }
+            let r = hash2((st.t * 977.0) as u32 ^ (k * 131), st.drips.len() as u32 + 11);
+            let r2 = hash2((st.t * 313.0) as u32 + k, 71);
+            let hue = (r2 * 255.0) as u8;
+            // Along the top edge, or running down the left or the right edge.
+            let (x, y, kind) = if r < 0.6 {
+                (bwf * (0.02 + 0.96 * r2), 1.0, 0u8)
+            } else if r < 0.8 {
+                (2.0, bhf * 0.5 * r2, 1)
+            } else {
+                (bwf - 3.0, bhf * 0.5 * r2, 1)
+            };
+            st.drips.push(Drip {
+                x,
+                y,
+                vx: 0.0,
+                vy: bhf * (0.04 + 0.1 * r2),
+                len: bhf * (0.04 + 0.08 * r),
+                hue,
+                kind,
+            });
+        }
         // The beat starts a ring (once per pulse: the pulse gap already caps them at three a second) and a floor cascade.
         if fresh {
             if st.rings.len() < 5 {
@@ -117,6 +244,10 @@ impl Viz {
             }
             st.cascade = 0.0;
             st.hue_kick += 0.07;
+            if calm >= 1.0 {
+                st.beat_flash = 1.0;
+                st.beat_count = st.beat_count.wrapping_add(1);
+            }
         }
     }
 
@@ -149,64 +280,133 @@ impl Viz {
         }
     }
 
+    /// The speaker wall: two big subs, a column of mids between them and a row of tweeters above, filling the picture; each driver pumps with its
+    /// own band. Light drips run down the edges and sparkles twinkle all the way round the frame.
     fn scene_subwoofer(&mut self) {
         let g = self.gain();
         let (bw, bh) = (self.bw as f32, self.bh as f32);
-        let (cx, cy) = (bw * 0.5, bh * 0.52);
-        let side = bh * 0.86;
         let tint = self.col(((self.phase * 6.0) as usize) & 255);
-        // The cabinet: a dark slab with a bevelled edge in the palette tint, swelling a hair with the low end.
-        let swell = 1.0 + self.bass * 0.012;
-        let half = side * 0.5 * swell;
-        self.rect_add(
-            (cx - half) as i32,
-            (cy - half) as i32,
-            (cx + half) as i32,
-            (cy + half) as i32,
-            [14, 12, 22],
-            1.0,
-        );
-        for e in 0..3 {
-            let o = half - e as f32 * 1.5;
-            let edge = scale_c(tint, 0.28 - e as f32 * 0.07);
-            self.line_add(cx - o, cy - o, cx + o, cy - o, edge, 1.0, 0);
-            self.line_add(cx - o, cy + o, cx + o, cy + o, edge, 1.0, 0);
-            self.line_add(cx - o, cy - o, cx - o, cy + o, edge, 1.0, 0);
-            self.line_add(cx + o, cy - o, cx + o, cy + o, edge, 1.0, 0);
+        // The cabinet is the whole picture: a bevelled frame in the palette tint with a screw in each corner.
+        for e in 0..4 {
+            let o = 1.5 + e as f32 * 1.6;
+            let edge = scale_c(tint, 0.34 - e as f32 * 0.07);
+            self.line_add(o, o, bw - o, o, edge, 1.0, 0);
+            self.line_add(o, bh - o, bw - o, bh - o, edge, 1.0, 0);
+            self.line_add(o, o, o, bh - o, edge, 1.0, 0);
+            self.line_add(bw - o, o, bw - o, bh - o, edge, 1.0, 0);
         }
-        // The driver: surround, cone (its depth shading follows the bass), dust cap with a moving highlight.
-        let r = half * 0.78;
-        let excursion = self.bass * 0.06 + self.level * 0.02;
-        self.disc_add(cx, cy, r * 1.04, [60, 56, 76], 0.9);
-        for ring in 0..9 {
-            let f = ring as f32 / 9.0;
+        let screw = (bh * 0.018).max(2.0);
+        for &(sx, sy) in &[
+            (bw * 0.025, bh * 0.045),
+            (bw * 0.975, bh * 0.045),
+            (bw * 0.025, bh * 0.955),
+            (bw * 0.975, bh * 0.955),
+        ] {
+            self.disc_add(sx, sy, screw, [150, 146, 170], 0.7);
+        }
+        let low = |a: usize, b: usize, s: &Self| (a..b).map(|i| s.bands[i]).sum::<f32>() / (b - a) as f32;
+        let (sub_l, sub_r) =
+            ((self.bass * 0.6 + low(0, 4, self)).min(1.2), (self.bass * 0.6 + low(2, 6, self)).min(1.2));
+        let mids = low(8, 20, self).max(self.mid * 0.8);
+        let highs = low(22, 32, self).max(self.treble * 0.8);
+        // The two subs, big and low.
+        let r_sub = (bw * 0.20).min(bh * 0.36);
+        let (cy_sub, x_l, x_r) = (bh * 0.58, bw * 0.235, bw * 0.765);
+        self.driver(x_l, cy_sub, r_sub, sub_l, tint, g, 0.09);
+        self.driver(x_r, cy_sub, r_sub, sub_r, tint, g, 0.09);
+        // Two mids stacked between them.
+        let gap = (x_r - x_l) * 0.5 - r_sub - 4.0;
+        let r_mid = (bh * 0.115).min(gap * 0.95).max(6.0);
+        let mid_tint = self.col(((self.phase * 6.0) as usize + 50) & 255);
+        self.driver(bw * 0.5, bh * 0.43, r_mid, mids, mid_tint, g, 0.07);
+        self.driver(bw * 0.5, bh * 0.76, r_mid, (mids * 0.9).min(1.2), mid_tint, g, 0.07);
+        // A row of tweeters along the top: small domes that flutter with the highs.
+        let hi_tint = self.col(((self.phase * 6.0) as usize + 110) & 255);
+        let r_tw = (bh * 0.045).max(3.0);
+        for i in 0..6 {
+            let x = bw * (0.13 + 0.148 * i as f32);
+            let k = (highs * (0.7 + 0.3 * sinf(self.phase * 9.0 + i as f32 * 1.7))).clamp(0.0, 1.2);
+            self.driver(x, bh * 0.14, r_tw, k, hi_tint, g, 0.12);
+        }
+        // The ports of the subs throw pressure rings on the beat.
+        let rings = self.scenes.rings.clone();
+        for &px in &[x_l, x_r] {
+            for rg in &rings {
+                self.ring_add(px, cy_sub, r_sub * (0.5 + rg.r * 1.6), 1.8, scale_c(tint, 0.5 * rg.life * g));
+            }
+        }
+        // Light dripping down the edges, and sparkles twinkling all the way round.
+        let drips = self.scenes.drips.clone();
+        for d in &drips {
+            let c = self.col((d.hue as usize + (self.phase * 14.0) as usize) & 255);
+            let steps = (d.len as i32).max(2);
+            for s in 0..steps {
+                let f = s as f32 / steps as f32;
+                // The trail fades behind the drip; the head is a bright bead. A splash trails along its own path.
+                let (tx, ty) = if d.kind == 2 {
+                    (d.x - d.vx * 0.04 * f, d.y - d.vy * 0.04 * f)
+                } else {
+                    (d.x, d.y - f * d.len)
+                };
+                self.add(tx as i32, ty as i32, c, (1.0 - f) * 0.55 * g);
+            }
+            self.disc_add(d.x, d.y, 1.8, scale_c(c, 1.0), 0.9 * g);
+        }
+        let reach = (bh * 0.014).max(2.0);
+        for i in 0..EDGE_SPARKS {
+            let u = hash2(i as u32, 1);
+            let inset = 2.0 + hash2(i as u32, 2) * bh * 0.03;
+            // A point on the frame: u runs round the perimeter.
+            let per = 2.0 * (bw + bh);
+            let d = u * per;
+            let (x, y) = if d < bw {
+                (d, inset)
+            } else if d < bw + bh {
+                (bw - inset, d - bw)
+            } else if d < 2.0 * bw + bh {
+                (bw - (d - bw - bh), bh - inset)
+            } else {
+                (inset, bh - (d - 2.0 * bw - bh))
+            };
+            let rate = 1.5 + hash2(i as u32, 3) * 3.5;
+            let tw = sinf(self.phase * rate * 4.0 + hash2(i as u32, 4) * 40.0).max(0.0);
+            let k = tw * tw * tw * (0.25 + highs * 0.9 + self.level * 0.4).min(1.4) * g;
+            if k < 0.05 {
+                continue;
+            }
+            let c = self.col(((hash2(i as u32, 5) * 255.0) as usize + (self.phase * 20.0) as usize) & 255);
+            self.add(x as i32, y as i32, [255, 255, 255], k);
+            let arm = (reach * (0.5 + tw)) as i32;
+            for o in 1..=arm {
+                let f = k * (1.0 - o as f32 / (arm + 1) as f32);
+                self.add(x as i32 + o, y as i32, c, f);
+                self.add(x as i32 - o, y as i32, c, f);
+                self.add(x as i32, y as i32 + o, c, f);
+                self.add(x as i32, y as i32 - o, c, f);
+            }
+        }
+    }
+
+    /// A speaker driver at (`cx`, `cy`): surround, cone (its shading follows `level`), dust cap or dome with a highlight. The cone pumps with
+    /// the level, `pump` being how far at full level (a fraction of the radius).
+    #[allow(clippy::too_many_arguments)]
+    fn driver(&mut self, cx: f32, cy: f32, r: f32, level: f32, tint: [u8; 3], g: f32, pump: f32) {
+        let excursion = level * pump * 0.9;
+        self.disc_fast(cx, cy, r * 1.08, [54, 50, 70], 1.6);
+        let rings = ((r / 5.0) as usize).clamp(3, 9);
+        for ring in 0..rings {
+            let f = ring as f32 / rings as f32;
             let rr = r * (1.0 - f * 0.78) * (1.0 + excursion * (1.0 - f));
-            let shade = 0.10 + 0.20 * f + self.bass * 0.18 * (1.0 - f);
-            let c = scale_c(tint, shade * g);
-            self.ring_add(cx, cy, rr, 1.6, c);
+            let shade = 0.10 + 0.20 * f + level * 0.22 * (1.0 - f);
+            self.ring_add(cx, cy, rr, 1.4, scale_c(tint, shade * g));
         }
-        let cap = r * 0.22 * (1.0 + excursion * 1.5);
+        let cap = r * 0.24 * (1.0 + excursion * 1.6);
         self.disc_add(cx, cy, cap, [190, 186, 210], 0.9);
         let hx = cx + cosf(self.scenes.reel * 0.4) * cap * 0.35;
         let hy = cy - sinf(self.scenes.reel * 0.4) * cap * 0.35;
-        self.disc_add(hx, hy, cap * 0.4, [255, 255, 255], 0.55 + self.treble * 0.3);
-        // Two ports on the lower corners fire pressure rings on the beat.
-        for &px in &[cx - half * 0.62, cx + half * 0.62] {
-            let py = cy + half * 0.78;
-            self.rect_add(
-                (px - 5.0) as i32,
-                (py - 2.0) as i32,
-                (px + 5.0) as i32,
-                (py + 2.0) as i32,
-                [4, 4, 8],
-                1.0,
-            );
-            let rings = self.scenes.rings.clone();
-            for rg in rings {
-                let rad = rg.r * bh * 0.7;
-                self.ring_add(px, py, rad, 1.8, scale_c(tint, 0.55 * rg.life * g));
-            }
-        }
+        self.disc_add(hx, hy, cap * 0.4, [255, 255, 255], 0.5 + level * 0.4);
+        // The whole driver glows with its own level.
+        self.disc_fast(cx, cy, r * 1.3, tint, 0.08 + level * 0.22);
     }
 
     fn scene_boombox(&mut self) {
@@ -329,7 +529,7 @@ impl Viz {
     }
 
     /// A circle outline `thick` pixels wide, in `c` (additive).
-    fn ring_add(&mut self, cx: f32, cy: f32, r: f32, thick: f32, c: [u8; 3]) {
+    pub(super) fn ring_add(&mut self, cx: f32, cy: f32, r: f32, thick: f32, c: [u8; 3]) {
         if r < 1.0 {
             return;
         }
@@ -475,30 +675,99 @@ impl Viz {
                 (0.11 + self.treble * 0.12) * g,
             );
         }
-        // The light the facets throw: a lattice of squares sweeping the room in lockstep with the spin.
-        let nu = 20usize;
-        let nv = 10usize;
+        // Every mirror facet of the ball: its normal (spun with the ball) and what it throws back at the three lights that circle the room.
+        // `glints[tile]` is how hard the facet flashes at the viewer; `spots` are the squares of light it throws across the room.
+        let (nu, nv) = (TILES_U, TILES_V);
+        let spin = self.scenes.ball_spin;
+        let bf = self.scenes.beat_flash;
+        let beats = self.scenes.beat_count;
+        let mut glints = [0f32; TILES_U * TILES_V];
+        let lights =
+            [(self.phase * 0.31, 0.25f32), (self.phase * 0.23 + 2.1, -0.15), (self.phase * 0.41 + 4.2, 0.45)];
+        let hot = 0.5 + self.treble * 0.9;
         for iu in 0..nu {
-            for iv in 1..nv {
-                let seed = (iu * nv + iv) as u32;
-                if hash2(seed, 77) > 0.55 {
-                    continue;
+            let lon = (iu as f32 + 0.5) / nu as f32 * TAU + spin;
+            let (sl, cl) = (sinf(lon), cosf(lon));
+            for iv in 0..nv {
+                let lat = ((iv as f32 + 0.5) / nv as f32 - 0.5) * core::f32::consts::PI;
+                let (cla, sla) = (cosf(lat), sinf(lat));
+                let (nx, ny, nz) = (cla * sl, sla, cla * cl);
+                let tile = iu * nv + iv;
+                if nz > -0.1 {
+                    // Mirror reflection of the viewer's ray, against each light.
+                    let (rx, ry, rz) = (2.0 * nz * nx, 2.0 * nz * ny, 2.0 * nz * nz - 1.0);
+                    let mut gl = 0.0;
+                    for &(la, lh) in &lights {
+                        let (lx, ly, lz) = (cosf(la) * 0.9, lh, sinf(la) * 0.9 + 0.3);
+                        let inv = 1.0 / sqrtf(lx * lx + ly * ly + lz * lz);
+                        let d = ((rx * lx + ry * ly + rz * lz) * inv).max(0.0);
+                        let d2 = d * d;
+                        let d4 = d2 * d2;
+                        let d8 = d4 * d4;
+                        gl += d8 * d8 * d8; // d^24
+                    }
+                    // Some facets flash on each beat (another set every time).
+                    let flash = if hash2(tile as u32, beats) < 0.28 { bf } else { 0.0 };
+                    glints[tile] = (gl * 2.4 * hot + flash * 0.9).min(1.6);
                 }
-                let lon = iu as f32 / nu as f32 * TAU + self.scenes.ball_spin;
-                let lat = (iv as f32 / nv as f32 - 0.5) * core::f32::consts::PI;
-                // A facet's normal, spun about the vertical axis; the spot lands where it reflects the light from the front.
-                let (nx, ny, nz) = (cosf(lat) * sinf(lon), sinf(lat), cosf(lat) * cosf(lon));
-                if nz < -0.2 {
-                    continue; // facing away from the viewer: its light goes to the back wall, hidden by the ball
+                // The spot this facet throws: where its mirror image of the front light lands in the room.
+                if nz < -0.2 || hash2(tile as u32, 77) > 0.72 {
+                    continue;
                 }
                 let (dx, dy) = (nx * 2.0, ny * 1.4 - 0.2 * nz);
                 let (sx, sy) = (cx + dx * bw * 0.62, cy + dy * bh * 0.78);
-                let hue = (hash2(seed, 5) * 255.0) as usize + hue_base;
-                let c = self.col(hue & 255);
-                let tw = 0.5 + 0.5 * sinf(self.phase * 3.0 + seed as f32);
-                let k = (0.35 + 0.5 * tw * (0.5 + self.treble)) * g;
-                let sz = 1 + (self.level * 2.0) as i32;
-                self.rect_add(sx as i32 - sz, sy as i32 - sz, sx as i32 + sz, sy as i32 + sz, c, k);
+                let h = hash2(tile as u32, 5);
+                let c = self.col(((h * 255.0) as usize + hue_base) & 255);
+                let tw = 0.5 + 0.5 * sinf(self.phase * 3.0 + tile as f32);
+                let on_beat = if hash2(tile as u32, beats ^ 0x55) < 0.3 { bf } else { 0.0 };
+                let k = ((0.32 + 0.5 * tw * (0.5 + self.treble)) * (0.6 + 0.8 * glints[tile].min(1.0))
+                    + on_beat * 0.7)
+                    * g;
+                let sz = 1.0 + self.level * 2.0 + (bh * 0.004) + on_beat * 1.5;
+                // A tilted square (the facet's shape, turned as the ball turns).
+                let ang = lon * 0.5;
+                let (ca, sa) = (cosf(ang), sinf(ang));
+                let n_in = (sz * 2.0) as i32;
+                for oy in -n_in..=n_in {
+                    for ox in -n_in..=n_in {
+                        let (u, v) = (ox as f32 * ca + oy as f32 * sa, -(ox as f32) * sa + oy as f32 * ca);
+                        if fabsf(u) <= sz && fabsf(v) <= sz {
+                            self.add(sx as i32 + ox, sy as i32 + oy, c, k);
+                        }
+                    }
+                }
+                // The bright ones twinkle: a cross of light through the spot.
+                if k > 0.55 {
+                    let arm = (sz * 2.5 + 2.0 + on_beat * 3.0) as i32;
+                    for o in 1..=arm {
+                        let f = k * 0.6 * (1.0 - o as f32 / (arm + 1) as f32);
+                        self.add(sx as i32 + o, sy as i32, [255, 255, 255], f);
+                        self.add(sx as i32 - o, sy as i32, [255, 255, 255], f);
+                        self.add(sx as i32, sy as i32 + o, [255, 255, 255], f);
+                        self.add(sx as i32, sy as i32 - o, [255, 255, 255], f);
+                    }
+                }
+            }
+        }
+        // Sparkles drifting in the room, glinting as the ball's light passes.
+        for i in 0..ROOM_SPARKS {
+            let (hx, hy) = (hash2(i as u32, 21), hash2(i as u32, 22));
+            let drift = self.phase * (0.02 + hx * 0.04);
+            let (x, y) = (((hx + drift * 0.5) % 1.0) * bw, ((hy + drift * 0.3) % 1.0) * bh * 0.82);
+            let tw = sinf(self.phase * (2.0 + hy * 5.0) * 3.0 + hx * 50.0).max(0.0);
+            let k = tw * tw * tw * (0.35 + self.treble * 0.8 + bf * 0.5) * g;
+            if k < 0.06 {
+                continue;
+            }
+            let c = self.col(((hx * 255.0) as usize + hue_base) & 255);
+            self.add(x as i32, y as i32, [255, 255, 255], k);
+            let arm = (1.0 + tw * 2.5) as i32;
+            for o in 1..=arm {
+                let f = k * (1.0 - o as f32 / (arm + 1) as f32);
+                self.add(x as i32 + o, y as i32, c, f);
+                self.add(x as i32 - o, y as i32, c, f);
+                self.add(x as i32, y as i32 + o, c, f);
+                self.add(x as i32, y as i32 - o, c, f);
             }
         }
         // The chain and the ball.
@@ -512,28 +781,38 @@ impl Viz {
                 }
                 let pz = sqrtf(1.0 - d2);
                 // Longitude and latitude on the sphere, spun, quantised into mirror tiles with a thin grout.
-                let lon = libm::atan2f(px, pz) + self.scenes.ball_spin;
+                let lon = libm::atan2f(px, pz) + spin;
                 let lat = libm::asinf(py);
-                let u = lon / TAU * 20.0;
-                let v = (lat / core::f32::consts::PI + 0.5) * 12.0;
+                let u = lon / TAU * nu as f32;
+                let v = (lat / core::f32::consts::PI + 0.5) * nv as f32;
                 let (fu, fv) = (u - floorf(u), v - floorf(v));
-                let grout = fu < 0.1 || fv < 0.1;
-                let tile = (floorf(u) as i32 & 63) as u32 * 16 + floorf(v) as i32 as u32;
-                let h = hash2(tile, 9);
+                let grout = fu < 0.08 || fv < 0.08;
+                let iu = (floorf(u) as i32).rem_euclid(nu as i32) as usize;
+                let iv = (floorf(v) as i32).clamp(0, nv as i32 - 1) as usize;
+                let tile = iu * nv + iv;
+                let h = hash2(tile as u32, 9);
                 let lit = 0.25 + 0.75 * h * (0.5 + 0.5 * sinf(self.phase * 2.2 + h * 20.0));
                 let shade = (0.25 + 0.75 * pz) * lit;
                 let c = if grout { [20, 18, 30] } else { self.col(((h * 255.0) as usize + hue_base) & 255) };
+                let gl = glints[tile];
+                // A mirror: the tile's own light, plus a hard white-hot glint where it catches a light, brighter towards a tile's middle.
+                let centre = 1.0 - ((fu - 0.5) * (fu - 0.5) + (fv - 0.5) * (fv - 0.5)) * 2.0;
                 let k = if grout { 0.8 } else { (0.35 + shade * (0.7 + self.treble * 0.5)).min(1.2) * g };
                 let i = (y.max(0) as usize).min(self.bh - 1) * self.bw + (x.max(0) as usize).min(self.bw - 1);
                 let base = [self.buf[i * 4], self.buf[i * 4 + 1], self.buf[i * 4 + 2]];
                 for ch in 0..3 {
-                    let v = if grout { c[ch] as f32 } else { (c[ch] as f32 * k + 24.0 * pz).min(255.0) };
-                    self.buf[i * 4 + ch] = if grout { v as u8 } else { v.max(base[ch] as f32 * 0.2) as u8 };
+                    if grout {
+                        self.buf[i * 4 + ch] = c[ch];
+                    } else {
+                        let lit = (c[ch] as f32 * k + 24.0 * pz).max(base[ch] as f32 * 0.2);
+                        let white = 255.0 * gl * centre.max(0.2);
+                        self.buf[i * 4 + ch] = (lit + white).min(255.0) as u8;
+                    }
                 }
             }
         }
         // A bloom behind the ball that swells with the bass, and a specular glint.
-        self.disc_add(cx, cy, r * 1.9, self.col((hue_base + 40) & 255), 0.10 + self.bass * 0.14);
+        self.disc_add(cx, cy, r * 1.9, self.col((hue_base + 40) & 255), 0.10 + self.bass * 0.14 + bf * 0.10);
         self.disc_add(cx - r * 0.35, cy - r * 0.4, r * 0.18, [255, 255, 255], 0.6);
         let _ = fabsf(0.0);
         let _ = Effect::DiscoBall;

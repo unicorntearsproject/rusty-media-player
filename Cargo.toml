@@ -31,7 +31,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0-rc4"
+version = "1.0.0-rc5"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -98,6 +98,10 @@ opt-level = 2
 [profile.dev.package.rvp-app]
 opt-level = 2
 [profile.dev.package.rvp-host-desktop]
+opt-level = 2
+[profile.dev.package.rvp-viz]
+opt-level = 2
+[profile.test.package.rvp-viz]
 opt-level = 2
 [profile.dev.package.rvp-par]
 opt-level = 2

@@ -1,4 +1,5 @@
-//! The visualizer effects: spectrum bars, oscilloscope, tunnel, beat-reactive particles and plasma, drawn on the CPU into a
+//! The visualizer effects: spectrum bars, oscilloscope, tunnel, beat-reactive particles, plasma, the Bass machine, Unicorn Tears, the Disco ball, the
+//! Bass cathedral and Sun Ship 3000, drawn on the CPU into a
 //! small RGBA picture that the UI scales up to the window. Driven by [`VizSummary`]s (bands, level, onset) and the latest
 //! waveform, so they look the same in a browser, on the desktop and in Rusty Bucket.
 //!
@@ -9,7 +10,9 @@
 //! **Motion safety.** Brightness changes on the beat are capped at 12 percent and at three a second (the general flash
 //! threshold), nothing ever flashes the whole picture, and with `reduce_motion` the effects run calm: no beat pulses or bursts,
 //! slow drift, heavy smoothing.
+mod cathedral;
 mod scenes;
+mod sunship;
 
 use alloc::vec::Vec;
 use libm::{atan2f, cosf, powf, sinf, sqrtf};
@@ -44,10 +47,14 @@ pub enum Effect {
     UnicornTears,
     /// A mirror ball throwing sweeping squares of light across the room.
     DiscoBall,
+    /// A flight down an endless nave: pillars that flex with the bass, a core of light, godrays, a recoil and a shockwave on the beat.
+    BassCathedral,
+    /// A cosmic space battle: enemy formations, laser streams, a ship pushed by the bass and a beat explosion.
+    SunShip,
 }
 
 /// Every effect, in the order the preset switcher steps through them.
-pub const EFFECTS: [Effect; 8] = [
+pub const EFFECTS: [Effect; 10] = [
     Effect::Spectrum,
     Effect::Scope,
     Effect::Tunnel,
@@ -56,6 +63,8 @@ pub const EFFECTS: [Effect; 8] = [
     Effect::BassMachine,
     Effect::UnicornTears,
     Effect::DiscoBall,
+    Effect::BassCathedral,
+    Effect::SunShip,
 ];
 
 impl Effect {
@@ -70,6 +79,8 @@ impl Effect {
             Effect::BassMachine => "Bass machine",
             Effect::UnicornTears => "Unicorn Tears",
             Effect::DiscoBall => "Disco ball",
+            Effect::BassCathedral => "Bass cathedral",
+            Effect::SunShip => "Sun Ship 3000",
         }
     }
 
@@ -85,10 +96,12 @@ impl Effect {
             Effect::Spectrum
             | Effect::Scope
             | Effect::Particles
-            | Effect::BassMachine
             | Effect::UnicornTears
             | Effect::DiscoBall => 2,
             Effect::Tunnel | Effect::Plasma => 4,
+            Effect::BassCathedral => 6,
+            Effect::SunShip => 3,
+            Effect::BassMachine => 3,
         }
     }
 }
@@ -409,8 +422,32 @@ impl Viz {
             Effect::BassMachine => self.draw_bass_machine(dt, moving, calm),
             Effect::UnicornTears => self.draw_unicorn_tears(dt, moving, calm),
             Effect::DiscoBall => self.draw_disco_ball(dt, moving, calm),
+            Effect::BassCathedral => self.draw_bass_cathedral(dt, moving, calm, input.reduce_motion),
+            Effect::SunShip => self.draw_sun_ship(dt, moving, calm, input.reduce_motion),
         }
         self.frames += 1;
+    }
+
+    /// Keep the picture's mean brightness within the flash limit of the frame before (`prev`, 0 for none): a frame that would be more than
+    /// 12 percent brighter or darker is scaled back to that. Returns this frame's mean. Used by the effects whose beat reaction moves a lot
+    /// of the picture at once.
+    fn limit_jump(&mut self, prev: f32) -> f32 {
+        let sum: u64 = self.buf.chunks_exact(4).map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum();
+        let mean = sum as f32 / (self.buf.len() / 4).max(1) as f32 / 3.0;
+        if prev < 1.0 || mean < 0.5 {
+            return mean;
+        }
+        let target = mean.clamp(prev * (1.0 - PULSE_GAIN), prev * (1.0 + PULSE_GAIN));
+        if (target - mean).abs() > 0.05 {
+            let k = ((target / mean * 256.0) as u32).min(512);
+            for p in self.buf.chunks_exact_mut(4) {
+                for c in &mut p[..3] {
+                    *c = ((*c as u32 * k) >> 8).min(255) as u8;
+                }
+            }
+            return target;
+        }
+        mean
     }
 
     fn gain(&self) -> f32 {
@@ -464,6 +501,25 @@ impl Viz {
                     sqrtf((x as f32 - cx) * (x as f32 - cx) + (y as f32 - cy) * (y as f32 - cy)) / r.max(0.5);
                 if d < 1.0 {
                     let f = 1.0 - d;
+                    self.add(x, y, c, k * f * f);
+                }
+            }
+        }
+    }
+
+    /// A soft disc like `disc_add` but without a square root per pixel: the light falls off with the square of the distance (flatter in the
+    /// middle, sharper at the rim), which is what the big dark glows and surrounds of the speaker wall want.
+    fn disc_fast(&mut self, cx: f32, cy: f32, r: f32, c: [u8; 3], k: f32) {
+        let r = r.max(0.5);
+        let inv = 1.0 / (r * r);
+        let (x0, x1) = (((cx - r) as i32).max(0), ((cx + r) as i32 + 1).min(self.bw as i32 - 1));
+        let (y0, y1) = (((cy - r) as i32).max(0), ((cy + r) as i32 + 1).min(self.bh as i32 - 1));
+        for y in y0..=y1 {
+            let dy = y as f32 - cy;
+            for x in x0..=x1 {
+                let dx = x as f32 - cx;
+                let f = 1.0 - (dx * dx + dy * dy) * inv;
+                if f > 0.0 {
                     self.add(x, y, c, k * f * f);
                 }
             }
@@ -925,10 +981,15 @@ mod tests {
 
     #[test]
     fn effects_and_palettes_step_around() {
-        assert_eq!(Effect::Spectrum.step(-1), Effect::DiscoBall);
-        assert_eq!(Effect::DiscoBall.step(1), Effect::Spectrum);
+        let last = EFFECTS[EFFECTS.len() - 1];
+        assert_eq!(Effect::Spectrum.step(-1), last);
+        assert_eq!(last.step(1), Effect::Spectrum);
         assert_eq!(Effect::Plasma.step(1), Effect::BassMachine);
-        assert_eq!(EFFECTS.len(), 8);
+        assert_eq!(Effect::DiscoBall.step(1), Effect::BassCathedral);
+        assert_eq!(EFFECTS.len(), 10);
+        assert_eq!(Effect::BassCathedral.step(1), Effect::SunShip);
+        assert_eq!(Effect::SunShip.name(), "Sun Ship 3000");
+        assert_eq!(Effect::BassCathedral.name(), "Bass cathedral");
         assert_eq!(Effect::UnicornTears.name(), "Unicorn Tears");
         assert_eq!(Palette::Tears.next().next().next().next(), Palette::Tears);
         assert_eq!(Palette::Aurora.next(), Palette::Rainbow);
@@ -944,5 +1005,169 @@ mod tests {
         assert_eq!(lut[0], [255, 43, 214]);
         assert!(lut.iter().all(|c| c.iter().any(|&v| v > 0)));
         let _ = vec![0u8; 1];
+    }
+
+    // ---- the visualizer round: Bass cathedral, Sun Ship 3000, the speaker wall and the reworked disco ball ------------------------
+
+    const ROUND: [Effect; 4] =
+        [Effect::BassCathedral, Effect::SunShip, Effect::BassMachine, Effect::DiscoBall];
+
+    fn run(
+        v: &mut Viz,
+        w: usize,
+        h: usize,
+        frames: usize,
+        calm: bool,
+        beat_every: usize,
+        loud: f32,
+    ) -> Vec<f64> {
+        let mut means = Vec::new();
+        let mut now = 0i64;
+        for f in 0..frames {
+            for k in 0..3 {
+                let onset = beat_every > 0 && f % beat_every == 0 && k == 0;
+                v.feed(&summary(now + k * 10_700, loud, onset), calm);
+            }
+            v.render(w, h, &FrameInput { now_us: now, playing: true, reduce_motion: calm, scope: &[] });
+            means.push(mean_brightness(v));
+            now += 33_000;
+        }
+        means
+    }
+
+    #[test]
+    fn the_round_draws_within_the_pixel_budget_at_1080p_and_4k() {
+        for e in ROUND {
+            for (w, h) in [(1920usize, 1080usize), (3840, 2160), (800, 450)] {
+                let mut v = Viz::new();
+                v.effect = e;
+                run(&mut v, w, h, 3, false, 2, 0.6);
+                let (px, bw, bh) = v.picture();
+                assert_eq!(px.len(), bw * bh * 4, "{e:?} {w}x{h}");
+                assert!(bw * bh <= MAX_PIXELS, "{e:?} at {w}x{h} draws {bw}x{bh} pixels");
+                // A fraction of the window at 1080p: the cost per frame is bounded by the picture, never by the window.
+                if w == 1920 {
+                    assert!(bw * bh <= 960 * 540, "{e:?} draws {bw}x{bh} for a 1080p window");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_round_lights_up_with_music_and_every_palette_works() {
+        for e in ROUND {
+            for pal in PALETTES {
+                let mut v = Viz::new();
+                v.effect = e;
+                v.palette = pal;
+                let loud = run(&mut v, 640, 360, 30, false, 8, 0.7);
+                let mut q = Viz::new();
+                q.effect = e;
+                q.palette = pal;
+                let quiet = run(&mut q, 640, 360, 30, false, 0, 0.0);
+                assert!(
+                    loud[29] > quiet[29] * 1.05 + 1.0,
+                    "{e:?} {pal:?}: loud {} vs quiet {}",
+                    loud[29],
+                    quiet[29]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_round_never_flashes_the_picture_and_is_calm_in_reduced_motion() {
+        for e in ROUND {
+            // Beats every 8th frame (about 4 a second, more than the cap allows): the mean brightness may not jump by more than the
+            // shared pulse (12 percent) from one frame to the next, plus what the effect's own motion adds.
+            let mut v = Viz::new();
+            v.effect = e;
+            let means = run(&mut v, 640, 360, 120, false, 8, 0.7);
+            let steady = means[60..].iter().sum::<f64>() / 60.0;
+            for w in means[10..].windows(2) {
+                assert!(
+                    (w[1] - w[0]).abs() <= steady * 0.25 + 2.0,
+                    "{e:?}: {} -> {} (steady {steady})",
+                    w[0],
+                    w[1]
+                );
+            }
+            // Calm mode: no beat reaction at all (the same music with and without beats looks the same), no pulses, small steps.
+            let mut a = Viz::new();
+            a.effect = e;
+            let with_beats = run(&mut a, 640, 360, 60, true, 8, 0.7);
+            let mut b = Viz::new();
+            b.effect = e;
+            let without = run(&mut b, 640, 360, 60, true, 0, 0.7);
+            assert_eq!(hash(&a), hash(&b), "{e:?} reacts to beats in calm mode");
+            assert_eq!(with_beats, without);
+            for w in with_beats[10..].windows(2) {
+                assert!((w[1] - w[0]).abs() <= steady * 0.1 + 1.0, "{e:?} calm: {} -> {}", w[0], w[1]);
+            }
+        }
+    }
+
+    #[test]
+    fn a_beat_is_answered_by_each_of_the_round_and_a_paused_picture_stays() {
+        for e in ROUND {
+            let mut v = Viz::new();
+            v.effect = e;
+            // Settle on a steady, loud passage, remember the picture and the next one without a beat; then a beat must change more.
+            run(&mut v, 640, 360, 40, false, 0, 0.7);
+            let before = v.picture().0.to_vec();
+            let mut calm_next = Viz::new();
+            calm_next.effect = e;
+            run(&mut calm_next, 640, 360, 40, false, 0, 0.7);
+            let t = 40 * 33_000;
+            calm_next.feed(&summary(t, 0.7, false), false);
+            calm_next.render(
+                640,
+                360,
+                &FrameInput { now_us: t, playing: true, reduce_motion: false, scope: &[] },
+            );
+            v.feed(&summary(t, 0.7, true), false);
+            v.render(640, 360, &FrameInput { now_us: t, playing: true, reduce_motion: false, scope: &[] });
+            let diff = |a: &[u8], b: &[u8]| {
+                a.iter().zip(b).map(|(x, y)| (*x as i64 - *y as i64).unsigned_abs()).sum::<u64>()
+            };
+            let beat_change = diff(v.picture().0, &before);
+            let quiet_change = diff(calm_next.picture().0, &before);
+            assert!(beat_change > quiet_change, "{e:?}: beat {beat_change} vs steady {quiet_change}");
+            // Paused: the picture is left exactly as it is.
+            let h0 = hash(&v);
+            v.render(
+                640,
+                360,
+                &FrameInput { now_us: t + 500_000, playing: false, reduce_motion: false, scope: &[] },
+            );
+            assert_eq!(hash(&v), h0, "{e:?}");
+        }
+    }
+
+    #[test]
+    fn what_the_speaker_wall_and_the_disco_ball_keep_is_bounded() {
+        // A long, loud, beat-heavy run: the drips, splashes and everything else stay within their caps however long it goes.
+        let mut v = Viz::new();
+        v.effect = Effect::BassMachine;
+        run(&mut v, 1280, 720, 1500, false, 3, 1.0);
+        assert!(v.scenes.drips.len() <= scenes::MAX_DRIPS_FOR_TESTS, "{} drips", v.scenes.drips.len());
+        // The wall (scene 0, the first 22 s) had drips by the time the scene changed; with the beat they run along every kind of edge.
+        let mut w = Viz::new();
+        w.effect = Effect::BassMachine;
+        run(&mut w, 1280, 720, 200, false, 6, 0.9);
+        let kinds: alloc::collections::BTreeSet<u8> =
+            w.scenes.drips.iter().map(|d| d.kind_for_tests()).collect();
+        assert!(kinds.contains(&0) || kinds.contains(&1), "no drips on the edges: {kinds:?}");
+        assert!(!w.scenes.drips.is_empty());
+        // Calm mode drips slower and never in a burst.
+        let mut c = Viz::new();
+        c.effect = Effect::BassMachine;
+        run(&mut c, 1280, 720, 200, true, 6, 0.9);
+        assert!(
+            c.scenes.drips.len() < w.scenes.drips.len() || w.scenes.drips.len() < 4,
+            "{} vs {}",
+            c.scenes.drips.len(),
+            w.scenes.drips.len()
+        );
     }
 }
