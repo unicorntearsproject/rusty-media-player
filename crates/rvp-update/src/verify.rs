@@ -2,8 +2,11 @@
 //!
 //! What is trusted is the key compiled into the program (`packaging/keys/rusty-wave-release.asc`): a download is only used when a
 //! detached signature over its exact bytes verifies with it. The signature must carry that key's fingerprint, must not be older
-//! than the key, and must not be newer than the key's expiry; the key itself must not be revoked.
+//! than the key, and must not be newer than the key's expiry; the key itself must not be revoked. The release is signed in CI by a
+//! signing-only subkey of the release key: a signature by a subkey that belongs to the release key counts for it, as long as the subkey is
+//! not revoked and was valid (not yet expired) when it signed.
 use pgp::composed::{Deserializable, DetachedSignature, SignedPublicKey};
+use pgp::packet::SignatureType;
 use pgp::types::KeyDetails;
 
 /// The release key, armored.
@@ -91,7 +94,12 @@ impl Verifier {
         let (sig, _) =
             DetachedSignature::from_string(text).map_err(|e| VerifyError::BadSignature(e.to_string()))?;
         let issuers = sig.signature.issuer_fingerprint();
-        if !issuers.is_empty() && !issuers.iter().any(|f| f.as_bytes() == self.fingerprint.as_slice()) {
+        // The issuer, when the signature names one, is the release key or one of its subkeys.
+        let is_ours = |f: &[u8]| {
+            f == self.fingerprint.as_slice()
+                || self.key.public_subkeys.iter().any(|s| s.key.fingerprint().as_bytes() == f)
+        };
+        if !issuers.is_empty() && !issuers.iter().any(|f| is_ours(f.as_bytes())) {
             return Err(VerifyError::WrongKey);
         }
         let made = sig.signature.created().map(|t| u64::from(t.as_secs()));
@@ -101,19 +109,33 @@ impl Verifier {
         {
             return Err(VerifyError::OutOfValidity);
         }
-        // The primary key signs for the release key; a signing subkey would be tried the same way.
         if sig.verify(&self.key.primary_key, data).is_ok() {
             return Ok(());
         }
+        let mut out_of_validity = false;
         for sub in &self.key.public_subkeys {
-            if sub.key.fingerprint().as_bytes() != self.fingerprint.as_slice()
-                && sig.verify(&sub.key, data).is_ok()
-            {
-                // A subkey of the release key (the signature names the primary's fingerprint or none).
+            if sub.signatures.iter().any(|s| s.typ() == Some(SignatureType::SubkeyRevocation)) {
+                continue;
+            }
+            // A subkey's own validity: not before it was made, not after the expiry its binding signature gives it.
+            let created = u64::from(sub.key.created_at().as_secs());
+            let expires = sub
+                .signatures
+                .iter()
+                .filter_map(|s| s.key_expiration_time())
+                .map(|d| created + u64::from(d.as_secs()))
+                .min();
+            if made < created || expires.is_some_and(|e| made > e) {
+                if sig.verify(&sub.key, data).is_ok() {
+                    out_of_validity = true;
+                }
+                continue;
+            }
+            if sig.verify(&sub.key, data).is_ok() {
                 return Ok(());
             }
         }
-        Err(VerifyError::Mismatch)
+        Err(if out_of_validity { VerifyError::OutOfValidity } else { VerifyError::Mismatch })
     }
 }
 
@@ -126,6 +148,7 @@ pub(crate) mod testkit {
     //! Throwaway keys and signatures for tests (no gpg needed).
     use pgp::composed::{
         ArmorOptions, DetachedSignature, KeyType, SecretKeyParamsBuilder, SignedPublicKey, SignedSecretKey,
+        SubkeyParamsBuilder,
     };
     use pgp::crypto::hash::HashAlgorithm;
     use pgp::types::{KeyDetails, Password};
@@ -148,6 +171,38 @@ pub(crate) mod testkit {
         let public = SignedPublicKey::from(secret.clone());
         let public_armored = public.to_armored_string(ArmorOptions::default()).unwrap();
         TestKey { secret, public_armored }
+    }
+
+    /// A key whose signing is done by a subkey (the primary only certifies), as the release key's CI signing key.
+    pub fn key_with_signing_subkey(user: &str) -> TestKey {
+        let sub = SubkeyParamsBuilder::default().key_type(KeyType::Ed25519Legacy).can_sign(true).build().unwrap();
+        let params = SecretKeyParamsBuilder::default()
+            .key_type(KeyType::Ed25519Legacy)
+            .can_certify(true)
+            .can_sign(false)
+            .primary_user_id(user.into())
+            .subkey(sub)
+            .build()
+            .unwrap();
+        let mut rng = rand::thread_rng();
+        let secret = params.generate(&mut rng).unwrap();
+        let public = SignedPublicKey::from(secret.clone());
+        let public_armored = public.to_armored_string(ArmorOptions::default()).unwrap();
+        TestKey { secret, public_armored }
+    }
+
+    /// A detached signature made by the key's first secret subkey.
+    pub fn sign_with_subkey(k: &TestKey, data: &[u8]) -> Vec<u8> {
+        let mut rng = rand::thread_rng();
+        let sig = DetachedSignature::sign_binary_data(
+            &mut rng,
+            &k.secret.secret_subkeys[0].key,
+            &Password::empty(),
+            HashAlgorithm::Sha256,
+            data,
+        )
+        .unwrap();
+        sig.to_armored_string(ArmorOptions::default()).unwrap().into_bytes()
     }
 
     pub fn fingerprint(k: &TestKey) -> String {
@@ -193,6 +248,27 @@ mod tests {
         let (a, b) = (testkit::key("A <a@example.com>"), testkit::key("B <b@example.com>"));
         let v = Verifier::from_armored(&a.public_armored).unwrap();
         assert_eq!(v.verify_detached(b"x", &testkit::sign(&b, b"x")), Err(VerifyError::WrongKey));
+    }
+
+    #[test]
+    fn a_signature_by_a_subkey_of_the_release_key_is_accepted() {
+        let k = testkit::key_with_signing_subkey("Release <r@example.com>");
+        let v = Verifier::from_armored(&k.public_armored).unwrap();
+        let sig = testkit::sign_with_subkey(&k, b"the file");
+        assert_eq!(v.verify_detached(b"the file", &sig), Ok(()));
+        assert_eq!(v.verify_detached(b"the filE", &sig), Err(VerifyError::Mismatch));
+        // Another key's subkey is still refused.
+        let other = testkit::key_with_signing_subkey("Other <o@example.com>");
+        assert_eq!(
+            v.verify_detached(b"the file", &testkit::sign_with_subkey(&other, b"the file")),
+            Err(VerifyError::WrongKey)
+        );
+    }
+
+    #[test]
+    fn the_committed_release_key_carries_the_ci_signing_subkey() {
+        let v = Verifier::release();
+        assert!(!v.key.public_subkeys.is_empty(), "the committed key lists no signing subkey");
     }
 
     #[test]
