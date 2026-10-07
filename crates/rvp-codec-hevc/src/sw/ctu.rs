@@ -82,7 +82,9 @@ impl<'a> Dec<'a> {
         removed: &'a [usize],
         slice_idx: usize,
     ) -> Self {
-        let slice_qp = 26 + pps.init_qp_minus26 as i32 + hdr.qp_delta as i32;
+        // A damaged header can put the slice QP out of range; the range is kept so no table lookup can go wrong.
+        let slice_qp = (26 + pps.init_qp_minus26 as i32 + hdr.qp_delta as i32)
+            .clamp(-6 * (sps.bit_depth_luma as i32 - 8), 51);
         let scaling = sps.scaling_list_enabled.then(|| {
             let lists = pps.scaling_list.as_ref().or(sps.scaling_list.as_ref());
             scaling_factors(lists.unwrap_or(&ScalingList::default_lists()))
@@ -1118,9 +1120,12 @@ impl<'a> Dec<'a> {
         if v > 0 && self.cabac.bypass() == 1 {
             v = -v;
         }
+        let off = 6 * (self.bit_depth as i32 - 8);
+        if v < -(26 + off / 2) || v > 25 + off / 2 {
+            return invalid("cu_qp_delta out of range");
+        }
         self.is_cu_qp_delta_coded = true;
         self.cu_qp_delta_val = v;
-        let off = 6 * (self.bit_depth as i32 - 8);
         self.qp_y = ((self.qg_pred + v + 52 + 2 * off) % (52 + off)) - off;
         Ok(())
     }

@@ -319,7 +319,8 @@ pub fn build_ref_lists(h: &SliceHeader, set: &RefSet) -> [Vec<RefIdx>; 2] {
         }
         out[l] = (0..n)
             .map(|i| match &h.list_entry[l] {
-                Some(e) => temp[e[i] as usize],
+                // A damaged list modification cannot point outside the candidates.
+                Some(e) => temp[e.get(i).copied().unwrap_or(0) as usize % temp.len()],
                 None => temp[i],
             })
             .collect();

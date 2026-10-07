@@ -292,8 +292,6 @@ impl<B: Backend> HevcStream<B> {
         }
         let set: RefSet = self.dpb.apply_rps(&rps, max_lsb, irap_no_rasl);
         self.dpb.sweep();
-        // The set's indices into the buffer moved with the sweep: look the references up again by POC.
-        let set = relocate(&self.dpb, &set);
         self.active_sps = Some(sps.id);
         while self.dpb.must_bump(
             sps.max_num_reorder_pics as usize,
@@ -302,6 +300,8 @@ impl<B: Backend> HevcStream<B> {
         ) {
             self.bump()?;
         }
+        // The set's indices into the buffer moved with the sweep and with the pictures just output: look the references up again by POC.
+        let set = relocate(&self.dpb, &set);
         // The decode itself.
         let surface = self.backend.alloc(&sps)?;
         let mut slices = Vec::new();
