@@ -1119,6 +1119,10 @@ Features added on top of M12 (details in the docs named in brackets):
 - **Transport `<< < play > >>`** on every bar (player, library, phone; 44 px touch targets): the outer pair is restart-or-previous (`P`: restarts the item, within 3 s of its start goes to the previous one) and next (`N`; greyed out and inert when nothing follows, `UiModel.can_next`), the inner pair stays the 10 s seeks (`J`/`L`). Shuffle and repeat stay outside. A player window narrower than 680 px keeps the inner three; shuffle and repeat now appear from 880 px.
 - **About**: a closing line, "Please provide suggestions, requests & bug reports via X or GitHub!", whose X and GitHub are links (X profile, the GitHub issues) opened like the other links; where the host cannot open links the addresses follow the words as text.
 
+### After rc9.1 (1.0.0 final)
+
+- **Music button in the player bar**: the music-note button (every layout: desktop from 600 px, phone portrait, the Bucket adapter; in the Tab order) now asks for the music library (`Action::ShowMusic`): the Library face, on Albums when it was last on Videos or About, otherwise on the view it was. What is playing keeps playing (navigation never stops playback). Tooltip: "Music library".
+
 ### Phase A2 of the 2026-10-06 batch
 
 - **Favorites**: a heart on every song and video (rows, posters, the album page's *Favorite* button, the now-playing card, the bar, context menus, key `H`, since rc10 `Ctrl+F`), a Favorites view (key `9`) with Music and Videos

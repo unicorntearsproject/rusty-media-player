@@ -608,3 +608,32 @@ fn keys_and_the_context_of_the_library_work_through_the_app() {
     r.key(Key::Escape);
     assert_eq!(r.app.ui().lib_state().view(), View::NowPlaying);
 }
+
+#[test]
+fn the_players_music_button_goes_to_the_music_library_and_the_music_keeps_playing() {
+    if skip() {
+        return;
+    }
+    let mut r = Rig::scanned();
+    r.act(Action::SetMode(Mode::Library));
+    r.key(Key::Char('3'));
+    r.run(50);
+    r.key(Key::Down);
+    r.key(Key::Down);
+    r.key(Key::Enter);
+    r.run(300);
+    assert_eq!(r.app.model().state, MediaState::Playing);
+    // From the Player face, on the Videos view: the button lands on Albums, in the Library face, and playback goes on.
+    r.act(Action::ShowView(View::Videos));
+    r.act(Action::SetMode(Mode::Player));
+    r.act(Action::ShowMusic);
+    r.run(300);
+    assert_eq!(r.app.ui().mode(), Mode::Library);
+    assert_eq!(r.app.ui().lib_state().view(), View::Albums);
+    assert_eq!(r.app.model().state, MediaState::Playing, "it keeps playing");
+    // On a music view already it keeps the view.
+    r.act(Action::ShowView(View::Tracks));
+    r.act(Action::SetMode(Mode::Player));
+    r.act(Action::ShowMusic);
+    assert_eq!(r.app.ui().lib_state().view(), View::Tracks);
+}

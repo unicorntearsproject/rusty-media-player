@@ -86,6 +86,9 @@ pub enum Action {
     SetMode(Mode),
     /// Switch between the two.
     ToggleMode,
+    /// The music-note button of the player bar: the Library face, on a music view (Albums when it was last on Videos or About). What is
+    /// playing keeps playing.
+    ShowMusic,
     /// Show a view of the library (this switches to the Library face).
     ShowView(View),
     /// Open the visualizer, or leave it for the view it was opened from.

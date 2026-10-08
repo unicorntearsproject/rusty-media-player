@@ -1171,6 +1171,12 @@ impl App {
             }
             Action::SelectSubtitle(id) => self.select_subtitle(id, now),
             Action::SetMode(m) => self.set_mode(m),
+            Action::ShowMusic => {
+                self.set_mode(Mode::Library);
+                if matches!(self.ui.lib_state().view(), rvp_ui::View::Videos | rvp_ui::View::About) {
+                    self.ui.show_view(rvp_ui::View::Albums);
+                }
+            }
             Action::ToggleMode => {
                 let m = if self.ui.mode() == Mode::Library { Mode::Player } else { Mode::Library };
                 self.set_mode(m);

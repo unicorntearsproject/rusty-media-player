@@ -129,7 +129,7 @@ pub(crate) fn btn_text(b: Btn, model: &UiModel, library: bool, view: View) -> Op
             if library {
                 "Switch to the player: the picture and its controls."
             } else {
-                "Switch to the library."
+                "Music library: your albums, artists and songs. What is playing keeps playing."
             },
             "B",
         ),

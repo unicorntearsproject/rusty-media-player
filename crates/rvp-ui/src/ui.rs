@@ -984,7 +984,7 @@ impl Ui {
                 }
             }
             Btn::Playlist => self.open_playlist_popup(model),
-            Btn::ModeSwitch => out.push(Action::SetMode(crate::lib_ui::Mode::Library)),
+            Btn::ModeSwitch => out.push(Action::ShowMusic),
             Btn::Shuffle => out.push(Action::ToggleShuffle),
             Btn::Repeat => out.push(Action::CycleRepeat),
             Btn::Favorite => out.push(Action::ToggleFavorite),
@@ -1543,6 +1543,37 @@ mod tests {
         assert_eq!(click(&mut ui, r.cx(), r.cy(), &m2, 2_000_000), [Action::Next]);
         let p = l.rect_of(Btn::Prev).unwrap();
         assert_eq!(click(&mut ui, p.cx(), p.cy(), &m2, 4_000_000), [Action::Prev]);
+    }
+
+    #[test]
+    fn the_music_note_button_is_on_every_player_bar_and_asks_for_the_music_library() {
+        let m = media();
+        // Desktop widths from 600 up, a phone, and the keyboard reaches it with Tab.
+        for (w, h, dpr) in
+            [(1280u32, 720u32, 1.0f32), (900, 500, 1.0), (640, 400, 1.0), (390, 844, 3.0), (360, 800, 3.0)]
+        {
+            let mut ui = Ui::default();
+            ui.set_size((w as f32 * dpr) as u32, (h as f32 * dpr) as u32, dpr);
+            let l = ui.layout(&m);
+            let r = l.rect_of(Btn::ModeSwitch).unwrap_or_else(|| panic!("no music button at {w}x{h}"));
+            assert!(r.w >= 36.0 * dpr - 0.5 && r.right() <= l.w, "{r:?}");
+            assert_eq!(click(&mut ui, r.cx(), r.cy(), &m, 1), [Action::ShowMusic], "{w}x{h}");
+            // Tab reaches it.
+            let mut ui = Ui::default();
+            ui.set_size((w as f32 * dpr) as u32, (h as f32 * dpr) as u32, dpr);
+            let mut seen = false;
+            for _ in 0..16 {
+                ui.cycle_focus(false, &m);
+                if ui.focus == Some(Btn::ModeSwitch) {
+                    seen = true;
+                    break;
+                }
+            }
+            assert!(seen, "Tab does not reach the music button at {w}x{h}");
+        }
+        // The tooltip names it.
+        let tip = crate::tips::btn_text(Btn::ModeSwitch, &m, false, crate::lib_ui::View::Albums).unwrap();
+        assert!(tip.0.contains("Music library") && tip.1 == "B", "{tip:?}");
     }
 
     #[test]
