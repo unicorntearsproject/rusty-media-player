@@ -9,7 +9,7 @@
 # release already has its files; `force` overrides. No schedules.
 #
 # Every release file gets a detached .asc by the release key (the repository secret RELEASE_GPG_PRIVATE_KEY, a signing-only subkey): there is no
-# unsigned path, and a missing key fails the first job. The publish job lays the files out as Rusty Bucket's publisher requires (docs/packaging.md,
+# unsigned path, and a missing key fails the first job. The publish job lays the files out as Rusty Bucket's publisher requires (docs/release/packaging.md,
 # "Rusty Bucket's release site") and hands them to its action. Windows and macOS code signing stay optional (their own secrets).
 name: Release
 

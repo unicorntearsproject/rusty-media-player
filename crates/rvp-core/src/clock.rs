@@ -1,4 +1,4 @@
-//! The master clock: maps system time to stream time. See `docs/PLAN.md` section 6.
+//! The master clock: maps system time to stream time. See `docs/planning/PLAN.md` section 6.
 //!
 //! The clock holds no time source. Every call passes the current system time (`sys_us`, from the host
 //! clock), which keeps it deterministic and unit-testable.

@@ -3,7 +3,7 @@
 # The crates are vendored offline: `cargo-sources.json` lists every crate of Cargo.lock with its checksum (regenerate it with
 # `cargo xtask dist flatpak-sources` whenever Cargo.lock changes) and the build runs `cargo --offline`, as Flathub requires.
 # The program source is the release tag below; `cargo xtask dist flatpak` swaps it for a tarball of the working tree (between the
-# APP-SOURCE markers) to build what you have locally. See docs/packaging.md.
+# APP-SOURCE markers) to build what you have locally. See docs/release/packaging.md.
 app-id: io.github.unicorntearsproject.RustyWave
 runtime: org.freedesktop.Platform
 runtime-version: '25.08'

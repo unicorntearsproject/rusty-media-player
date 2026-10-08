@@ -1,5 +1,5 @@
 //! The player engine: command/event API, state machine, and (from M1) the cooperative scheduler,
-//! pipeline and A/V sync. See `docs/PLAN.md` sections 5-7.
+//! pipeline and A/V sync. See `docs/planning/PLAN.md` sections 5-7.
 #![no_std]
 
 extern crate alloc;

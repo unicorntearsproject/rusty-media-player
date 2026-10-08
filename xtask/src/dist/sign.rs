@@ -22,7 +22,7 @@ pub(super) fn resolve_key(root: &Path, explicit: Option<String>) -> Result<Strin
     let secret =
         capture(Command::new("gpg").args(["--batch", "--list-secret-keys", "--with-colons", &wanted]))
             .map_err(|_| {
-                format!("the secret key {wanted} is not in your gpg keyring (see docs/packaging.md, Signing)")
+                format!("the secret key {wanted} is not in your gpg keyring (see docs/release/packaging.md, Signing)")
             })?;
     fingerprint(&secret).ok_or_else(|| format!("no secret key {wanted}"))
 }
@@ -367,7 +367,7 @@ impl Ctx {
             );
         }
         // Flatpak repo: the summary is signed and the app commit carries a signature by our key (ostree cannot check it against a throwaway
-        // keyring; the real check is installing from the remote, which verifies it: see docs/release-testing.md).
+        // keyring; the real check is installing from the remote, which verifies it: see docs/release/release-testing.md).
         let fp = self.staging().join("flatpak/repo");
         if fp.join("summary.sig").exists() && have("ostree") {
             let sig_len = fs::metadata(fp.join("summary.sig")).map(|m| m.len()).unwrap_or(0);

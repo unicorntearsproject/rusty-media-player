@@ -58,7 +58,7 @@ Brand: the Rusty Wave icon is the project's official artwork (`assets/brand/rust
 The logo, the icon sizes, the installer bitmaps and the PWA icons (`assets/brand`, `packaging/icons`, `packaging/windows`, `web/icons`,
 `crates/rvp-ui/assets/logo-*.rgba`) are resized or cropped from it with `tools/gen-brand.py` on the Unicorn Tears night background; no VLC art is used.
 
-## Planned (see `docs/PLAN.md` section 8)
+## Planned (see `docs/planning/PLAN.md` section 8)
 
 | Component | License | Obligation |
 | --- | --- | --- |

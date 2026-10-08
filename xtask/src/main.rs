@@ -27,14 +27,14 @@ const USAGE: &str = "usage: cargo xtask <command>
                    (default: the threaded page, 60 s each; --single the single-threaded baseline, --both both)
   fuzz [target|all] [secs]   run cargo-fuzz targets (fuzz/, nightly + cargo-fuzz) for `secs` each (default 600)
   dist <target>    release packages: deb, rpm, appimage, flatpak, windows, installer, pwa, ... (`cargo xtask dist` lists them;
-                   docs/packaging.md explains each)
+                   docs/release/packaging.md explains each)
   bucket [--simd] [--no-threads] [--no-opt] [--no-smoke]
                    build the Rusty Bucket app: the wasm module(s), their imports checked against the documented App API, and
                    target/bucket/Rusty Wave.bucket; then run them in Node (cargo xtask bucket for the details)
   bucket-smoke     the Node checks alone, on quick builds (lifecycle of both builds, thread start-up contract)
   bucket-e2e [--sim PATH] [--only NAME...] [-v]
                    run the packed app through the Bucket Simulator scenarios, headless (skipped when it is not installed)
-  licenses         not implemented yet (see docs/PLAN.md)";
+  licenses         not implemented yet (see docs/planning/PLAN.md)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

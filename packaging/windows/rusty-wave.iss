@@ -13,7 +13,7 @@
 ; settings and the library index under %APPDATA%\rusty-wave.
 ;
 ; Signing: pass /S"rvpsign=<command with $f>" to ISCC and /DSign=1 (CI does this when a code-signing certificate is available;
-; see docs/packaging.md). Until then the installer and rusty-wave.exe are unsigned and SmartScreen asks for "More info > Run anyway".
+; see docs/release/packaging.md). Until then the installer and rusty-wave.exe are unsigned and SmartScreen asks for "More info > Run anyway".
 
 #define AppName "Rusty Wave"
 #define AppExe "rusty-wave.exe"
@@ -105,7 +105,7 @@ Root: HKA; Subkey: "Software\RustyWave\Capabilities"; ValueType: string; ValueNa
 Root: HKA; Subkey: "Software\RustyWave\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Plays video and music, with a library, a queue and a visualizer."; Tasks: assoc
 Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "RustyWave"; ValueData: "Software\RustyWave\Capabilities"; Flags: uninsdeletevalue; Tasks: assoc
 ; Three entries per file type: the capability (what Default apps lists), the type's OpenWithProgids, the program's SupportedTypes.
-; (Generated from the list in docs/packaging.md; keep the two in step with MimeType= in the .desktop file.)
+; (Generated from the list in docs/release/packaging.md; keep the two in step with MimeType= in the .desktop file.)
 Root: HKA; Subkey: "Software\RustyWave\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp4"; ValueData: "{#AppId}.Media"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\.mp4\OpenWithProgids"; ValueType: string; ValueName: "{#AppId}.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".mp4"; ValueData: ""; Tasks: assoc

@@ -591,7 +591,7 @@ setInterval(() => { if (document.hidden && !recovering) player.tick(); }, 25);
 window.rvp = {
   ready: true,
   snapshot: () => {
-    // `ready` is part of the stable subset (docs/host-api.md): true once the player runs, false while it restarts after a crash.
+    // `ready` is part of the stable subset (docs/reference/host-api.md): true once the player runs, false while it restarts after a crash.
     const j = player.snapshot();
     if (j) lastSnapshot = JSON.parse(j);
     return j ? { ...lastSnapshot, ready: true } : { ...lastSnapshot, state: "recovering", ready: false };

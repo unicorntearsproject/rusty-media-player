@@ -44,7 +44,7 @@ use rvp_core::VideoCodec;
 /// The codec this crate decodes.
 pub const CODEC: VideoCodec = VideoCodec::H264;
 
-/// Highest implemented stage (see `docs/PLAN.md` M6); 0 means nothing yet.
+/// Highest implemented stage (see `docs/planning/PLAN.md` M6); 0 means nothing yet.
 pub const STAGE: u8 = 6;
 
 use alloc::boxed::Box;

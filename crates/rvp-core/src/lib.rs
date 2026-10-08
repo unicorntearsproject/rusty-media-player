@@ -1,7 +1,7 @@
 //! Core types for rusty-video-player: time, media descriptors, the master clock and a ring buffer.
 //!
 //! `no_std + alloc`. No I/O, no global clock, no threads: everything time-dependent takes the
-//! current time as an argument so it is deterministic and testable (see `docs/PLAN.md` sections 4-6).
+//! current time as an argument so it is deterministic and testable (see `docs/planning/PLAN.md` sections 4-6).
 #![no_std]
 
 extern crate alloc;

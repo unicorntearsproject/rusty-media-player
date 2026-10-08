@@ -1,5 +1,7 @@
 # Release testing checklist
 
+[Documentation index](../README.md) · [Packaging](packaging.md) · [Updates](../reference/updates.md) · [Keys](../reference/keys.md)
+
 Everything that cannot be checked in a container or under Wine: real machines, real audio hardware, real desktops, a real Windows PC and real
 browsers. Nothing here is public yet; build and sign locally, test, then decide. Tick the boxes, note the machine and the version in the table at the
 end. See [`packaging.md`](packaging.md) for how the files are built and signed.
@@ -59,6 +61,11 @@ Do this once per package type on each machine, with real speakers or headphones.
 - [ ] **Starts**: `rusty-wave --version` prints `rusty-wave 0.0.2`; the window opens in about a second with the right icon and title; no console window on Windows.
 - [ ] **Video**: play an H.264 MP4, an AV1 WebM and a VP9 WebM. Smooth, no tearing, lip sync right (a clapper or a speaking face), seeking with the arrows
   and by clicking the bar lands where it should; full screen (`F` / `F11`) and back; `Space` pauses; `[` `]` change speed with pitch preserved.
+- [ ] **HEVC**: play an H.265 MP4 (Main) and a Main 10 one, 8-bit and 10-bit, and a phone video if you have one: smooth, right colours (HDR looks natural, not washed out), seeking works,
+  the CPU stays reasonable. It is our own decoder, so it plays without a system HEVC decoder (Windows without the HEVC extension, a browser without HEVC).
+- [ ] **Keys of the app**: `H` or `?` opens the keyboard and mouse list (scrolls, `Esc`/`H`/`?` close it); `Ctrl+Q` quits (`Cmd+Q` on a Mac); `Ctrl+F` hearts what is playing (or the
+  selected song), `/` searches; the transport reads `<< < play > >>` (`<<` restarts, again within 3 s goes to the previous item; `>>` is greyed out when nothing follows); in the player the
+  music-note button opens the music library and the music or video keeps playing.
 - [ ] **Audio**: sound comes out of the default device at the right pitch and speed (no chipmunk or slow-motion, no crackle when the window is dragged or the
   machine is busy). Volume (`Up`/`Down`) and mute (`M`) work. Change the default output device while playing (plug in headphones, switch Bluetooth): playback
   continues on the new device or recovers within a couple of seconds, without a crash. Gapless: play an album (a live or classical one) and listen across track
@@ -199,7 +206,7 @@ c) From the single-file bundle (works offline except for the runtime): `flatpak 
 Build a "new" version and serve it from a local folder: `cargo xtask dist appimage --sign --version 0.0.9 --base-url file:///tmp/rw-dist` (embeds `zsync|file:///tmp/rw-dist/...`
 and writes the `.zsync` with that base), `cargo xtask dist checksums --sign`, then `cargo xtask dist manifest --sign --base-url file:///tmp/rw-dist` and copy the AppImage, its `.asc`, the
 `.zsync` (also as `rusty-wave-latest-x86_64.AppImage.zsync`), `rusty-wave-latest.json` and its `.asc` into `/tmp/rw-dist`. Point the installed (older) Rusty Wave at that manifest
-as described in [`updates.md`](updates.md) (the other end of this contract) and check that it finds 0.0.9, verifies the SHA-256 and the signature, and replaces itself. `publish` never
+as described in [`updates.md`](../reference/updates.md) (the other end of this contract) and check that it finds 0.0.9, verifies the SHA-256 and the signature, and replaces itself. `publish` never
 accepts `--base-url`, so a test build can never reach the bucket with local URLs.
 
 ## 4. Quick container checks (dev machine, no hardware)

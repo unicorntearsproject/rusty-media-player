@@ -1,4 +1,4 @@
-//! Minimal task helpers for the cooperative, single-threaded model (see `docs/PLAN.md` section 5).
+//! Minimal task helpers for the cooperative, single-threaded model (see `docs/planning/PLAN.md` section 5).
 //!
 //! Futures in this project never rely on wakers: a task that cannot progress returns `Pending` and is
 //! simply polled again on the next tick. So a no-op waker is enough.

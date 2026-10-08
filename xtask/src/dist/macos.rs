@@ -4,7 +4,7 @@
 //! `RVP_MACOS_SIGN_IDENTITY` (a Developer ID Application identity: hardened runtime, timestamp, `packaging/macos/entitlements.plist`) and
 //! `RVP_MACOS_NOTARY_PROFILE` (a `notarytool store-credentials` keychain profile: submit, wait, staple). Without an identity the bundle is
 //! ad-hoc signed (`codesign --sign -`, which Apple Silicon requires to run at all) and the dmg is unsigned; Gatekeeper then asks the user to
-//! allow it (see `docs/release-testing.md`). Nothing here has been run on macOS yet.
+//! allow it (see `docs/release/release-testing.md`). Nothing here has been run on macOS yet.
 use super::*;
 
 const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];

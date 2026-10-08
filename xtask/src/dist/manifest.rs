@@ -1,6 +1,6 @@
 //! The release file list, the stable `latest` aliases and the update manifest (`rusty-wave-latest.json`).
 //!
-//! The in-app updater reads the manifest (schema 1, see `docs/updates.md`). Its URLs name the immutable versioned files; only the `latest`
+//! The in-app updater reads the manifest (schema 1, see `docs/reference/updates.md`). Its URLs name the immutable versioned files; only the `latest`
 //! aliases are ever overwritten on the distribution bucket. The zsync file is the one exception: the manifest and the AppImage's embedded
 //! update information both name its stable alias (`rusty-wave-latest-x86_64.AppImage.zsync`), whose content is the versioned
 //! `.zsync` and whose internal URL points at the versioned AppImage, so the alias can never mismatch the file it describes.
@@ -147,7 +147,7 @@ pub(super) struct Entry {
 pub(super) fn note(key: &str) -> Option<&'static str> {
     match key {
         "macos-dmg" => Some(
-            "beta: ad-hoc signed only, not signed with a Developer ID and not notarized; Gatekeeper asks to allow it once (docs/release-testing.md, 5b)",
+            "beta: ad-hoc signed only, not signed with a Developer ID and not notarized; Gatekeeper asks to allow it once (docs/release/release-testing.md, 5b)",
         ),
         _ => None,
     }

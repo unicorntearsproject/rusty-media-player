@@ -1,4 +1,4 @@
-//! `cargo xtask dist <target>`: release packages of the desktop app and the PWA. See `docs/packaging.md`.
+//! `cargo xtask dist <target>`: release packages of the desktop app and the PWA. See `docs/release/packaging.md`.
 //!
 //! Everything here shells out to the packaging tools (cargo-deb, cargo-generate-rpm, appimagetool, flatpak-builder, podman, wine, Inno
 //! Setup); there are no secrets in it, and signing is `--sign` (the GPG release key in the user's keyring, see `sign.rs`) or a hook

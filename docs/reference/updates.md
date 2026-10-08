@@ -1,5 +1,7 @@
 # Updates and app-menu integration (desktop)
 
+[Documentation index](../README.md) · [Packaging](../release/packaging.md) · [Release testing](../release/release-testing.md) · [Host interfaces](host-api.md)
+
 The desktop app (`rusty-wave`) can look for a newer version, install it itself where that is safe, and add itself to the desktop's application
 menu when it runs as an AppImage or as the portable Windows program. The web app (PWA) has its own service-worker update flow and none of this.
 The code is in `crates/rvp-update` (everything that touches the network, files and signatures), `crates/rvp-host-desktop/src/services.rs` (the host side) and
@@ -41,7 +43,7 @@ no identifier, no telemetry). Nothing is sent unless the user chose to check or 
 The release key is compiled into the program (`packaging/keys/rusty-wave-release.asc`, fingerprint `E13F F843 723D 5406 8E45  A3FF 54BF 2FA4 0709 3CEE`).
 Verification is pure Rust (`pgp`, rPGP) with no gpg binary needed.
 
-1. The manifest (`rusty-wave-latest.json`, written by `cargo xtask dist manifest`, see [`packaging.md`](packaging.md)) is only read after its detached
+1. The manifest (`rusty-wave-latest.json`, written by `cargo xtask dist manifest`, see [`packaging.md`](../release/packaging.md)) is only read after its detached
    signature `rusty-wave-latest.json.asc` verifies with the release key; it must name that key's fingerprint; a newer `schema` than the program knows is
    refused; versions are compared as semantic versions, so an older (replayed) manifest never offers a downgrade and `0.0.3-ci1` is older than `0.0.3`.
 2. A file is only used after its size and SHA-256 match the manifest *and* its own detached `.asc` verifies with the release key. The signature must carry
@@ -76,7 +78,7 @@ does all of this itself and never shows the offer.
 
 ## Testing the update path locally
 
-See [`release-testing.md`](release-testing.md), "Testing the update path against a local manifest". In short: build the new AppImage and a manifest with
+See [`release-testing.md`](../release/release-testing.md), "Testing the update path against a local manifest". In short: build the new AppImage and a manifest with
 `cargo xtask dist manifest --sign --base-url file:///tmp/rw-dist`, copy the files there, then run the *old* AppImage with
 `RVP_UPDATE_MANIFEST_URL=file:///tmp/rw-dist/rusty-wave-latest.json ./Rusty-Wave-old.AppImage --update-now` under `xvfb-run -a` with DISPLAY and WAYLAND_DISPLAY cleared.
 Versions 0.0.1 and 0.0.2 have no updater, so the "old" build for such a test is a build of this tree before the version bump.

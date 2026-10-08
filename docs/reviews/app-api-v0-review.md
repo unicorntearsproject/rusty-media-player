@@ -1,5 +1,7 @@
 # Review of Rusty Bucket's App API v0 draft (`bucket_v0`)
 
+[Documentation index](../README.md) · [Host interfaces](../reference/host-api.md) · [Plan](../planning/PLAN.md)
+
 Reviewed 2026-10-05 against rvp commit `746da34`. Draft read: `../rust-os/docs/developer/app-api.md`, `app-api-reference.md`,
 `bucket-format.md`, ADR-0039 (and ADR-0023, ADR-0026). Compared with `rvp-host` (traits, `media.rs`, `library.rs`, `input.rs`),
 `rvp_core` (`VideoFrame`, `AudioParams`, `Source` use), `rvp-player` (`TICK_US`, executor, `request_wake`), `rvp-app` (effects,

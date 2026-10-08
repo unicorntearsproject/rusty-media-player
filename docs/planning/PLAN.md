@@ -1,8 +1,9 @@
 # rusty-video-player: Plan
 
-> Status: Milestones 0 to 11 done; scope widened 2026-10-05 (standalone audio and video app, two editions, milestones
-> M7 to M12). Decisions live in `CLAUDE.md`; this file is the architecture and the milestone list. Update it when
-> a decision changes.
+> Status: shipped as 1.0.0-rc9.1 (milestones M0 to M12 and the release-candidate rounds are done; the 1.0.0 final waits for tests on other
+> systems). This file is the architecture and the history of how it got there: the sections up to the milestone list describe the design,
+> the "rounds" at the end record what each release added. What comes next is in [v1.1-media-server.md](v1.1-media-server.md) and the
+> README's Roadmap. Decisions live in [`CLAUDE.md`](../../CLAUDE.md). Back to the [documentation index](../README.md).
 
 ## 1. Goal and non-goals
 
@@ -20,14 +21,14 @@ crates never depend on Rusty Bucket. Rusty Bucket is one more host (`rvp-host-rb
 desktop and headless hosts. Rusty Bucket-only extras (the Bucket Bar widget, streaming) are built on top of the
 host traits, never by changing them. The headless and browser hosts are also the dev/test hosts.
 
-- **In scope (v1):** containers MP4, MKV, WebM; video H.264 (our own decoder), AV1, VP9; audio AAC, MP3, FLAC,
+- **In scope (v1):** containers MP4, MKV, WebM; video H.264 and HEVC (both our own decoders), AV1, VP9; audio AAC, MP3, FLAC,
   Opus, Vorbis; seek, pause, speed, volume, playlist, SRT/WebVTT subtitles; our own UI.
 - **In scope (after v1, M8 to M11):** gapless playback, optional crossfade and an automatic loudness level; a host-neutral now-playing model and a visualizer tap;
   an audio-first view (library, playlists, queue, album/artist/track views, built-in visualizer); a native
   desktop host and packaging (PWA, Flatpak, AppImage, MPRIS).
 - **Out of scope:** optical discs, network protocols other than "the host hands us bytes", streaming
-  adaptive formats (HLS/DASH), skins, filters/effects, transcoding, DRM, interlaced H.264 (PAFF/MBAFF)
-  until after v1, anything in VLC's `modules/` not listed above.
+  adaptive formats (HLS/DASH), skins, filters/effects, DRM, interlaced H.264 (PAFF/MBAFF) until after v1,
+  anything in VLC's `modules/` not listed above. (Transcoding was out of scope for v1; it is planned for 1.1 as a server feature.)
 - **Clean-room:** `../vlc` is read only for architecture and behavior. No code is copied or translated
   (it is GPL/LGPL; this project is MIT OR Apache-2.0). Third-party crates must be MIT/Apache-compatible.
 
@@ -96,7 +97,7 @@ pub trait Host {
     fn input(&mut self) -> &mut dyn InputEvents;
     fn storage(&mut self) -> &mut dyn Storage;
     fn now_playing(&mut self) -> Option<&mut dyn NowPlaying> { None }   // M8, optional
-    fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> { None } // M8, optional (see docs/host-api.md)
+    fn visualizer(&mut self) -> Option<&mut dyn VisualizerTap> { None } // M8, optional (see docs/reference/host-api.md)
     fn library(&mut self) -> Option<&mut dyn Library> { None }          // M10, optional (directory access)
     async fn open(&mut self, req: OpenRequest) -> Result<Self::Source, HostError>; // file picker, drop, path, URL id
 }
@@ -136,7 +137,7 @@ pub trait Storage {                   // settings, recents, resume positions
 ```
 
 Added in M8 (host-neutral, no Rusty Bucket types; these are the source of truth that Rusty Bucket's App API
-media interfaces follow, rust-os ADR-0026). The shapes, rules and mapping hints are in [`host-api.md`](host-api.md):
+media interfaces follow, rust-os ADR-0026). The shapes, rules and mapping hints are in [`host-api.md`](../reference/host-api.md):
 
 ```rust
 pub trait NowPlaying {                // MPRIS-like; the host mirrors it to its OS or shell
@@ -334,7 +335,7 @@ Source of truth: the Unicorn Tears design system, mirrored into the `theme` crat
 
 Each milestone ends with a commit and push. "Done when" is a concrete, automatable test unless noted.
 
-**M0 Plan and scaffold** (this one). *Done when:* `docs/PLAN.md` exists, the workspace builds, `cargo test`
+**M0 Plan and scaffold** (this one). *Done when:* `docs/planning/PLAN.md` exists, the workspace builds, `cargo test`
 passes on native, `cargo check --target wasm32-unknown-unknown` passes for the wasm-capable crates, the
 `theme` crate is generated from the tokens and a test proves the generated file is in sync.
 
@@ -601,7 +602,7 @@ and a tempo estimate within 2 bpm.
   Opus pieces match within -64 dBFS (exact frame count), AAC within -50 dBFS (its own coding noise); no click at the joins; also through
   the application with titles changing as each item is heard. A next item with no audio, or one that is not ready in time, starts
   right after the current one ends (not gapless, but without a stall: see "Gap closing after M10"). Crossfade is an optional setting (see "Audio settings: crossfade and automatic level").
-- **Now-playing.** `rvp-host::media` (`NowPlaying`, `NowPlayingMeta`, `Playback`, `TransportCommand`) and `docs/host-api.md`. Tags and cover
+- **Now-playing.** `rvp-host::media` (`NowPlaying`, `NowPlayingMeta`, `Playback`, `TransportCommand`) and `docs/reference/host-api.md`. Tags and cover
   art come from the containers: MP4 `ilst` (title, artist, album artist, album, `covr`), Matroska `Info/Title`, `Tags` and cover attachments.
   The app sends metadata when the item or its tags change and playback only on a change or a jump of more than 0.5 s (the host
   extrapolates); commands from the sink drive the player. The browser maps it to the **Media Session API** (`web/mediasession.js`): metadata with artwork
@@ -964,14 +965,14 @@ M11 notes (what was built, what was checked, what is not there):
 - **Brand:** the app is **Rusty Wave** (renamed from "Rusty Video Player" on 2026-10-05). The official icon master (a rusted-metal play triangle with neon waves,
   `assets/brand/rusty-wave-icon-master.png`) is sized by `tools/gen-brand.py` into hicolor PNGs 16 to 512, `.ico`, `.icns`, installer bitmaps, PWA icons (maskable
   on the night background), the favicon and the in-app logo; 32 px and below use a tighter crop. No scalable SVG (no vector source). No VLC cone.
-- **Packaging** is described in [`packaging.md`](packaging.md): `cargo xtask dist`, Flatpak, AppImage, .deb, .rpm, Windows exe and Inno Setup installer, PWA, signing hooks,
+- **Packaging** is described in [`packaging.md`](../release/packaging.md): `cargo xtask dist`, Flatpak, AppImage, .deb, .rpm, Windows exe and Inno Setup installer, PWA, signing hooks,
   release workflows (tag or manual only), and the verification record.
 - **Findings along the way:** winit's X11 backend panics when `libxkbcommon-x11` is missing, so packages depend on it; `cargo-deb` ignores its own copyright asset when a
   copyright is generated (use `license-file`); Inno Setup under Wine needs `ProgramW6432Dir` set; Docker Hub's CDN is not reachable from every network (an ECR mirror
   works for the Ubuntu base).
-- **Not done / limits:** no single-instance forwarding (a second `rvp file` starts a second window; it gets an MPRIS name with `.instance<pid>`); the web build still draws
-  CJK as boxes (no system fonts in a page); the Windows build was verified under Wine only; macOS (`.icns` is ready) is later; Flathub submission is not made; the release
-  workflows have never been run (they must not be triggered from a session).
+- **Not done / limits (as of M11; since then the release workflows have run for every tag and macOS has a beta build, see `release/packaging.md`):** no single-instance
+  forwarding (a second `rvp file` starts a second window; it gets an MPRIS name with `.instance<pid>`); the web build still draws CJK as boxes (no system fonts in a page);
+  the Flathub submission is not made.
 
 **Audio settings: crossfade and automatic level** *(done 2026-10-05, after M11, on its own branch)*. Two user-visible audio settings in an Audio panel
 (`U`, or "Audio effects" in the context menu of either face), kept in host `Storage` under `settings/audio` (so the browser's `localStorage` and the desktop's data
@@ -1074,12 +1075,12 @@ v0.2, 13 deltas in v0.3, all folded in), so the adapter has no workarounds left 
   Bucket Bar commands or clipboard (we draw our own look), no device selection, no `file_open_sibling` use (the host traits have no sidecar open). Still open:
   QEMU under Rusty Bucket (runtime choice: AOT or interpreter, risk R3), `video_present` in the real pipeline, the answers to items 8 to 11 of the review section.
 
-### Phase A of the 2026-10-06 batch (v0.0.5, in progress)
+### Phase A of the 2026-10-06 batch (v0.0.5)
 
 Features added on top of M12 (details in the docs named in brackets):
 
-- **First run and the last face** ([`host-api.md`](host-api.md)): the first run opens on the Library and adds the system's Music and Videos folders; later runs reopen the last face.
-- **Settings, default media player, app-menu offer** ([`host-api.md`](host-api.md), [`packaging.md`](packaging.md)): one Settings dialog (rail button, right-click menu, Ctrl+,); a checklist of every
+- **First run and the last face** ([`host-api.md`](../reference/host-api.md)): the first run opens on the Library and adds the system's Music and Videos folders; later runs reopen the last face.
+- **Settings, default media player, app-menu offer** ([`host-api.md`](../reference/host-api.md), [`packaging.md`](../release/packaging.md)): one Settings dialog (rail button, right-click menu, Ctrl+,); a checklist of every
   media type the player opens (`MEDIA_TYPES`) with per-platform behaviour (Linux `mimeapps.list`, Windows registration plus *Default apps*, macOS Launch Services); "No thanks" is final.
 - **Video library**: the same folders, index and queue as the music, a Videos view (poster grid or list, sort, search, resume markers), posters made by decoding one frame in the background.
 - **Theming**: a pasted Claude Design link or CSS becomes a theme (`rvp_ui::theming`): colours and corner radii mapped onto the runtime tokens (`rvp_ui::tk`), contrast checked, previewed live, kept per user.
@@ -1099,7 +1100,7 @@ Features added on top of M12 (details in the docs named in brackets):
 - **First run never adds `$HOME`**: a Videos or Music folder that is `$HOME` or above it is left out with a note; the walker follows symlinked folders without looping, skips hidden and junk files, and is bounded. Scale check on a real 10,954-track, 3,659-album music folder: about 130 s on an idle-priority scan, 137 MB peak, no errors.
 - **Play history**: each play of a song or video (counts after 30 s or half the item, whichever comes first; the time heard and finished-or-skipped are kept) is stored by the same identity as favorites, bounded to 10,000 plays (`library/history`). A **History** view (key `0`) lists Music and Videos newest first, grouped by day (Today, Yesterday, dates) with the time and a play-count badge; rows play, queue, heart, open the album, and **Delete** (or the menu) removes a play. **Clear history** asks first. The Tracks and Videos views sort by *Most played* and *Last played* and show the count and last day while they do. **Pause history** in Settings stops recording. Plays are dated by `HostClock::unix_time` and grouped by the local day (`utc_offset_secs`).
 
-- **Platform video decoders**: HEVC (Main, Main 10) and 10-bit H.264 through the system where we have no decoder of our own: WebCodecs in the browser, VA-API (dlopen, no build-time dependency; verified bit-exact against ffmpeg on 10 x265 streams: slices, weighted prediction, scaling lists, open GOP, odd sizes, Main 10), VideoToolbox, Media Foundation. The stream layer (`rvp-codec-hevc`: parameter sets, slice headers, POC, RPS, DPB, output order) is shared and is the base of the planned pure-Rust HEVC decoder. HDR10/HLG is tone-mapped to SDR (`rvp_core::hdr`). Every user-facing error now says what, why and what next (`rvp-app/src/messages.rs`); toasts and the error card wrap at any width.
+- **Platform video decoders**: HEVC (Main, Main 10) and 10-bit H.264 through the system where we have no decoder of our own: WebCodecs in the browser, VA-API (dlopen, no build-time dependency; verified bit-exact against ffmpeg on 10 x265 streams: slices, weighted prediction, scaling lists, open GOP, odd sizes, Main 10), VideoToolbox, Media Foundation. The stream layer (`rvp-codec-hevc`: parameter sets, slice headers, POC, RPS, DPB, output order) is shared and is the base of our own HEVC decoder (rc9, below). HDR10/HLG is tone-mapped to SDR (`rvp_core::hdr`). Every user-facing error now says what, why and what next (`rvp-app/src/messages.rs`); toasts and the error card wrap at any width.
 - **Phone layout**: under 600 px the rail is a drawer behind a menu button, the bar and the player controls are touch-sized rows (44 px targets), the first tap on a playing picture shows the controls, the install strip sits above the canvas; tested at 390x844, 360x800 and 3x.
 - **Install guidance per platform**: a computer is offered the desktop app first (software.rustybucket.ai) and the web app second; Android/ChromeOS the browser's prompt; iOS Add to Home Screen with the note that folder libraries are not available there; Safari on a Mac Add to Dock; Firefox on a computer the desktop app.
 
@@ -1131,7 +1132,7 @@ Features added on top of M12 (details in the docs named in brackets):
   for builds without git), links through the host (`Effect::OpenUrl`) and the licenses.
 - **Visualizer cycle**: `Shift+V` (or the button) changes the effect by itself; Settings has the order (in turn or random) and the time (15 s, 30 s, 1, 2, 5, 10 min); it holds still with reduced motion.
 - **Edit tags** (right-click, `E`): title, artist, album, album artist, track, disc, year, genre and the cover for a song, or the shared tags of an album. `rvp-tagwrite` writes ID3v2.4, Vorbis comments and
-  MP4 `ilst`, safely; see [`host-api.md`](host-api.md) for what each host does. Multi-select editing is not there (the library has no multi-select); an album's shared fields are the cheap version of it.
+  MP4 `ilst`, safely; see [`host-api.md`](../reference/host-api.md) for what each host does. Multi-select editing is not there (the library has no multi-select); an album's shared fields are the cheap version of it.
 - **Tooltips**: every control (rail, buttons, toggles, sliders, rows, dialogs, the tag editor, the audio panel) says what it does and its key, after 450 ms or when the keyboard reaches it, wrapped at 140
   characters, inside the window; Settings has *Show tooltips*. `tips.rs` decides the text for every `LibHit` exhaustively, and a test walks every control of every view.
 - Search covers favorites' hearts, videos and edited tags at once (the library is patched the moment a file is written, and the folder is read again to confirm it).

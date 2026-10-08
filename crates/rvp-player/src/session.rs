@@ -1,7 +1,7 @@
 //! A playback session: one opened media item, its demux and decode tasks, and the output side that feeds the
 //! host's audio sink and keeps the master clock.
 //!
-//! Threading model (docs/PLAN.md section 5): everything runs on the caller's thread. `Session::tick` polls the
+//! Threading model (docs/planning/PLAN.md section 5): everything runs on the caller's thread. `Session::tick` polls the
 //! demux and decode tasks (cooperatively, within a time budget) and then does the synchronous output work:
 //! feed the audio sink, update the clock. Tasks never touch the host; they communicate through [`Shared`].
 use crate::audio::{AudioOut, FadeStatus, LevelConfig, TraceEntry};

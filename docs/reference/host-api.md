@@ -1,9 +1,11 @@
 # Host API: now-playing, the visualizer tap and the library
 
+[Documentation index](../README.md) · [Plan](../planning/PLAN.md) · [Updates](updates.md) · [Keys](keys.md) · [Developing](development.md)
+
 Status: shapes stable since M8 (2026-10-05). They live in `crates/rvp-host/src/media.rs` and are the source of truth;
 Rusty Bucket's App API media interfaces are modelled on them (rust-os ADR-0026) and the mapping lives in `rvp-host-rb`.
 Nothing here is specific to any one host. Changes are listed at the bottom; the full host trait set is in
-[`PLAN.md`](PLAN.md) section 4.
+[`PLAN.md`](../planning/PLAN.md) section 4.
 
 All three are **optional** capabilities of `Host`; a host that has no media shell, no use for audio analysis and no directory
 access keeps the default (`None`) and pays nothing.
@@ -224,7 +226,7 @@ enum DefaultOutcome { Set(usize), UserMustConfirm(String) }                    /
   face that suits it. `settings/setup` holds `face=` and `folders=done`.
 * **Standard folders** on the desktop come from the `directories` crate: the XDG user directories (`user-dirs.dirs`) on Linux, Known Folders on Windows, `~/Music` and
   `~/Movies` on macOS. Browsers and Rusty Bucket keep the default (none).
-* **Default media player**: the checklist is [`MEDIA_TYPES`](../crates/rvp-host/src/types.rs) (every type the player opens, a test keeps it equal to the desktop file's
+* **Default media player**: the checklist is [`MEDIA_TYPES`](../../crates/rvp-host/src/types.rs) (every type the player opens, a test keeps it equal to the desktop file's
   `MimeType` and the Windows installer's extensions); the app passes the ids the user ticked. Linux writes `~/.config/mimeapps.list` (`[Default Applications]`, what
   `xdg-mime default` writes; an AppImage gets its app-menu entry first), Windows registers the per-user associations and opens *Default apps* (Windows does not let a
   program take defaults silently, and the dialog says so), macOS calls `LSSetDefaultRoleHandlerForContentType` for each type's UTI. The first-run offer and "No thanks"

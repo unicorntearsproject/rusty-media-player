@@ -1,5 +1,5 @@
 //! The host trait set: everything the player needs from its environment (browser page, Rusty Bucket
-//! app runtime, headless test harness). See `docs/PLAN.md` section 4.
+//! app runtime, headless test harness). See `docs/planning/PLAN.md` section 4.
 //!
 //! All I/O is `async`, polled by the player's own cooperative executor, so a browser `Promise` and a
 //! blocking native read look the same. The core never blocks, spawns, or reads a global clock.

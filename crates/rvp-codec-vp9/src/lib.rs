@@ -1,5 +1,5 @@
 //! VP9 decoding behind [`rvp_core::VideoDecoder`], built on `rusty_vp9` (Apache-2.0, pure Rust, bit-exact against
-//! the libvpx conformance vectors; chosen over `vp9dec` in M7, see `docs/PLAN.md`).
+//! the libvpx conformance vectors; chosen over `vp9dec` in M7, see `docs/planning/PLAN.md`).
 //!
 //! What this wrapper adds on top of the crate:
 //!

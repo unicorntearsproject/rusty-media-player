@@ -146,7 +146,8 @@ test("screenshots", async ({ page, browser }) => {
 
 test("library screenshots", async ({ page, browser }) => {
   await ready(page);
-  await page.keyboard.press("b");
+  // The first run opens on the Library already; B only when a run starts on the Player.
+  if ((await snap(page)).lib.mode !== "library") await page.keyboard.press("b");
   await waitFor(page, () => window.rvp.snapshot().lib.mode === "library");
   await page.waitForTimeout(300);
   await shot(page, "15-library-empty.png");

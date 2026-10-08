@@ -2,7 +2,7 @@
 //! natively, and the app's canvas has a hole where it shows.
 //!
 //! This is the accelerator behind plan A. Plan A (the default) lets the app compose picture and UI into one RGBA frame for
-//! `canvas_present`; this layer is ready for the day the app draws a transparent hole instead (see `docs/host-api.md`). Nothing in
+//! `canvas_present`; this layer is ready for the day the app draws a transparent hole instead (see `docs/reference/host-api.md`). Nothing in
 //! the default pipeline calls it yet.
 use bucket_v0_sys::{self as sys, err, video};
 use rvp_core::{ColorMatrix, ColorRange, PixelFormat, VideoFrame};
