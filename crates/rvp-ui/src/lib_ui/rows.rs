@@ -475,7 +475,7 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
             let w = (m.body.w - 2.0 * m.pad).clamp(200.0 * s, 680.0 * s);
             let chars: usize = super::about::PARAGRAPHS.iter().map(|(_, p)| p.len()).sum();
             let lines = libm::ceilf(chars as f32 * 8.2 * s / w) + 6.0;
-            b.push(260.0 * s + lines * 24.0 * s + 3.0 * 70.0 * s, RowKind::About);
+            b.push(260.0 * s + lines * 24.0 * s + 3.0 * 70.0 * s + 120.0 * s, RowKind::About);
         }
         (View::NowPlaying | View::Visualizer, None) => {}
     }

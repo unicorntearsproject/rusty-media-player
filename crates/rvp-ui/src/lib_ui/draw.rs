@@ -2501,6 +2501,10 @@ impl Ui {
             }
             return;
         }
+        // "Next" is greyed out when there is nothing to go to.
+        let off = btn == Btn::Next && !model.can_next;
+        let (hot, pressed) = (hot && !off, pressed && !off);
+        let a = if off { a * 0.4 } else { a };
         if hot || pressed {
             fb.fill_rrect(rr, 10.0 * s, Paint::Solid(fade(t::white(), 0.12)), a);
         }
@@ -2508,6 +2512,8 @@ impl Ui {
             Btn::Shuffle => (Icon::Shuffle, model.shuffle),
             Btn::Prev => (Icon::SkipBack, false),
             Btn::Next => (Icon::SkipForward, false),
+            Btn::Back => (Icon::Rewind, false),
+            Btn::Fwd => (Icon::FastForward, false),
             Btn::Repeat => (Icon::for_repeat(model.repeat), model.repeat != 0),
             Btn::Mute => (
                 if model.muted || model.volume <= 0.0 {
@@ -2550,11 +2556,13 @@ impl Ui {
     }
 
     fn lib_bar_index(&self, btn: Btn) -> usize {
-        // The order the geometry pushed them in: shuffle, prev, play, next, repeat, mode, viz, queue, mute.
+        // The order the geometry pushed them in: shuffle, prev, back, play, forward, next, repeat, mode, viz, queue, mute.
         [
             Btn::Shuffle,
             Btn::Prev,
+            Btn::Back,
             Btn::Play,
+            Btn::Fwd,
             Btn::Next,
             Btn::Repeat,
             Btn::ModeSwitch,

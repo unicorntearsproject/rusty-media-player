@@ -94,6 +94,8 @@ cargo run --release -p rvp-host-desktop -- <files>   # the desktop app
 Browser player: drop a file or a folder on the page or press `O`. Two faces, switched with `B` (or the button in the bar, or the switch in the
 rail): the **Player** for video and the **Library** for music. A song opened from outside goes to the Library, a video to the Player.
 
+Transport: `<<` (`P`) restarts the item, and again within 3 s of its start goes to the previous one; `<` and `>` (`J`/`L`) seek 10 s; `>>` (`N`) goes to the next item.
+
 Player keys: `Space`/`K` play, arrows seek 5 s (Shift 30 s), `J`/`L` 10 s, `Up`/`Down` volume, `M` mute, `F` fullscreen, `[`/`]` speed, `\` normal
 speed, `Home`/`End`, `S`/`A` subtitle and audio track, `.`/`,` frame step, `I` A-B loop, `N`/`P` next and previous, `R` repeat, `Z` shuffle, `Q`
 playlist, Page Up/Down chapters, `U` audio settings, `Ctrl+F` heart (favorite), `Ctrl+Q` quit (the desktop app and Rusty Bucket; `Cmd+Q` on a Mac), `H` or `?` the

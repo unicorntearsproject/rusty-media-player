@@ -79,13 +79,18 @@ pub enum Btn {
 
 /// The player bar shows the shuffle and repeat buttons from this width (logical pixels) up: below it the time readout would
 /// run into them.
-pub(crate) const SHUFFLE_REPEAT_MIN_W: f32 = 800.0;
+pub(crate) const SHUFFLE_REPEAT_MIN_W: f32 = 880.0;
+
+/// The player bar shows the restart/previous and next buttons from this width (logical pixels) up.
+pub(crate) const TRANSPORT_OUTER_MIN_W: f32 = 680.0;
 
 /// Tab order of the transport bar (buttons the window is too narrow for are skipped).
-const FOCUS_ORDER: [Btn; 12] = [
-    Btn::Play,
+const FOCUS_ORDER: [Btn; 14] = [
+    Btn::Prev,
     Btn::Back,
+    Btn::Play,
     Btn::Fwd,
+    Btn::Next,
     Btn::Mute,
     Btn::Speed,
     Btn::Tracks,
@@ -483,13 +488,22 @@ impl Ui {
         let cy = l.row_cy;
         let mut x = m;
         let play = 44.0 * s;
-        l.buttons.push((Btn::Play, RectF::new(x, cy - play * 0.5, play, play)));
-        x += play + 8.0 * s;
         let b = 36.0 * s;
-        if w >= 560.0 * s {
-            l.buttons.push((Btn::Back, RectF::new(x, cy - b * 0.5, b, b)));
+        // The transport reads `<< < play > >>`: restart or previous, back 10 s, play, forward 10 s, next. The outer pair is dropped
+        // when the window is too narrow for the time readout beside it.
+        let outer = w >= TRANSPORT_OUTER_MIN_W * s;
+        if outer {
+            l.buttons.push((Btn::Prev, RectF::new(x, cy - b * 0.5, b, b)));
             x += b + 2.0 * s;
-            l.buttons.push((Btn::Fwd, RectF::new(x, cy - b * 0.5, b, b)));
+        }
+        l.buttons.push((Btn::Back, RectF::new(x, cy - b * 0.5, b, b)));
+        x += b + 4.0 * s;
+        l.buttons.push((Btn::Play, RectF::new(x, cy - play * 0.5, play, play)));
+        x += play + 4.0 * s;
+        l.buttons.push((Btn::Fwd, RectF::new(x, cy - b * 0.5, b, b)));
+        x += b + if outer { 2.0 } else { 6.0 } * s;
+        if outer {
+            l.buttons.push((Btn::Next, RectF::new(x, cy - b * 0.5, b, b)));
             x += b + 6.0 * s;
         }
         l.buttons.push((Btn::Mute, RectF::new(x, cy - b * 0.5, b, b)));
@@ -527,7 +541,7 @@ impl Ui {
     }
 
     /// The controls of a phone-width window, in two rows of touch-sized buttons under the seek bar and its times:
-    /// mute, back, play, forward; then the mode switch, queue, tracks, speed, open and fullscreen.
+    /// restart or previous, back, play, forward, next; then mute, the mode switch, queue, tracks, speed, open and fullscreen.
     fn layout_phone(&self, l: &mut Layout) {
         let s = l.s;
         let (w, h) = (l.w, l.h);
@@ -538,8 +552,7 @@ impl Ui {
         l.seek_track = RectF::new(m, h - 148.0 * s - 2.0 * s, w - 2.0 * m, 4.0 * s);
         l.seek_hit = RectF::new(m, h - 148.0 * s - 18.0 * s, w - 2.0 * m, 36.0 * s);
         l.vol_hit = None;
-        let gap = 8.0 * s;
-        let row = |l: &mut Layout, cy: f32, items: &[(Btn, f32, f32)]| {
+        let row = |l: &mut Layout, cy: f32, items: &[(Btn, f32, f32)], gap: f32| {
             let total: f32 =
                 items.iter().map(|(_, bw, _)| bw * s).sum::<f32>() + gap * (items.len() as f32 - 1.0);
             let mut x = (w - total) * 0.5;
@@ -552,17 +565,20 @@ impl Ui {
             l,
             h - 96.0 * s,
             &[
-                (Btn::Mute, 44.0, 44.0),
+                (Btn::Prev, 44.0, 44.0),
                 (Btn::Back, 44.0, 44.0),
                 (Btn::Play, 56.0, 56.0),
                 (Btn::Fwd, 44.0, 44.0),
+                (Btn::Next, 44.0, 44.0),
             ],
+            8.0 * s,
         );
         l.row_cy = h - 34.0 * s;
         row(
             l,
             l.row_cy,
             &[
+                (Btn::Mute, 44.0, 44.0),
                 (Btn::ModeSwitch, 44.0, 44.0),
                 (Btn::Playlist, 44.0, 44.0),
                 (Btn::Tracks, 44.0, 44.0),
@@ -570,6 +586,7 @@ impl Ui {
                 (Btn::Open, 44.0, 44.0),
                 (Btn::Fullscreen, 44.0, 44.0),
             ],
+            4.0 * s,
         );
     }
 
@@ -971,7 +988,9 @@ impl Ui {
             Btn::Shuffle => out.push(Action::ToggleShuffle),
             Btn::Repeat => out.push(Action::CycleRepeat),
             Btn::Favorite => out.push(Action::ToggleFavorite),
-            Btn::Prev | Btn::Next | Btn::QueueView | Btn::VizView => {}
+            Btn::Prev => out.push(Action::Prev),
+            Btn::Next if model.can_next => out.push(Action::Next),
+            Btn::Next | Btn::QueueView | Btn::VizView => {}
         }
     }
 
@@ -1456,14 +1475,74 @@ mod tests {
                 &m,
             )
         };
+        ui.set_size(1280, 720, 1.0);
+        // The first stop is the leftmost button of the transport (restart or previous); play is the third.
+        tab(&mut ui);
+        assert_eq!(ui.focus, Some(Btn::Prev));
+        let enter = |ui: &mut Ui, t| {
+            ui.handle(
+                &InputEvent::KeyDown { key: Key::Enter, mods: Modifiers::default(), repeat: false },
+                t,
+                &m,
+            )
+        };
+        assert_eq!(enter(&mut ui, 2), [Action::Prev]);
+        tab(&mut ui);
+        assert_eq!(ui.focus, Some(Btn::Back));
+        assert_eq!(enter(&mut ui, 3), [Action::SeekBy(-10_000)]);
         tab(&mut ui);
         assert_eq!(ui.focus, Some(Btn::Play));
-        let out = ui.handle(
-            &InputEvent::KeyDown { key: Key::Enter, mods: Modifiers::default(), repeat: false },
-            2,
-            &m,
-        );
-        assert_eq!(out, [Action::PlayPause]);
+        assert_eq!(enter(&mut ui, 4), [Action::PlayPause]);
+        tab(&mut ui);
+        tab(&mut ui);
+        assert_eq!(ui.focus, Some(Btn::Next));
+        // No next item: the button is there and greyed, and pressing it does nothing.
+        assert_eq!(enter(&mut ui, 5), []);
+    }
+
+    #[test]
+    fn the_transport_reads_restart_back_play_forward_next_at_every_width() {
+        let m = media();
+        let order = |w: u32, h: u32, dpr: f32| -> Vec<Btn> {
+            let mut ui = Ui::default();
+            ui.set_size((w as f32 * dpr) as u32, (h as f32 * dpr) as u32, dpr);
+            let l = ui.layout(&m);
+            let mut v: Vec<(Btn, RectF)> = l
+                .buttons
+                .iter()
+                .copied()
+                .filter(|(b, _)| matches!(b, Btn::Prev | Btn::Back | Btn::Play | Btn::Fwd | Btn::Next))
+                .collect();
+            // Rows top to bottom, then left to right.
+            v.sort_by(|a, b| {
+                (a.1.cy() / 10.0).round().total_cmp(&(b.1.cy() / 10.0).round()).then(a.1.x.total_cmp(&b.1.x))
+            });
+            v.into_iter().map(|(b, _)| b).collect()
+        };
+        let full = [Btn::Prev, Btn::Back, Btn::Play, Btn::Fwd, Btn::Next];
+        assert_eq!(order(1280, 720, 1.0), full);
+        assert_eq!(order(700, 400, 2.0), full);
+        // Too narrow for the outer pair beside the time readout: the inner three.
+        assert_eq!(order(640, 400, 1.0), [Btn::Back, Btn::Play, Btn::Fwd]);
+        // A phone: all five in one row, at least 44 px (3x scale on a 390 wide screen).
+        assert_eq!(order(390, 844, 3.0), full);
+        let mut ui = Ui::default();
+        ui.set_size(390 * 3, 844 * 3, 3.0);
+        let l = ui.layout(&m);
+        for b in full {
+            let r = l.rect_of(b).unwrap();
+            assert!(r.w >= 44.0 * 3.0 - 0.5 && r.h >= 44.0 * 3.0 - 0.5, "{b:?} is {r:?}");
+        }
+        // Next is greyed out and inert with nothing to go to, live with something.
+        let mut ui = Ui::default();
+        ui.set_size(1280, 720, 1.0);
+        let l = ui.layout(&m);
+        let r = l.rect_of(Btn::Next).unwrap();
+        assert_eq!(click(&mut ui, r.cx(), r.cy(), &m, 1), []);
+        let m2 = UiModel { can_next: true, ..media() };
+        assert_eq!(click(&mut ui, r.cx(), r.cy(), &m2, 2_000_000), [Action::Next]);
+        let p = l.rect_of(Btn::Prev).unwrap();
+        assert_eq!(click(&mut ui, p.cx(), p.cy(), &m2, 4_000_000), [Action::Prev]);
     }
 
     #[test]
@@ -1511,6 +1590,8 @@ mod tests {
                 Btn::Play,
                 Btn::Back,
                 Btn::Fwd,
+                Btn::Prev,
+                Btn::Next,
                 Btn::Mute,
                 Btn::Fullscreen,
                 Btn::ModeSwitch,
@@ -1520,6 +1601,11 @@ mod tests {
                 Btn::Open,
             ] {
                 assert!(l.rect_of(want).is_some(), "{want:?} missing at {w}x{h}");
+            }
+            // The outer pair of the transport is there on a phone and on a wide window.
+            let logical = w as f32 / dpr;
+            if logical < 600.0 || logical >= TRANSPORT_OUTER_MIN_W {
+                assert!(l.rect_of(Btn::Prev).is_some() && l.rect_of(Btn::Next).is_some(), "{w}x{h}");
             }
             // The time readout sits above the seek bar, clear of every button.
             assert!(l.time_y < l.seek_hit.y && l.buttons.iter().all(|(_, r)| r.y > l.time_y + 8.0 * dpr));

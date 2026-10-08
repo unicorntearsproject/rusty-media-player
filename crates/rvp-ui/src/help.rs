@@ -118,8 +118,12 @@ pub fn describe(action: Action) -> Option<(&'static str, String)> {
             (PLAYBACK, format!("{} frame (pauses)", if d > 0 { "Next" } else { "Previous" }))
         }
         Action::LoopMark => (PLAYBACK, "Mark loop start, then end, then clear".to_string()),
-        Action::Next => (PLAYBACK, "Next item".to_string()),
-        Action::Prev => (PLAYBACK, "Previous item (or the start of this one)".to_string()),
+        Action::Next => (PLAYBACK, "Next item (the >> button)".to_string()),
+        Action::Prev => (
+            PLAYBACK,
+            "Start this item again; within 3 seconds of its start, the previous item (the << button)"
+                .to_string(),
+        ),
         Action::CycleRepeat => (PLAYBACK, "Repeat: off, all, one".to_string()),
         Action::ToggleShuffle => (PLAYBACK, "Shuffle on or off".to_string()),
         Action::ChapterStep(d) => (PLAYBACK, format!("{} chapter", if d > 0 { "Next" } else { "Previous" })),

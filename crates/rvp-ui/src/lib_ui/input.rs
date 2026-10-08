@@ -1156,7 +1156,7 @@ impl Ui {
             (View::Favorites, None, 1) => {
                 out.push(Action::Lib(LibAction::Play(Scope::List, Enqueue::ShuffleNow)))
             }
-            (View::About, None, id @ 0..=2) => out.push(Action::Lib(LibAction::About(id))),
+            (View::About, None, id @ (0..=2 | 4 | 5)) => out.push(Action::Lib(LibAction::About(id))),
             (View::About, None, 3) => out.push(Action::ShowHelp),
             (View::NowPlaying, None, 0) => self.show_view(View::Albums),
             (_, None, 10) => out.push(Action::Lib(LibAction::AddFolder)),
@@ -1170,7 +1170,10 @@ impl Ui {
         match b {
             Btn::Play => out.push(Action::PlayPause),
             Btn::Prev => out.push(Action::Prev),
-            Btn::Next => out.push(Action::Next),
+            Btn::Next if model.can_next => out.push(Action::Next),
+            Btn::Next => {}
+            Btn::Back => out.push(Action::SeekBy(-10_000)),
+            Btn::Fwd => out.push(Action::SeekBy(10_000)),
             Btn::Shuffle => out.push(Action::ToggleShuffle),
             Btn::Repeat => out.push(Action::CycleRepeat),
             Btn::Mute => out.push(Action::ToggleMute),

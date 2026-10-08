@@ -404,7 +404,10 @@ fn ctrl_q_quits_the_app_and_h_opens_help_without_ending_anything() {
     let t0 = Instant::now();
     run_ok(rvp(&b.iter().map(String::as_str).collect::<Vec<_>>()));
     assert!(t0.elapsed() < Duration::from_secs(30), "Ctrl+Q did not quit: {:?}", t0.elapsed());
-    assert!(std::fs::read_to_string(&report).unwrap().contains("\"version\""), "the report is written on the way out");
+    assert!(
+        std::fs::read_to_string(&report).unwrap().contains("\"version\""),
+        "the report is written on the way out"
+    );
     std::fs::remove_dir_all(dir).ok();
 }
 

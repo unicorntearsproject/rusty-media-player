@@ -407,12 +407,20 @@ impl Ui {
         // Centre: transport.
         let cy = y0 + 34.0 * s;
         let row: Vec<(Btn, f32)> = if tiny {
-            alloc::vec![(Btn::Prev, small), (Btn::Play, big), (Btn::Next, small)]
+            alloc::vec![
+                (Btn::Prev, small),
+                (Btn::Back, small),
+                (Btn::Play, big),
+                (Btn::Fwd, small),
+                (Btn::Next, small)
+            ]
         } else {
             alloc::vec![
                 (Btn::Shuffle, small),
                 (Btn::Prev, small),
+                (Btn::Back, small),
                 (Btn::Play, big),
+                (Btn::Fwd, small),
                 (Btn::Next, small),
                 (Btn::Repeat, small)
             ]
@@ -490,19 +498,22 @@ impl Ui {
         }
         // Row 3: the transport.
         let cy = y0 + 122.0 * s;
-        let row: [(Btn, f32); 5] = [
+        let row: [(Btn, f32); 7] = [
             (Btn::QueueView, 44.0),
             (Btn::Prev, 44.0),
+            (Btn::Back, 44.0),
             (Btn::Play, 56.0),
+            (Btn::Fwd, 44.0),
             (Btn::Next, 44.0),
             (Btn::ModeSwitch, 44.0),
         ];
-        let total: f32 = row.iter().map(|(_, z)| z * s).sum::<f32>() + 10.0 * s * 4.0;
+        let gap = 4.0 * s;
+        let total: f32 = row.iter().map(|(_, z)| z * s).sum::<f32>() + gap * 6.0;
         let mut x = (w - total) * 0.5;
         for (btn, z) in row {
             let z = z * s;
             g.bar_btns.push((btn, RectF::new(x, cy - z * 0.5, z, z)));
-            x += z + 10.0 * s;
+            x += z + gap;
         }
     }
 

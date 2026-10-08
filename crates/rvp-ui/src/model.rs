@@ -143,6 +143,8 @@ pub struct UiModel {
     pub repeat: u8,
     /// Shuffle on.
     pub shuffle: bool,
+    /// There is an item to go to with "next" (the button is greyed out when there is none).
+    pub can_next: bool,
     /// A-B loop start, microseconds.
     pub loop_a: Option<i64>,
     /// A-B loop end, microseconds.

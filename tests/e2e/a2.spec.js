@@ -78,7 +78,7 @@ test("About RW is last in the rail; its link opens a new tab and the page says t
   const s = await snap(page);
   expect(s.lib.about.y).toBeGreaterThan(s.lib.settings.y);
   const ids = s.lib.hero_buttons.map((b) => b.id);
-  expect(ids).toEqual([0, 1, 2, 3]);
+  expect(ids).toEqual([0, 1, 2, 3, 4, 5]); // the pills, then X and GitHub inside the closing line
   const bucket = s.lib.hero_buttons.find((b) => b.id === 0).rect;
   // The page may be taller than the window: scroll to the button first.
   await page.mouse.move(s.lib.body.x + 300, s.lib.body.y + 300);
@@ -93,6 +93,20 @@ test("About RW is last in the rail; its link opens a new tab and the page says t
   const [popup] = await Promise.all([context.waitForEvent("page"), page.mouse.click(...center(b))]);
   expect(popup.url()).toMatch(/^https:\/\/rustybucket\.ai\/?$|^about:blank$/);
   await popup.close();
+  // The closing line's two words open X and the GitHub issues the same way (the popup may stay blank offline: the address is what counts).
+  for (const [id, want] of [[4, /x\.com\/djunicorntears|about:blank/], [5, /github\.com\/unicorntearsproject\/rusty-media-player\/issues|about:blank/]]) {
+    for (let i = 0; i < 8; i++) {
+      const u = await snap(page);
+      const w = u.lib.hero_buttons.find((x) => x.id === id).rect;
+      if (w.y + w.h < u.lib.body.y + u.lib.body.h) break;
+      await page.mouse.wheel(0, 200);
+    }
+    const u = await snap(page);
+    const w = u.lib.hero_buttons.find((x) => x.id === id).rect;
+    const [pop] = await Promise.all([context.waitForEvent("page"), page.mouse.click(...center(w))]);
+    expect(pop.url()).toMatch(want);
+    await pop.close();
+  }
   expect(bucket.w).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });

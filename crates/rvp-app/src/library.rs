@@ -23,6 +23,8 @@ const NOW_ART_SIDE: u32 = 640;
 
 /// The About page's links.
 pub const ABOUT_BUCKET_URL: &str = "https://rustybucket.ai";
+/// Where suggestions, requests and bug reports go besides X.
+pub const ABOUT_GITHUB_ISSUES_URL: &str = "https://github.com/unicorntearsproject/rusty-media-player/issues";
 /// The About page's link to DJ Unicorn Tears on X.
 pub const ABOUT_X_URL: &str = "https://x.com/djunicorntears";
 /// The licenses of everything the app is made of (the About page's Licenses button saves this).
@@ -765,7 +767,8 @@ impl App {
             LibAction::EditTags(scope) => self.open_tag_form(host, scope, now),
             LibAction::About(n) => match n {
                 0 => self.effects.push(Effect::OpenUrl(ABOUT_BUCKET_URL.into())),
-                1 => self.effects.push(Effect::OpenUrl(ABOUT_X_URL.into())),
+                1 | 4 => self.effects.push(Effect::OpenUrl(ABOUT_X_URL.into())),
+                5 => self.effects.push(Effect::OpenUrl(ABOUT_GITHUB_ISSUES_URL.into())),
                 _ => self.effects.push(Effect::Download {
                     name: "rusty-wave-licenses.md".into(),
                     mime: "text/markdown".into(),

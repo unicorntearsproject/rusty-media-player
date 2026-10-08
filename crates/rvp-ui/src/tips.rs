@@ -88,10 +88,18 @@ pub(crate) fn btn_text(b: Btn, model: &UiModel, library: bool, view: View) -> Op
             tip(if model.fullscreen { "Leave fullscreen." } else { "Play the picture fullscreen." }, "F")
         }
         Btn::Welcome => tip("Choose a file to play, or drop one on this window.", "O"),
-        Btn::Prev => {
-            tip("The previous item. Pressed after a few seconds, it goes back to the start of this one.", "P")
-        }
-        Btn::Next => tip("The next item in the queue.", "N"),
+        Btn::Prev => tip(
+            "Start this one again. Pressed within 3 seconds of the start (or at the start), it goes to the previous item.",
+            "P",
+        ),
+        Btn::Next => tip(
+            if model.can_next {
+                "Go to the next item in the queue."
+            } else {
+                "There is no next item in the queue."
+            },
+            "N",
+        ),
         Btn::Shuffle => tip(
             if model.shuffle {
                 "Shuffle is on: the queue plays in a random order. Click to play in order."

@@ -1380,6 +1380,7 @@ impl App {
             Repeat::One => 2,
         };
         m.shuffle = self.playlist.shuffle();
+        m.can_next = self.playlist.can_next();
         if let Some(s) = &self.session {
             m.title = self.title.clone();
             m.duration_us = s.duration_us();
@@ -1441,6 +1442,7 @@ impl App {
                 Repeat::One => 2,
             };
             m.shuffle = self.playlist.shuffle();
+            m.can_next = self.playlist.can_next();
             m.subtitle = s.subtitle_text().map(|t| t.to_string());
             m.subtitle_cues = s.subtitle_cues().to_vec();
             m.video_size = self.drawn_size;

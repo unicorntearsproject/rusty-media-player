@@ -1116,6 +1116,8 @@ Features added on top of M12 (details in the docs named in brackets):
 - **Ctrl+Q quits** the desktop app (Cmd+Q on a Mac) and Rusty Bucket's app (the host's shutdown); a browser tab leaves the key alone (`Host::can_quit`, `Effect::Quit`, a "Quit" menu entry only where it applies).
 - **Help overlay** (`H` or `?`; Esc, `H` or `?` close it; the menu's "Keyboard shortcuts", the About page's button): a themed, scrollable keyboard and mouse reference with Playback, Library, Visualizer, App and Mouse groups and a tips list, at any width including a phone (a finger drags it). The shortcut rows are generated from `SHORTCUTS`, so they cannot drift (a test fails for a shortcut with no words or no row); the library's own keys (matched where they act) are in `help::library_keys()`, and a test presses each one that has a probe.
 - **Favorites moved from `H` to `Ctrl+F`** (tooltips, menus, hints, docs and tests follow); search is `/` only.
+- **Transport `<< < play > >>`** on every bar (player, library, phone; 44 px touch targets): the outer pair is restart-or-previous (`P`: restarts the item, within 3 s of its start goes to the previous one) and next (`N`; greyed out and inert when nothing follows, `UiModel.can_next`), the inner pair stays the 10 s seeks (`J`/`L`). Shuffle and repeat stay outside. A player window narrower than 680 px keeps the inner three; shuffle and repeat now appear from 880 px.
+- **About**: a closing line, "Please provide suggestions, requests & bug reports via X or GitHub!", whose X and GitHub are links (X profile, the GitHub issues) opened like the other links; where the host cannot open links the addresses follow the words as text.
 
 ### Phase A2 of the 2026-10-06 batch
 

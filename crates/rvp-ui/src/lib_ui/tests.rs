@@ -450,11 +450,31 @@ fn the_bar_controls_map_to_actions_and_the_seek_bar_seeks() {
         video: None,
         resume: crate::lib_ui::no_resume(),
     };
+    r.m.can_next = true;
     let g = r.ui.lib_geom(&r.m, &ctx);
+    // Left to right: shuffle, restart or previous, back 10 s, play, forward 10 s, next, repeat.
+    let order: Vec<crate::ui::Btn> = {
+        let mut v: Vec<_> = g
+            .bar_btns
+            .iter()
+            .filter(|(b, _)| {
+                use crate::ui::Btn::*;
+                matches!(b, Shuffle | Prev | Back | Play | Fwd | Next | Repeat)
+            })
+            .collect();
+        v.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+        v.into_iter().map(|(b, _)| *b).collect()
+    };
+    {
+        use crate::ui::Btn::*;
+        assert_eq!(order, [Shuffle, Prev, Back, Play, Fwd, Next, Repeat]);
+    }
     for (b, a) in [
         (crate::ui::Btn::Play, Action::PlayPause),
         (crate::ui::Btn::Next, Action::Next),
         (crate::ui::Btn::Prev, Action::Prev),
+        (crate::ui::Btn::Back, Action::SeekBy(-10_000)),
+        (crate::ui::Btn::Fwd, Action::SeekBy(10_000)),
         (crate::ui::Btn::Shuffle, Action::ToggleShuffle),
         (crate::ui::Btn::Repeat, Action::CycleRepeat),
         (crate::ui::Btn::Mute, Action::ToggleMute),
@@ -463,6 +483,11 @@ fn the_bar_controls_map_to_actions_and_the_seek_bar_seeks() {
         let (x, y) = center(g.bar_btns.iter().find(|(k, _)| *k == b).unwrap().1);
         assert_eq!(r.click(x, y), [a], "{b:?}");
     }
+    // With nothing after the current item the next button is inert (and greyed out).
+    r.m.can_next = false;
+    let (x, y) = center(g.bar_btns.iter().find(|(k, _)| *k == crate::ui::Btn::Next).unwrap().1);
+    assert!(r.click(x, y).is_empty());
+    r.m.can_next = true;
     let (x, y) = center(g.seek_hit);
     let out = r.click(x, y);
     assert!(out.iter().any(|a| matches!(a, Action::SeekFraction(f) if (*f - 0.5).abs() < 0.05)), "{out:?}");
@@ -1321,7 +1346,11 @@ fn about_rw_is_last_in_the_rail_and_opens_a_page_with_links_and_the_version() {
         let body = g.m.body;
         let btns = r.ui.about_page(None, body, &r.m);
         let ids: Vec<u8> = btns.iter().map(|b| b.id).collect();
-        assert_eq!(ids, [0, 1, 2, 3], "Rusty Bucket, X, Licenses, Keyboard shortcuts");
+        assert_eq!(
+            ids,
+            [0, 1, 2, 3, 4, 5],
+            "Rusty Bucket, X, Licenses, Keyboard shortcuts, then X and GitHub in the closing line"
+        );
         for b in &btns {
             assert!(b.rect.x >= body.x && b.rect.right() <= body.right(), "{w}x{h}: {b:?}");
         }
@@ -1335,6 +1364,18 @@ fn about_rw_is_last_in_the_rail_and_opens_a_page_with_links_and_the_version() {
         r.ui.lib.scroll = (b.rect.bottom() - body.bottom() + 24.0).max(0.0);
         let (bx, by) = center(b.rect);
         assert_eq!(r.click(bx, by - r.ui.lib.scroll), [Action::Lib(LibAction::About(1))]);
+        // The two links of the closing line (suggestions, requests and bug reports) are words after the pills, X then GitHub.
+        for (i, id) in [(4usize, 4u8), (5, 5)] {
+            let w = &btns[i];
+            assert_eq!(w.id, id);
+            assert!(w.rect.y > btns[3].rect.bottom(), "{w:?} sits under the buttons");
+            r.ui.lib.scroll = (w.rect.bottom() - body.bottom() + 24.0).max(0.0);
+            let (wx, wy) = center(w.rect);
+            assert_eq!(r.click(wx, wy - r.ui.lib.scroll), [Action::Lib(LibAction::About(id))]);
+        }
+        assert_eq!(btns[4].label, "X");
+        assert_eq!(btns[5].label, "GitHub");
+        assert!(btns[4].rect.x < btns[5].rect.x || btns[4].rect.y < btns[5].rect.y, "X comes before GitHub");
         let _ = r.draw();
         // F1 gets there from anywhere.
         r.ui.show_view(View::Albums);
@@ -2198,4 +2239,41 @@ fn while_help_is_up_the_library_keys_do_nothing_else() {
     assert!(!r.ui.help_open());
     assert_eq!(r.key(Key::Char('3')), []);
     assert_eq!(r.ui.lib_state().view(), View::Tracks);
+}
+
+#[test]
+fn the_phone_transport_has_the_five_in_order_at_44_px_and_fits_the_width() {
+    use crate::ui::Btn;
+    for (w, h, s) in PHONES {
+        let mut r = phone_rig(w, h, s);
+        r.m = playing_model(&r.lib);
+        let g = geom_of(&mut r);
+        let mut row: Vec<(Btn, RectF)> = g
+            .bar_btns
+            .iter()
+            .copied()
+            .filter(|(b, _)| matches!(b, Btn::Prev | Btn::Back | Btn::Play | Btn::Fwd | Btn::Next))
+            .collect();
+        row.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+        assert_eq!(
+            row.iter().map(|(b, _)| *b).collect::<Vec<_>>(),
+            [Btn::Prev, Btn::Back, Btn::Play, Btn::Fwd, Btn::Next]
+        );
+        for (b, rect) in &g.bar_btns {
+            assert!(rect.x >= 0.0 && rect.right() <= w as f32, "{b:?} {rect:?} in {w}");
+            assert!(rect.w >= 44.0 * s - 0.5 && rect.h >= 44.0 * s - 0.5, "{b:?} is {rect:?} at {s}x");
+        }
+        // They do not overlap.
+        for (i, (b, a)) in g.bar_btns.iter().enumerate() {
+            for (b2, c) in &g.bar_btns[i + 1..] {
+                assert!(
+                    a.right() <= c.x + 0.01
+                        || c.right() <= a.x + 0.01
+                        || a.bottom() <= c.y + 0.01
+                        || c.bottom() <= a.y + 0.01,
+                    "{b:?} overlaps {b2:?}"
+                );
+            }
+        }
+    }
 }

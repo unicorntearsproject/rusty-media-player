@@ -390,6 +390,14 @@ impl Playlist {
         self.order.get(np).copied()
     }
 
+    /// Whether "next" would go anywhere: an item after the current one, the wrap of repeat All, or the first item when nothing is current.
+    pub fn can_next(&self) -> bool {
+        match self.pos {
+            None => !self.order.is_empty(),
+            Some(p) => p + 1 < self.order.len() || (self.repeat == Repeat::All && !self.order.is_empty()),
+        }
+    }
+
     /// The user asked for the previous item: the one before, wrapping with repeat All; at the very start the
     /// current item again (start it over).
     pub fn prev(&mut self) -> Option<u32> {

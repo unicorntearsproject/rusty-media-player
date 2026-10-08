@@ -521,10 +521,16 @@ impl Ui {
                 }
             }
             _ => {
+                // "Next" is greyed out when there is nothing to go to.
+                let off = b == Btn::Next && !model.can_next;
+                let (hot, pressed) = (hot && !off, pressed && !off);
                 if hot || pressed {
                     fb.fill_rrect(rr, 10.0 * s, Paint::Solid(fade(t::white(), 0.12)), a);
                 }
+                let a = if off { a * 0.4 } else { a };
                 let icon = match b {
+                    Btn::Prev => Icon::SkipBack,
+                    Btn::Next => Icon::SkipForward,
                     Btn::Back => Icon::Rewind,
                     Btn::Fwd => Icon::FastForward,
                     Btn::Mute => {
@@ -566,7 +572,7 @@ impl Ui {
                 };
                 let tint =
                     if b == Btn::Mute && (model.muted || model.volume <= 0.0) { t::text_dim() } else { col };
-                self.icon(fb, icon, rr.cx(), rr.cy(), 20.0, tint, a, false);
+                self.icon(fb, icon, rr.cx(), rr.cy(), 20.0, tint, a, matches!(b, Btn::Prev | Btn::Next));
                 if on {
                     fb.fill_rrect(
                         RectF::new(rr.cx() - 2.0 * s, rr.bottom() - 4.0 * s, 4.0 * s, 4.0 * s),

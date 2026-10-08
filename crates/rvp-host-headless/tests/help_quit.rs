@@ -87,3 +87,21 @@ fn the_help_overlay_is_not_a_quit_route_and_the_quit_menu_entry_follows_the_host
     assert!(m(true));
     assert!(!m(false));
 }
+
+#[test]
+fn the_about_pages_suggestion_links_open_x_and_the_github_issues() {
+    let mut r = Rig::new(false);
+    let now = 10_000_000;
+    r.app.apply(&mut r.host, rvp_ui::Action::Lib(rvp_ui::LibAction::About(4)), now);
+    r.app.apply(&mut r.host, rvp_ui::Action::Lib(rvp_ui::LibAction::About(5)), now);
+    let urls: Vec<String> = r
+        .app
+        .take_effects()
+        .into_iter()
+        .filter_map(|e| if let Effect::OpenUrl(u) = e { Some(u) } else { None })
+        .collect();
+    assert_eq!(
+        urls,
+        ["https://x.com/djunicorntears", "https://github.com/unicorntearsproject/rusty-media-player/issues"]
+    );
+}
