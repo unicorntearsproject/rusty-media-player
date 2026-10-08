@@ -1216,6 +1216,8 @@ mod version_tests {
         assert_eq!(rpm_parts("1.0.0-rc1"), ("1.0.0".to_string(), "0.1.rc1".to_string()));
         assert_eq!(rpm_parts("1.0.0-rc.2"), ("1.0.0".to_string(), "0.1.rc.2".to_string()));
         assert_eq!(rpm_parts("1.0.0"), ("1.0.0".to_string(), "1".to_string()));
+        // rc10 would sort below rc9 as text, so the counter after rc9 is rc9.1, rc9.2 ...: rpm compares the extra field as newer.
+        assert_eq!(rpm_parts("1.0.0-rc9.1"), ("1.0.0".to_string(), "0.1.rc9.1".to_string()));
         assert_eq!(rpm_parts("0.0.0-ci1"), ("0.0.0".to_string(), "0.1.ci1".to_string()));
         // rpm compares the release field piece by piece: 0.1.rc1 is older than 1 (the release).
         let key = |r: &str| r.split('.').map(|p| p.parse::<u32>().ok()).collect::<Vec<_>>();

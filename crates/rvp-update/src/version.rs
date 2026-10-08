@@ -153,6 +153,13 @@ mod tests {
         // 1.0.0-rc1 is what the first release candidate is called (SemVer: `rc1` is one identifier, compared as text, so rc1 < rc2 < rc9).
         assert!(v("1.0.0-rc1") < v("1.0.0-rc2") && v("1.0.0-rc2") < v("1.0.0"));
         assert!(v("1.0.0-rc9") < v("1.0.0"));
+        // rc10 would be older than rc9 (text order); the counter after rc9 is rc9.1, rc9.2 ... rc9.10 (numbers after the dot).
+        assert!(v("1.0.0-rc10") < v("1.0.0-rc9"));
+        assert!(
+            v("1.0.0-rc9") < v("1.0.0-rc9.1")
+                && v("1.0.0-rc9.2") < v("1.0.0-rc9.10")
+                && v("1.0.0-rc9.10") < v("1.0.0")
+        );
         assert!(v("1.0.0-beta1") < v("1.0.0-rc1"));
         assert!(
             v("0.99.0") < v("1.0.0-rc1"),

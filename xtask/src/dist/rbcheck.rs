@@ -256,6 +256,15 @@ mod tests {
     }
 
     #[test]
+    fn the_rc9_1_names_pass_the_contract() {
+        let dir = fake_release("rc91", "1.0.0-rc9.1");
+        assert_eq!(check_files(&dir, "1.0.0-rc9.1").unwrap(), Vec::<String>::new());
+        assert!(dir.join("rusty-wave_1.0.0~rc9.1_amd64.deb").is_file());
+        assert!(dir.join("rusty-wave-1.0.0-0.1.rc9.1.x86_64.rpm").is_file());
+        assert!(dir.join("rusty-wave-1.0.0-rc9.1-x86_64.AppImage").is_file());
+    }
+
+    #[test]
     fn a_signature_by_the_primary_or_by_its_subkey_is_accepted_and_nothing_else_is() {
         assert!(valid_sig_by(&good(SUB), PRIMARY));
         assert!(valid_sig_by(&good(PRIMARY), PRIMARY));

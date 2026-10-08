@@ -363,14 +363,14 @@ dependencies = [
 
 [[package]]
 name = "bucket-v0-mock"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "bucket-v0-sys",
 ]
 
 [[package]]
 name = "bucket-v0-sys"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 
 [[package]]
 name = "buffer-redux"
@@ -2982,7 +2982,7 @@ version = "0.1.1"
 
 [[package]]
 name = "rvp-app"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-core",
  "rvp-host",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-codec-audio"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "ropus",
  "rvp-core",
@@ -3008,7 +3008,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-codec-av1"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rav1d",
  "rvp-core",
@@ -3019,7 +3019,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-codec-h264"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-core",
  "rvp-demux",
@@ -3028,7 +3028,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-codec-hevc"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-core",
  "rvp-demux",
@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-codec-vp9"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rusty_vp9",
  "rvp-core",
@@ -3047,14 +3047,14 @@ dependencies = [
 
 [[package]]
 name = "rvp-core"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "rvp-demux"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-core",
  "rvp-host",
@@ -3063,14 +3063,14 @@ dependencies = [
 
 [[package]]
 name = "rvp-host"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-core",
 ]
 
 [[package]]
 name = "rvp-host-desktop"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "arboard",
  "cpal",
@@ -3102,7 +3102,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-host-headless"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-app",
  "rvp-codec-audio",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-host-rb"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "bucket-v0-mock",
  "bucket-v0-sys",
@@ -3137,7 +3137,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-host-web"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "js-sys",
  "rvp-app",
@@ -3157,7 +3157,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-library"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "libm",
  "rvp-core",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-par"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-codec-h264",
  "rvp-core",
@@ -3181,7 +3181,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-platform-video"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-codec-hevc",
  "rvp-core",
@@ -3192,7 +3192,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-player"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "libm",
  "rvp-core",
@@ -3204,14 +3204,14 @@ dependencies = [
 
 [[package]]
 name = "rvp-subs"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-core",
 ]
 
 [[package]]
 name = "rvp-tagwrite"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-core",
  "rvp-host",
@@ -3220,7 +3220,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-ui"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "fontdue",
  "libm",
@@ -3234,7 +3234,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-update"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "pgp",
  "rand",
@@ -3248,7 +3248,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-viz"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "libm",
  "rvp-core",
@@ -3258,7 +3258,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-wasm-smoke"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "rvp-codec-av1",
  "rvp-codec-h264",
@@ -3272,7 +3272,7 @@ dependencies = [
 
 [[package]]
 name = "rvp-wave-bucket"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "bucket-v0-sys",
  "rvp-codec-audio",
@@ -3797,7 +3797,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "theme"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 
 [[package]]
 name = "thiserror"
@@ -4774,7 +4774,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "1.0.0-rc10"
+version = "1.0.0-rc9.1"
 dependencies = [
  "bucket-v0-sys",
 ]
