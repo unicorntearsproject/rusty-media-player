@@ -248,6 +248,17 @@ One bounded GET (2 MiB) of a text document, polled. Only the theme dialog uses i
 update client (HTTPS only); a page answers with `fetch` (a cross-origin link the server does not allow fails, and the dialog tells the person to paste the CSS instead);
 Rusty Bucket keeps the default and the dialog says to paste.
 
+## Quitting (`Host::can_quit`, `Effect::Quit`, rc10)
+
+```rust
+fn can_quit(&self) -> bool { false }                    // on Host
+Effect::Quit                                             // Ctrl+Q (Cmd+Q on a Mac)
+```
+
+A host with a window of its own answers `true`: the desktop (the window closes the way the X does: state saved, the report written) and Rusty Bucket (the adapter runs its shutdown and
+returns the exit status). The UI then claims Ctrl+Q, offers a "Quit" entry in its menu and lists the key on the Help page (`UiModel.app.quit`). A browser tab answers `false` (the default): Ctrl+Q
+is not taken and no entry is shown, so the browser keeps its own behaviour. The desktop host turns Cmd+Q into the app's Ctrl+Q on macOS.
+
 ## Opening links (`Host::opens_links`, `Effect::OpenUrl`)
 
 ```rust
@@ -298,7 +309,7 @@ fields are only ever added:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `version` | string | The app's version, `1.0.0-rc9` (a pre-release keeps its suffix). |
+| `version` | string | The app's version, `1.0.0-rc10` (a pre-release keeps its suffix). |
 | `ready` | boolean | `true` once the player runs; `false` while the page restarts it after a crash (then `state` is `"recovering"` and the rest is the last known). |
 | `state` | string | `idle`, `opening`, `paused`, `buffering`, `playing`, `ended`, `failed`, or `recovering` (the page is restarting the player). |
 | `position_us` | integer | Playback position of the current item, microseconds (0 when idle). |
@@ -319,5 +330,6 @@ are what the Rusty Bucket and desktop hosts' smoke output reports where they rep
 - 2026-10-05: the Rusty Bucket mapping and its open questions (M12). No trait changed.
 - 2026-10-06: optional `AppServices` capability (update checks, app-menu entry); `settings/app` key.
 - 2026-10-06: M12 against the Bucket Simulator: answers to the open questions recorded; the pause fix (`Session` pauses the audio sink with the clock) is verified there.
+- 2026-10-08 (rc10): `Host::can_quit` and `Effect::Quit` (Ctrl+Q); `AppModel.quit`; the Help page (`H`, `?`) is the UI's own and needs nothing from a host; favorites moved from `H` to `Ctrl+F`; the snapshot has `help` and `app.quit`.
 - 2026-10-06 (Phase A2): `Host::opens_links`, `Effect::OpenUrl`, `Effect::PickCover`, the optional `FileWriter` capability and `Host::file_writer`; the `library/favorites` key; app settings load without `AppServices`.
 - 2026-10-06: the stable `window.rvp.snapshot()` subset (`version`, `ready`, `state`, `position_us`, `duration_us`, `item`, `error`) is documented; `version` and `item` are new snapshot fields.

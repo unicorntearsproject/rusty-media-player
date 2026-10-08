@@ -226,6 +226,8 @@ pub struct Ui {
     pub(crate) pressed_lib: Option<crate::lib_ui::LibHit>,
     /// The Audio settings panel, while it is up.
     pub(crate) audio_panel: Option<crate::audio_panel::AudioPanel>,
+    /// The Help overlay, while it is up.
+    pub(crate) help: Option<crate::help::HelpState>,
     /// The state of the application's modal dialog (focus, hover), while one is up.
     pub(crate) dialog: crate::dialog::DialogState,
     /// A dialog was up at the last draw or input.
@@ -282,6 +284,7 @@ impl Ui {
             lib: crate::lib_ui::LibUi::default(),
             pressed_lib: None,
             audio_panel: None,
+            help: None,
             dialog: crate::dialog::DialogState::default(),
             dialog_open: false,
         }
@@ -431,6 +434,7 @@ impl Ui {
             || self.toast.is_some()
             || self.drag_over
             || self.audio_panel.is_some()
+            || self.help.is_some()
             || self.dialog_open
     }
 
@@ -742,6 +746,9 @@ impl Ui {
             return self.dialog_event(ev, now_us, d);
         }
         self.dialog_closed();
+        if self.help.is_some() {
+            return self.help_event(ev, now_us, model);
+        }
         if self.audio_panel.is_some() {
             return self.audio_panel_event(ev, now_us, model);
         }
@@ -1056,7 +1063,7 @@ impl Ui {
             }
             _ => {}
         }
-        if let Some(a) = actions::shortcut_for(key, mods) {
+        if let Some(a) = actions::shortcut_for(key, mods).filter(|a| *a != Action::Quit || model.app.quit) {
             // Holding a key repeats seeks, volume and speed steps; play/pause, mute, fullscreen and open do not.
             let repeatable = matches!(
                 a,

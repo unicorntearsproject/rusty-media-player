@@ -419,6 +419,7 @@ impl WebPlayer {
                 Effect::ImportPlaylist => v.push("import".into()),
                 Effect::OpenUrl(url) => v.push(format!("open:{url}")),
                 Effect::PickCover => v.push("cover".into()),
+                Effect::Quit => {}
                 Effect::Download { name, mime, data } => {
                     self.host.downloads.push((name, mime, data));
                     v.push("download".into());

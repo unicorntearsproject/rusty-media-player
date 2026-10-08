@@ -69,7 +69,7 @@ Do this once per package type on each machine, with real speakers or headphones.
   - Windows: the hardware keys, the volume flyout (Win + the volume keys) and the lock screen show title, artist and cover; Bluetooth headset buttons work;
     the keys do not also control another player at the same time.
   - With another player (a browser tab playing) open: the keys go to the most recently active one, as with other apps.
-- [ ] **Library and queue**: open a folder (`O` or drop it on the window): albums, artists, tracks, cover art, search (`Ctrl+F`); the queue (`Q`); a saved M3U/M3U8/PLS
+- [ ] **Library and queue**: open a folder (`O` or drop it on the window): albums, artists, tracks, cover art, search (`/`); the queue (`Q`); a saved M3U/M3U8/PLS
   playlist imports. Quit during playback and start again: the queue and the position come back. CJK, Cyrillic and accented names render (needs a CJK font on the system).
 - [ ] **Subtitles and tracks**: an MKV or MP4 with subtitles shows them (`S`), a sidecar `.srt` next to a video loads, `A` switches audio tracks.
 - [ ] **File associations**: double-click an `.mp4`, `.mkv`, `.mp3`, `.flac` in the file manager after choosing Rusty Wave; "Open with" lists it with its icon; opening

@@ -381,6 +381,33 @@ fn the_audio_settings_are_changed_from_the_keyboard_and_kept_for_the_next_run() 
     std::fs::remove_dir_all(dir).ok();
 }
 
+#[test]
+fn ctrl_q_quits_the_app_and_h_opens_help_without_ending_anything() {
+    let _turn = one_at_a_time();
+    if skip("the quit test", &[]) {
+        return;
+    }
+    let dir = scratch("quit");
+    let report = dir.join("r.json");
+    // H opens the help page and Escape closes it: the run goes on to its end.
+    let mut a = base(&dir.join("data"), &report);
+    for (t, k) in [("1", "h"), ("1.5", "Escape")] {
+        a.extend(["--press".to_string(), format!("{t}:{k}")]);
+    }
+    a.extend(["--exit-after".into(), "3".into()]);
+    let t0 = Instant::now();
+    run_ok(rvp(&a.iter().map(String::as_str).collect::<Vec<_>>()));
+    assert!(t0.elapsed() >= Duration::from_secs(3), "help did not end the app");
+    // Ctrl+Q ends it long before the timer.
+    let mut b = base(&dir.join("data"), &report);
+    b.extend(["--press".to_string(), "1:ctrl+q".to_string(), "--exit-after".into(), "60".into()]);
+    let t0 = Instant::now();
+    run_ok(rvp(&b.iter().map(String::as_str).collect::<Vec<_>>()));
+    assert!(t0.elapsed() < Duration::from_secs(30), "Ctrl+Q did not quit: {:?}", t0.elapsed());
+    assert!(std::fs::read_to_string(&report).unwrap().contains("\"version\""), "the report is written on the way out");
+    std::fs::remove_dir_all(dir).ok();
+}
+
 /// A started `xvfb-run rvp` that is stopped, with everything it started, when the test ends (also when it fails).
 struct Reaper(std::process::Child);
 

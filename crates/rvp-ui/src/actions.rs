@@ -116,6 +116,10 @@ pub enum Action {
     DialogBackspace,
     /// Heart or un-heart what is playing (or, in the library, the selected song or video).
     ToggleFavorite,
+    /// Show the keyboard and mouse reference (the Help overlay), or hide it.
+    ShowHelp,
+    /// End the app (Ctrl+Q, Cmd+Q on a Mac): only where the host has a window of its own to close.
+    Quit,
     /// Show the Settings dialog (theme, default player, app menu, updates, audio).
     ShowSettings,
     /// Show the Audio settings panel (crossfade and automatic level).
@@ -211,7 +215,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc(ShortKey::Char('b'), Action::ToggleMode),
     sc(ShortKey::Char('v'), Action::ToggleVisualizer),
     sc(ShortKey::Char('u'), Action::ShowAudioSettings),
-    sc(ShortKey::Char('h'), Action::ToggleFavorite),
+    sc(ShortKey::Char('h'), Action::ShowHelp),
+    sc(ShortKey::Char('?'), Action::ShowHelp),
+    // Ctrl+F hearts what is playing (the selected song or video in the library); search is `/`.
+    Shortcut { key: ShortKey::Char('f'), shift: false, ctrl: true, action: Action::ToggleFavorite },
+    // Ctrl+Q ends the app where the host offers that (Cmd+Q reaches the UI as Ctrl+Q: the desktop host maps it).
+    Shortcut { key: ShortKey::Char('q'), shift: false, ctrl: true, action: Action::Quit },
     Shortcut { key: ShortKey::Char(','), shift: false, ctrl: true, action: Action::ShowSettings },
     // Ctrl+arrows keep seeking and the volume where the plain arrows move around lists in the library.
     Shortcut { key: ShortKey::Left, shift: false, ctrl: true, action: Action::SeekBy(-5_000) },
@@ -265,7 +274,9 @@ fn key_name(k: ShortKey) -> String {
 /// subset, so they are spelled out.
 pub fn shortcut_label(action: Action) -> String {
     let mut parts: Vec<String> = Vec::new();
-    for s in SHORTCUTS.iter().filter(|s| s.action == action && !s.ctrl) {
+    // Actions with only a Ctrl combination (hearting, quitting) show that.
+    let only_ctrl = !SHORTCUTS.iter().any(|s| s.action == action && !s.ctrl);
+    for s in SHORTCUTS.iter().filter(|s| s.action == action && (!s.ctrl || only_ctrl)) {
         let mut name = match s.key {
             ShortKey::Left => "Left".to_string(),
             ShortKey::Right => "Right".to_string(),
@@ -275,6 +286,9 @@ pub fn shortcut_label(action: Action) -> String {
         };
         if s.shift {
             name = alloc::format!("Shift+{name}");
+        }
+        if s.ctrl {
+            name = alloc::format!("Ctrl+{name}");
         }
         parts.push(name);
     }
@@ -624,6 +638,7 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         )
         .sep(),
     ];
+    v.push(MenuItem::act("Keyboard shortcuts", Action::ShowHelp).sep());
     v.push(MenuItem::act("Settings\u{2026}", Action::ShowSettings));
     // What the host offers beyond playback: only where it applies.
     if model.app.updates {
@@ -634,6 +649,9 @@ pub fn context_menu(model: &UiModel) -> Vec<MenuItem> {
         let mut m = MenuItem::act(label, Action::ToggleIntegration);
         m.separator = !model.app.updates;
         v.push(m);
+    }
+    if model.app.quit {
+        v.push(MenuItem::act("Quit", Action::Quit).sep());
     }
     v
 }
@@ -665,7 +683,9 @@ mod tests {
     #[test]
     fn every_shortcut_has_a_context_menu_entry() {
         let mut reachable = Vec::new();
-        menu_actions(&context_menu(&model()), &mut reachable);
+        let mut m = model();
+        m.app.quit = true;
+        menu_actions(&context_menu(&m), &mut reachable);
         for s in SHORTCUTS {
             assert!(
                 reachable.contains(&s.action),
@@ -731,6 +751,17 @@ mod tests {
         assert_eq!(shortcut_for(&Key::Char('m'), &ctrl), None); // leave Ctrl+M to the browser
         assert_eq!(shortcut_for(&Key::Char('x'), &none), None);
         assert_eq!(shortcut_for(&Key::Char('f'), &Modifiers { alt: true, ..none }), None);
+        // Help is H and ?, the heart is Ctrl+F (plain F stays fullscreen), Ctrl+Q quits.
+        assert_eq!(shortcut_for(&Key::Char('h'), &none), Some(Action::ShowHelp));
+        assert_eq!(shortcut_for(&Key::Char('?'), &none), Some(Action::ShowHelp));
+        assert_eq!(shortcut_for(&Key::Char('?'), &shift), Some(Action::ShowHelp));
+        assert_eq!(shortcut_for(&Key::Char('f'), &none), Some(Action::ToggleFullscreen));
+        assert_eq!(shortcut_for(&Key::Char('f'), &ctrl), Some(Action::ToggleFavorite));
+        assert_eq!(shortcut_for(&Key::Char('F'), &ctrl), Some(Action::ToggleFavorite));
+        assert_eq!(shortcut_for(&Key::Char('q'), &ctrl), Some(Action::Quit));
+        assert_eq!(shortcut_for(&Key::Char('q'), &none), Some(Action::ShowPlaylist));
+        // Favoriting has no plain key any more.
+        assert!(SHORTCUTS.iter().filter(|s| s.action == Action::ToggleFavorite).all(|s| s.ctrl));
     }
 
     #[test]
@@ -738,6 +769,9 @@ mod tests {
         assert_eq!(shortcut_label(Action::PlayPause), "Space / K");
         assert_eq!(shortcut_label(Action::SeekBy(-5_000)), "Left");
         assert_eq!(shortcut_label(Action::SeekBy(30_000)), "Shift+Right");
+        assert_eq!(shortcut_label(Action::ToggleFavorite), "Ctrl+F");
+        assert_eq!(shortcut_label(Action::Quit), "Ctrl+Q");
+        assert_eq!(shortcut_label(Action::ShowHelp), "H / ?");
         assert_eq!(speed_label(1.0), "1\u{d7}");
         assert_eq!(speed_label(0.25), "0.25\u{d7}");
         assert_eq!(speed_label(1.5), "1.5\u{d7}");

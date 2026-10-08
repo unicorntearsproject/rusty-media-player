@@ -384,6 +384,8 @@ pub struct UiHost {
     pub writer: Option<Box<dyn rvp_host::FileWriter>>,
     /// What [`Host::opens_links`] answers.
     pub links: bool,
+    /// What [`Host::can_quit`] answers.
+    pub quit: bool,
 }
 
 /// A [`rvp_host::FileWriter`] that really replaces files below the folders it was told about (root id -> directory), through a
@@ -451,6 +453,7 @@ impl UiHost {
             net: None,
             writer: None,
             links: false,
+            quit: false,
         }
     }
 
@@ -513,6 +516,9 @@ impl Host for UiHost {
     }
     fn opens_links(&self) -> bool {
         self.links
+    }
+    fn can_quit(&self) -> bool {
+        self.quit
     }
     fn stable_ids(&self) -> bool {
         self.stable

@@ -341,6 +341,7 @@ impl Ui {
         }
         self.menu = panels;
         self.draw_audio_panel(fb, model);
+        self.draw_help(fb, model);
         if self.lib.prompt.is_some() {
             self.draw_prompt(fb, &g);
         }

@@ -195,6 +195,11 @@ pub trait Host {
     fn opens_links(&self) -> bool {
         false
     }
+    /// True when the host has a window of its own that the app may close (a desktop window, Rusty Bucket's app): Ctrl+Q and the Quit
+    /// menu entry are then offered. A page in a browser has none.
+    fn can_quit(&self) -> bool {
+        false
+    }
     /// True when the ids this host gives to [`OpenRequest::Id`] still open the same file after a restart (file paths).
     /// The player then keeps them in the saved queue; a host whose ids belong to one session (a browser's stashed
     /// `File` objects) keeps the default and only library tracks are restored, through the library's own listing.

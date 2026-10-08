@@ -59,6 +59,7 @@ impl Ui {
         self.draw_toast(fb, &l);
         self.draw_tooltip(fb, &l, model);
         self.draw_audio_panel(fb, model);
+        self.draw_help(fb, model);
         self.draw_app_dialog(fb, model);
         // The dialog's and the audio panel's controls have tooltips too (drawn over them).
         if let Some(tip) = self.dialog_tip_now(model).or_else(|| self.audio_tip_now()) {

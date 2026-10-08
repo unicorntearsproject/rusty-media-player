@@ -376,6 +376,9 @@ impl Host for DesktopHost {
     fn opens_links(&self) -> bool {
         true
     }
+    fn can_quit(&self) -> bool {
+        true
+    }
     fn stable_ids(&self) -> bool {
         true
     }

@@ -537,6 +537,7 @@ fn it_still_draws_at_a_small_size_and_with_a_hidpi_scale() {
 fn the_general_menu_reaches_every_view_and_every_shortcut() {
     let mut r = Rig::new();
     r.m = playing_model(&r.lib);
+    r.m.app.quit = true;
     r.right_click(900.0, 650.0);
     assert!(r.ui.menu_open());
     let ctx = LibCtx {
@@ -1163,8 +1164,10 @@ fn hearts_on_songs_and_videos_toggle_favorites_by_click_and_by_h() {
     // A click on the row beside the heart is not the heart (it only selects).
     let row = r.ent_rect(2);
     assert!(r.click(row.x + row.w * 0.5, y).is_empty());
-    // H hearts the selected row.
-    assert_eq!(r.key(Key::Char('h')), [Action::Lib(LibAction::ToggleFavorite(id))]);
+    // Ctrl+F hearts the selected row; H opens the help page instead.
+    let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
+    assert_eq!(r.key_mod(Key::Char('f'), ctrl), [Action::Lib(LibAction::ToggleFavorite(id))]);
+    assert_eq!(r.key(Key::Char('h')), [Action::ShowHelp]);
     // A video poster has its heart in the top right corner of the poster, and a list row at its right end.
     r.ui.show_view(View::Videos);
     let vid = video_id(&mut r, 1);
@@ -1318,7 +1321,7 @@ fn about_rw_is_last_in_the_rail_and_opens_a_page_with_links_and_the_version() {
         let body = g.m.body;
         let btns = r.ui.about_page(None, body, &r.m);
         let ids: Vec<u8> = btns.iter().map(|b| b.id).collect();
-        assert_eq!(ids, [0, 1, 2], "Rusty Bucket, X, Licenses");
+        assert_eq!(ids, [0, 1, 2, 3], "Rusty Bucket, X, Licenses, Keyboard shortcuts");
         for b in &btns {
             assert!(b.rect.x >= body.x && b.rect.right() <= body.right(), "{w}x{h}: {b:?}");
         }
@@ -1338,7 +1341,7 @@ fn about_rw_is_last_in_the_rail_and_opens_a_page_with_links_and_the_version() {
         r.key(Key::Other("F1".into()));
         assert_eq!(r.ui.lib_state().view(), View::About);
     }
-    // Where the host cannot open a link, the addresses are text and only Licenses is a button.
+    // Where the host cannot open a link, the addresses are text and only Licenses and the shortcuts page are buttons.
     let mut r = Rig::new();
     r.ui.show_view(View::About);
     r.m.app.links = false;
@@ -1352,7 +1355,7 @@ fn about_rw_is_last_in_the_rail_and_opens_a_page_with_links_and_the_version() {
     };
     let g = r.ui.lib_geom(&r.m, &ctx);
     let ids: Vec<u8> = r.ui.about_page(None, g.m.body, &r.m).iter().map(|b| b.id).collect();
-    assert_eq!(ids, [2]);
+    assert_eq!(ids, [2, 3]);
 }
 
 // ---- the tag editor -------------------------------------------------------------------------------------------------------------
@@ -2106,4 +2109,93 @@ fn menus_and_dialogs_stay_inside_a_phone_window() {
         }
         let _ = r.draw();
     }
+}
+
+// ---- help, favorites on Ctrl+F, quit -----------------------------------------------------------------------------------------------
+
+#[test]
+fn h_and_question_mark_open_help_ctrl_f_no_longer_searches_and_ctrl_q_needs_a_host_that_can_quit() {
+    let mut r = Rig::new();
+    r.ui.show_view(View::Albums);
+    assert_eq!(r.key(Key::Char('h')), [Action::ShowHelp]);
+    assert_eq!(r.key(Key::Char('?')), [Action::ShowHelp]);
+    let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
+    // Ctrl+F is the heart now: nothing selected in Albums, so the player's own heart (what is playing) answers.
+    r.m = playing_model(&r.lib);
+    let out = r.key_mod(Key::Char('f'), ctrl);
+    assert_eq!(out, [Action::ToggleFavorite]);
+    assert_ne!(r.ui.lib_state().view(), View::Search, "Ctrl+F is not search");
+    // `/` is.
+    r.key(Key::Char('/'));
+    assert_eq!(r.ui.lib_state().view(), View::Search);
+    r.key(Key::Escape);
+    // Ctrl+Q is claimed only where the host can quit (a browser tab leaves it to the browser).
+    assert!(r.key_mod(Key::Char('q'), ctrl).is_empty());
+    r.m.app.quit = true;
+    assert_eq!(r.key_mod(Key::Char('q'), ctrl), [Action::Quit]);
+    // Plain Q still shows the queue.
+    assert_eq!(r.key(Key::Char('q')), [Action::ShowPlaylist]);
+}
+
+#[test]
+fn every_library_key_on_the_help_page_still_does_something() {
+    for k in crate::help::library_keys() {
+        let Some((key, mods)) = k.probe.clone() else { continue };
+        let mut r = Rig::new();
+        r.ui.show_view(View::Albums);
+        let before = r.ui.lib_state().view();
+        let out = r.key_mod(key.clone(), mods);
+        let after = r.ui.lib_state().view();
+        assert!(!out.is_empty() || before != after, "{} ({key:?}) does nothing in the library", k.keys);
+    }
+}
+
+#[test]
+fn the_about_pages_shortcuts_button_and_the_menus_open_help() {
+    let mut r = Rig::new();
+    r.ui.show_view(View::About);
+    r.m.app.links = true;
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let g = r.ui.lib_geom(&r.m, &ctx);
+    let btn = r.ui.about_page(None, g.m.body, &r.m).into_iter().find(|b| b.id == 3).expect("the button");
+    assert!(btn.label.contains("Keyboard"));
+    r.ui.lib.scroll = (btn.rect.bottom() - g.m.body.bottom() + 24.0).max(0.0);
+    let out = r.click(btn.rect.cx(), btn.rect.cy() - r.ui.lib.scroll);
+    assert_eq!(out, [Action::ShowHelp]);
+    // The library's general menu and the player's menu both have it.
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let mut reach = Vec::new();
+    menu_actions(&super::menus::global_menu(&r.ui, &r.m, &ctx), &mut reach);
+    assert!(reach.contains(&Action::ShowHelp));
+    let mut reach = Vec::new();
+    menu_actions(&crate::actions::context_menu(&r.m), &mut reach);
+    assert!(reach.contains(&Action::ShowHelp));
+}
+
+#[test]
+fn while_help_is_up_the_library_keys_do_nothing_else() {
+    let mut r = Rig::new();
+    r.ui.show_view(View::Albums);
+    r.ui.toggle_help();
+    assert!(r.key(Key::Char('3')).is_empty());
+    assert_eq!(r.ui.lib_state().view(), View::Albums, "digits do not change the view behind the page");
+    assert!(r.ui.help_open());
+    r.key(Key::Char('?'));
+    assert!(!r.ui.help_open());
+    assert_eq!(r.key(Key::Char('3')), []);
+    assert_eq!(r.ui.lib_state().view(), View::Tracks);
 }

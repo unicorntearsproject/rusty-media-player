@@ -90,6 +90,8 @@ pub enum Effect {
     ImportPlaylist,
     /// Ask for a picture to use as a cover (the tag editor's Replace button); the host answers with [`App::cover_picked`].
     PickCover,
+    /// End the app (Ctrl+Q): the host saves what it keeps and closes its window.
+    Quit,
     /// Open a web page (an `https` address) in the person's browser: a new tab in a page, the system browser on a desktop.
     OpenUrl(String),
     /// Give the user a file (an exported playlist).
@@ -130,6 +132,7 @@ pub struct App {
     links: bool,
     /// The host can replace library files (set every tick): the tag editor is offered.
     can_edit_tags: bool,
+    can_quit: bool,
     force_draw: bool,
     last_drawn: Option<UiModel>,
     last_has_media: bool,
@@ -224,6 +227,7 @@ impl App {
             base_dirty: true,
             links: false,
             can_edit_tags: false,
+            can_quit: false,
             force_draw: true,
             last_drawn: None,
             last_has_media: false,
@@ -896,6 +900,7 @@ impl App {
         let t0 = host.clock().now_us();
         self.links = host.opens_links();
         self.can_edit_tags = host.file_writer().is_some();
+        self.can_quit = host.can_quit();
         self.setup_tick(host);
         self.theme_tick(host);
         self.pump(host);
@@ -1182,6 +1187,12 @@ impl App {
             }
             Action::Lib(a) => self.apply_lib(host, a, now),
             Action::ShowAudioSettings => self.ui.open_audio_settings(),
+            Action::ShowHelp => self.ui.toggle_help(),
+            Action::Quit => {
+                if self.can_quit {
+                    self.effects.push(Effect::Quit);
+                }
+            }
             Action::ToggleFavorite => match self.playlist.current().and_then(|i| i.track) {
                 Some(id) => self.apply_lib(host, rvp_ui::LibAction::ToggleFavorite(id), now),
                 None => self.ui.show_toast("Only what is in your library can be a favorite", now),

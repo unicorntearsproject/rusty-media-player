@@ -237,10 +237,24 @@ impl App {
             }
             false => "\"audio_panel\":null,".to_string(),
         };
+        j += &match ui.help_open() {
+            true => {
+                let g = ui.help_geom();
+                format!(
+                    "\"help\":{{\"card\":{},\"close\":{},\"body\":{},\"scroll\":{:.1}}},",
+                    rect(g.card),
+                    rect(g.close),
+                    rect(g.body),
+                    ui.help_scroll()
+                )
+            }
+            false => "\"help\":null,".to_string(),
+        };
         j += &format!(
-            "\"app\":{{\"updates\":{},\"integration\":{}}},",
+            "\"app\":{{\"updates\":{},\"integration\":{},\"quit\":{}}},",
             m.app.updates,
-            m.app.integration.map_or("null".to_string(), |b| b.to_string())
+            m.app.integration.map_or("null".to_string(), |b| b.to_string()),
+            m.app.quit
         );
         j += &match &m.dialog {
             Some(d) => {

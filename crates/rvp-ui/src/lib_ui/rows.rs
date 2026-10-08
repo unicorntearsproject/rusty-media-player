@@ -341,7 +341,7 @@ pub(crate) fn build(ui: &LibUi, model: &UiModel, ctx: &LibCtx<'_>, m: &Metrics, 
                     300.0 * s,
                     RowKind::Message(
                         "Nothing hearted yet.".into(),
-                        "Click the heart on a song or a video, or press H, and it lands here.".into(),
+                        "Click the heart on a song or a video, or press Ctrl+F, and it lands here.".into(),
                     ),
                 );
             }

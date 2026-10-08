@@ -393,6 +393,7 @@ impl App {
             },
             links: self.links,
             tags: self.can_edit_tags,
+            quit: self.can_quit,
         }
     }
 

@@ -131,7 +131,7 @@ pub(crate) fn btn_text(b: Btn, model: &UiModel, library: bool, view: View) -> Op
             } else {
                 "Add what is playing to your favorites."
             },
-            "H",
+            "Ctrl+F",
         ),
     }
 }
@@ -295,7 +295,7 @@ impl Ui {
                             } else {
                                 alloc::format!("Add {name} to your favorites.")
                             },
-                            "H",
+                            "Ctrl+F",
                         )
                     }
                     (LibHit::EntPlay(_), EntKind::Album(_)) => {
@@ -322,12 +322,14 @@ impl Ui {
                     ),
                     (_, EntKind::Track { .. }) => tip(
                         alloc::format!(
-                            "{name}. Double-click to play. H hearts it, E edits its tags, right-click for more."
+                            "{name}. Double-click to play. Ctrl+F hearts it, E edits its tags, right-click for more."
                         ),
                         "Enter",
                     ),
                     (_, EntKind::Video { .. }) => tip(
-                        alloc::format!("{name}. Double-click to play. H hearts it, right-click for more."),
+                        alloc::format!(
+                            "{name}. Double-click to play. Ctrl+F hearts it, right-click for more."
+                        ),
                         "Enter",
                     ),
                     (_, EntKind::Queue(_)) => tip(

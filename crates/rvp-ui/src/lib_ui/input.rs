@@ -616,6 +616,9 @@ impl Ui {
             return self.dialog_event(ev, now_us, d);
         }
         self.dialog_closed();
+        if self.help.is_some() {
+            return self.help_event(ev, now_us, model);
+        }
         if self.audio_panel.is_some() {
             return self.audio_panel_event(ev, now_us, model);
         }
@@ -1154,6 +1157,7 @@ impl Ui {
                 out.push(Action::Lib(LibAction::Play(Scope::List, Enqueue::ShuffleNow)))
             }
             (View::About, None, id @ 0..=2) => out.push(Action::Lib(LibAction::About(id))),
+            (View::About, None, 3) => out.push(Action::ShowHelp),
             (View::NowPlaying, None, 0) => self.show_view(View::Albums),
             (_, None, 10) => out.push(Action::Lib(LibAction::AddFolder)),
             (_, None, 11) => out.push(Action::OpenFile),
@@ -1363,10 +1367,6 @@ impl Ui {
                 self.show_view(View::Search);
                 return;
             }
-            Key::Char('f') | Key::Char('F') if mods.ctrl => {
-                self.show_view(View::Search);
-                return;
-            }
             Key::Char('0') if plain && !mods.shift => {
                 self.show_view(View::History);
                 return;
@@ -1400,8 +1400,8 @@ impl Ui {
             }
             _ => {}
         }
-        // Content. H hearts the selected song or video (what is playing when nothing is selected: the shortcut table's own action).
-        if plain && !mods.shift && matches!(key, Key::Char('h' | 'H')) {
+        // Content. Ctrl+F hearts the selected song or video (what is playing when nothing is selected: the shortcut table's own action).
+        if mods.ctrl && !mods.alt && !mods.logo && !mods.shift && matches!(key, Key::Char('f' | 'F')) {
             self.ensure_rows(model, ctx, &g);
             let item = self
                 .lib
@@ -1450,7 +1450,7 @@ impl Ui {
             out.push(Action::PlayPause);
             return;
         }
-        if let Some(a) = shortcut_for(key, mods) {
+        if let Some(a) = shortcut_for(key, mods).filter(|a| *a != Action::Quit || model.app.quit) {
             let repeatable = matches!(
                 a,
                 Action::SeekBy(_) | Action::VolumeBy(_) | Action::SpeedStep(_) | Action::FrameStep(_)

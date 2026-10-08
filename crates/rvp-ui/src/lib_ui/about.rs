@@ -39,6 +39,7 @@ pub(crate) const PARAGRAPHS: [(&str, &str); 3] = [
 const LINKS: [(u8, &str, Icon); 2] =
     [(0, "Rusty Bucket", Icon::ExternalLink), (1, "@djunicorntears on X", Icon::ExternalLink)];
 const LICENSES: (u8, &str, Icon) = (2, "Licenses", Icon::Download);
+const SHORTCUTS_BTN: (u8, &str, Icon) = (3, "Keyboard shortcuts", Icon::Info);
 
 impl Ui {
     /// Lay out the About page in `rect` (the page's block on screen) and, when `fb` is given, draw it. Returns the buttons.
@@ -99,6 +100,7 @@ impl Ui {
             y += 8.0 * s;
         }
         defs.push(LICENSES);
+        defs.push(SHORTCUTS_BTN);
         let mut bx = x;
         for (id, label, icon) in defs {
             let w = self.text_w(Face::SansMedium, 13.0, label, 0.0) + 8.0 * s + 46.0 * s;

@@ -53,14 +53,14 @@ test("a heart on a song makes it a favorite, the Favorites view lists it, and it
   await waitFor(page, () => window.rvp.snapshot().lib.view === "favorites");
   s = await snap(page);
   expect(s.lib.ents.map((e) => e.label)).toEqual([title]);
-  // H toggles the selected row, too (in the Tracks view, where the row stays when its heart goes).
+  // Ctrl+F toggles the selected row, too (in the Tracks view, where the row stays when its heart goes).
   await press(page, "3");
   await waitFor(page, () => window.rvp.snapshot().lib.view === "tracks");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
-  await press(page, "h");
+  await press(page, "Control+f");
   await waitFor(page, () => window.rvp.snapshot().lib.favorites === 2);
-  await press(page, "h");
+  await press(page, "Control+f");
   await waitFor(page, () => window.rvp.snapshot().lib.favorites === 1);
   // A reload keeps it.
   await page.evaluate(() => window.rvp.flushStore());
@@ -78,7 +78,7 @@ test("About RW is last in the rail; its link opens a new tab and the page says t
   const s = await snap(page);
   expect(s.lib.about.y).toBeGreaterThan(s.lib.settings.y);
   const ids = s.lib.hero_buttons.map((b) => b.id);
-  expect(ids).toEqual([0, 1, 2]);
+  expect(ids).toEqual([0, 1, 2, 3]);
   const bucket = s.lib.hero_buttons.find((b) => b.id === 0).rect;
   // The page may be taller than the window: scroll to the button first.
   await page.mouse.move(s.lib.body.x + 300, s.lib.body.y + 300);

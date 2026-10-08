@@ -1111,9 +1111,15 @@ Features added on top of M12 (details in the docs named in brackets):
 - **Speed** (release, one thread, 1080p30, 7 Mbit/s typical, `--example bench`): 38.7 fps Main, 36.0 fps Main 10 on desktop. In the browser (`cargo xtask perf-web --both --only hevc`, 15 s): single-threaded build 0.0 % dropped Main, 1.7 % Main 10; threaded build 0.0 % and 0.4 %. No SIMD yet (the compiler vectorises the loops it can); threads only move the decoder off the UI thread.
 - Size: the wasm grew by about 190 KB (4.55 to 4.74 MB single, 4.87 to 5.06 MB threads).
 
+### rc10 round (2026-10-08): quit, help, favorites
+
+- **Ctrl+Q quits** the desktop app (Cmd+Q on a Mac) and Rusty Bucket's app (the host's shutdown); a browser tab leaves the key alone (`Host::can_quit`, `Effect::Quit`, a "Quit" menu entry only where it applies).
+- **Help overlay** (`H` or `?`; Esc, `H` or `?` close it; the menu's "Keyboard shortcuts", the About page's button): a themed, scrollable keyboard and mouse reference with Playback, Library, Visualizer, App and Mouse groups and a tips list, at any width including a phone (a finger drags it). The shortcut rows are generated from `SHORTCUTS`, so they cannot drift (a test fails for a shortcut with no words or no row); the library's own keys (matched where they act) are in `help::library_keys()`, and a test presses each one that has a probe.
+- **Favorites moved from `H` to `Ctrl+F`** (tooltips, menus, hints, docs and tests follow); search is `/` only.
+
 ### Phase A2 of the 2026-10-06 batch
 
-- **Favorites**: a heart on every song and video (rows, posters, the album page's *Favorite* button, the now-playing card, the bar, context menus, key `H`), a Favorites view (key `9`) with Music and Videos
+- **Favorites**: a heart on every song and video (rows, posters, the album page's *Favorite* button, the now-playing card, the bar, context menus, key `H`, since rc10 `Ctrl+F`), a Favorites view (key `9`) with Music and Videos
   sections that plays as one queue. Kept by folder name, file name and length (`library/favorites`), so rescans, moved folders and tag edits keep them.
 - **About RW** (last in the rail, `F1`): three short paragraphs (DJ Unicorn Tears, Rusty Wave, Rusty Bucket), the version and build commit (`build.rs` of `rvp-app`; `RVP_BUILD_COMMIT` overrides it
   for builds without git), links through the host (`Effect::OpenUrl`) and the licenses.

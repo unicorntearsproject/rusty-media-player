@@ -117,6 +117,9 @@ impl Host for RbHost {
     fn clock(&self) -> &dyn HostClock {
         &self.clock
     }
+    fn can_quit(&self) -> bool {
+        true
+    }
     fn audio(&mut self) -> &mut RbAudio {
         &mut self.audio
     }

@@ -78,6 +78,8 @@ pub struct AppModel {
     pub links: bool,
     /// The host can change library files: "Edit tags" is offered.
     pub tags: bool,
+    /// The host has a window of its own to close: Ctrl+Q and a "Quit" menu entry are offered (not in a browser tab).
+    pub quit: bool,
 }
 
 /// Everything the UI needs to draw and to build its menus.

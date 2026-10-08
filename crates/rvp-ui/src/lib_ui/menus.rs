@@ -42,7 +42,7 @@ fn favorite(id: u32, ctx: &LibCtx<'_>) -> MenuItem {
     let on = ctx.lib.is_favorite(id);
     hinted(
         if on { "Remove from favorites" } else { "Add to favorites" },
-        "H",
+        "Ctrl+F",
         Action::Lib(LibAction::ToggleFavorite(id)),
     )
 }
@@ -257,6 +257,7 @@ pub(crate) fn global_menu(_ui: &Ui, model: &UiModel, ctx: &LibCtx<'_>) -> Vec<Me
         item("Queue", Action::ShowView(View::Queue)),
         item("Visualizer", Action::ShowView(View::Visualizer)).sep(),
         hinted("About RW", "F1", Action::ShowView(View::About)),
+        hinted("Keyboard shortcuts", "H / ?", Action::ShowHelp),
     ];
     let has_root = !ctx.lib.roots().is_empty();
     let mut v = alloc::vec![
@@ -270,7 +271,8 @@ pub(crate) fn global_menu(_ui: &Ui, model: &UiModel, ctx: &LibCtx<'_>) -> Vec<Me
     ];
     let mut rest = context_menu(model);
     // The player menu's own "Library" entry is this face.
-    rest.retain(|m| m.action != Some(Action::ToggleMode));
+    // (The shortcuts page sits under "Go to" here, which keeps this menu short enough for a phone.)
+    rest.retain(|m| m.action != Some(Action::ToggleMode) && m.action != Some(Action::ShowHelp));
     if let Some(first) = rest.first_mut() {
         first.separator = true;
     }

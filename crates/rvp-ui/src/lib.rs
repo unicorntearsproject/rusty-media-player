@@ -21,6 +21,7 @@ pub mod dialog;
 mod draw;
 pub mod font;
 pub mod gfx;
+pub mod help;
 pub mod icon;
 mod icon_data;
 pub mod lib_ui;
@@ -37,6 +38,7 @@ pub use audio_panel::{AudioControl, AudioPanelGeom};
 pub use dialog::{DialogButton, DialogControl, DialogGeom, DialogSpec, DialogToggle};
 pub use font::{FontData, FontLoader};
 pub use gfx::{FrameBuffer, Paint, RectF};
+pub use help::{HelpGeom, HelpRow, HelpSection, help_sections};
 pub use lib_ui::{
     CoverAction, Detail, Enqueue, LibAction, LibCtx, LibHit, LibUi, Mode, Scope, TagField, TagFormSpec,
     TagTarget, UiCommand, View,

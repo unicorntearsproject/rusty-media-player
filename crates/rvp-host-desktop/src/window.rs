@@ -74,6 +74,7 @@ pub fn run(opts: Options, data_dir: PathBuf) -> i32 {
         started_paused: false,
         _lock: None,
         quitting: false,
+        quit_requested: false,
     };
     if let Err(e) = event_loop.run_app(&mut handler) {
         eprintln!("rusty-wave: {e}");
@@ -118,6 +119,8 @@ struct Handler {
     /// Held for the life of the process by the first instance (decides the MPRIS name).
     _lock: Option<std::fs::File>,
     quitting: bool,
+    /// The app asked to end (Ctrl+Q): the next tick closes the window.
+    quit_requested: bool,
 }
 
 impl Handler {
@@ -325,6 +328,7 @@ impl Handler {
                 Effect::ImportPlaylist => self.dialogs.pick_playlists(),
                 Effect::PickCover => self.dialogs.pick_cover(),
                 Effect::OpenUrl(url) => crate::open_url(&url),
+                Effect::Quit => self.quit_requested = true,
                 Effect::Rescan(id) => self.host.library.rescan(&id),
                 Effect::Forget(id) => {
                     self.host.library.forget(&id);
@@ -441,6 +445,10 @@ impl Handler {
             return;
         }
         self.handle_effects();
+        if self.quit_requested {
+            self.quit(el);
+            return;
+        }
         self.after_tick();
         if self.opts.paused && !self.started_paused && self.app.model().state.is_active() {
             self.started_paused = true;
@@ -512,6 +520,15 @@ impl ApplicationHandler for Handler {
                         && matches!(event.logical_key, winit::keyboard::Key::Named(_))
                     {
                         Modifiers::default()
+                    } else {
+                        mods
+                    };
+                    // Cmd+Q on a Mac is the app's Ctrl+Q.
+                    let mods = if cfg!(target_os = "macos")
+                        && mods.logo
+                        && matches!(key, rvp_host::Key::Char('q' | 'Q'))
+                    {
+                        Modifiers { ctrl: true, logo: false, ..mods }
                     } else {
                         mods
                     };
