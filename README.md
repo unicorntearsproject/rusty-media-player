@@ -51,6 +51,25 @@ for the architecture and the milestone list (M10 audio-first view, M11 desktop a
 Bucket adapter), [`docs/host-api.md`](docs/host-api.md) for the host-neutral media interfaces, and [`CLAUDE.md`](CLAUDE.md)
 for project rules.
 
+## Roadmap
+
+- **1.0.0**: the stable release, after more testing on other systems.
+- **1.0.x**: shuffle's Back goes to what you actually played last.
+- **1.1, media server (desktop)**, as optional drop-ins under a new Server tab:
+  - DLNA/UPnP: browse servers, share your library to TVs, "Play To", send to TVs.
+  - A home-network server for phones and browsers, with a phone remote.
+  - Chromecast.
+  - Jellyfin, Subsonic and Navidrome servers.
+  - WebDAV folders.
+  - Remux to MP4.
+  - Built-in transcoding with our own H.264 and AAC encoders (planned).
+- **1.2**, more drop-ins: SMB shares, internet radio and podcasts, multi-room playback, AirPlay.
+- **Later, exploring**: Spotify, Apple Music and YouTube as remote-controlled services; faster HEVC (SIMD and threads).
+
+Details: [docs/planning/v1.1-media-server.md](docs/planning/v1.1-media-server.md).
+
+Suggestions, requests & bug reports welcome via X (https://x.com/djunicorntears) or GitHub issues (https://github.com/unicorntearsproject/rusty-media-player/issues).
+
 ## Layout
 
 | Path | What |
