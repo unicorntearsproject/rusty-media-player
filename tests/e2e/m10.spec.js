@@ -265,6 +265,8 @@ test.describe("M10", () => {
     await waitFor(page, () => window.rvp.snapshot().repeat === 1);
     await press(page, "Tab"); // rail
     await press(page, "Tab"); // bar
+    // The bar reads shuffle, restart/previous, back, play: three steps from the first button to play.
+    await press(page, "ArrowRight");
     await press(page, "ArrowRight");
     await press(page, "ArrowRight");
     await press(page, "Enter");
