@@ -27,7 +27,10 @@ FOR SCRIPTS AND TESTS:
         --integration <ACTION> add, remove or show (status) the app-menu entry (AppImage; Start menu and file types on Windows) and exit
         --app-services         offer update checks and the app-menu entry even in a scripted run (they are off with --exit-after,
                                --screenshot, --press and --report so tests are not interrupted by their dialogs)
-        --exit-after <SEC>     quit after SEC seconds
+        --exit-after <SEC>     quit after SEC seconds (with the options below: the longest the run may take)
+        --exit-at-position <SEC>  quit once the media has played SEC seconds (media time, not wall time: a busy machine only makes the run longer)
+        --exit-at-frames <N>   quit once N pictures were shown (with --exit-at-position: when both are true)
+        --screenshot-at-frames <N>  take the screenshot once N pictures were shown
         --screenshot <PNG>     write the window's picture to PNG (at --screenshot-after, else at exit)
         --screenshot-after <SEC>
         --report <JSON>        write a short report (state, position, frames, audio clock rate) at exit
@@ -60,6 +63,12 @@ pub struct Options {
     pub data_dir: Option<PathBuf>,
     /// Quit after this many seconds.
     pub exit_after: Option<f64>,
+    /// Quit once the media position has reached this many seconds.
+    pub exit_at_position: Option<f64>,
+    /// Quit once this many pictures were shown.
+    pub exit_at_frames: Option<u64>,
+    /// Take the screenshot once this many pictures were shown.
+    pub screenshot_at_frames: Option<u64>,
     /// Write a screenshot here.
     pub screenshot: Option<PathBuf>,
     /// Seconds into the run to take it.
@@ -131,6 +140,18 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Options, String>
             "--exit-after" => {
                 o.exit_after = Some(value("seconds")?.parse().map_err(|_| "--exit-after: not a number")?)
             }
+            "--exit-at-position" => {
+                o.exit_at_position =
+                    Some(value("seconds")?.parse().map_err(|_| "--exit-at-position: not a number")?)
+            }
+            "--exit-at-frames" => {
+                o.exit_at_frames =
+                    Some(value("a count")?.parse().map_err(|_| "--exit-at-frames: not a number")?)
+            }
+            "--screenshot-at-frames" => {
+                o.screenshot_at_frames =
+                    Some(value("a count")?.parse().map_err(|_| "--screenshot-at-frames: not a number")?)
+            }
             "--screenshot" => o.screenshot = Some(PathBuf::from(value("a file name")?)),
             "--screenshot-after" => {
                 o.screenshot_after =
@@ -196,8 +217,17 @@ mod tests {
             "b.mp3",
             "--exit-after",
             "2.5",
+            "--exit-at-position",
+            "3",
+            "--exit-at-frames",
+            "40",
+            "--screenshot-at-frames=30",
         ])
         .unwrap();
+        assert_eq!(
+            (o.exit_at_position, o.exit_at_frames, o.screenshot_at_frames),
+            (Some(3.0), Some(40), Some(30))
+        );
         assert_eq!(o.inputs, ["a.mkv", "b.mp3"]);
         assert!(o.fullscreen);
         assert_eq!(o.size, Some((800, 450)));

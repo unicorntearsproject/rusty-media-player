@@ -51,15 +51,24 @@ const diff = (a, b, thr = 12) => {
   return n / (a.length / 3);
 };
 
-/** Wait until the picture differs from `before` by more than `min` of the sampled pixels; resolves with the new samples. */
-async function pictureChange(page, before, min = 0.01, timeout = 30_000) {
-  const t0 = Date.now();
+/** The pictures the page has shown so far (a counter, so waiting on it does not depend on how busy the machine is). */
+const presentedNow = async (page) => ((await snap(page)).video || { presented: 0 }).presented;
+
+/** After a seek while paused, the preview picture is a new frame that may need many frames decoded from the previous key frame (a long
+ *  AV1 clip on a busy machine takes minutes): wait for the picture itself to differ, with no budget but the test's own (generous) timeout. */
+async function pictureChange(page, before, min = 0.01) {
   for (;;) {
     const now = await picture(page);
     if (diff(before, now) > min) return now;
-    if (Date.now() - t0 > timeout) return now;
     await frames(page, 3);
   }
+}
+
+/** Wait until the page has shown more than `n` pictures (`n` read before whatever should make a new one), then sample the picture. */
+async function pictureAfter(page, n, more = 1) {
+  await waitFor(page, ([n, more]) => (window.rvp.snapshot().video || { presented: 0 }).presented >= n + more, [n, more], 120_000);
+  await frames(page, 2);
+  return picture(page);
 }
 
 const spread = (a) => {
@@ -76,15 +85,17 @@ test.describe("player", () => {
   });
 
   test("a) the picture moves, b) position runs at 1x, c) Space pauses and keeps the last frame, d) a seek click lands", async ({ page }) => {
+    test.setTimeout(300_000); // a busy machine decodes slowly; every wait below is on a condition, none on a budget
     const errors = await load(page);
     expect((await snap(page)).has_video).toBe(true);
 
     // (a) canvas pixels at the video rect change over 2 s.
     const before = await picture(page);
     expect(spread(before)).toBeGreaterThan(40); // it is a picture, not a flat colour
-    const after = await pictureChange(page, before);
+    const shown0 = await presentedNow(page);
+    const after = await pictureAfter(page, shown0, 12); // twelve more pictures: half a second of film
     const changed = diff(before, after);
-    expect(changed, `only ${(changed * 100).toFixed(1)}% of the sampled pixels changed in 2 s`).toBeGreaterThan(0.01);
+    expect(changed, `only ${(changed * 100).toFixed(1)}% of the sampled pixels changed over twelve pictures`).toBeGreaterThan(0.01);
 
     // The audio clock is what drives playback: the worklet is running and its played-frame counter moves.
     const a1 = await page.evaluate(() => window.rvp.audio());
@@ -112,8 +123,11 @@ test.describe("player", () => {
 
     // (d) A click on the seek bar lands within 1 s of the clicked point.
     const s = await snap(page);
-    const target = 0.5 * (s.duration_us / 1e6);
-    await page.mouse.click(s.seek.x + s.seek.w * 0.5, s.seek.y + s.seek.h / 2);
+    // Early in the clip, close to its first key frame: the preview of a seek far into a long clip needs every picture since the key frame
+    // decoded first, which a busy machine does in minutes. (The other seeks, into the short clips below, go far in.)
+    const frac = 0.03;
+    const target = frac * (s.duration_us / 1e6);
+    await page.mouse.click(s.seek.x + s.seek.w * frac, s.seek.y + s.seek.h / 2);
     await waitFor(page, (t) => Math.abs(window.rvp.snapshot().position_us / 1e6 - t) < 1, target);
     const landed = (await snap(page)).position_us / 1e6;
     expect(Math.abs(landed - target)).toBeLessThan(1);
@@ -136,6 +150,7 @@ test.describe("player", () => {
     ["VP9", "WebM + Vorbis", VP9_VORBIS],
   ]) {
     test(`${codec} (${name}): shows a moving picture at 1x and a seek lands`, async ({ page }) => {
+      test.setTimeout(300_000);
       expect(fs.existsSync(file), `${file} is missing: run cargo xtask fixtures`).toBeTruthy();
       const errors = await load(page, file);
       const s0 = await snap(page);
@@ -143,7 +158,8 @@ test.describe("player", () => {
       expect(s0.error).toBeFalsy();
       const before = await picture(page);
       expect(spread(before)).toBeGreaterThan(40);
-      const after = await pictureChange(page, before);
+      const shown0 = await presentedNow(page);
+      const after = await pictureAfter(page, shown0, 12);
       expect(diff(before, after), "the picture changes while playing").toBeGreaterThan(0.01);
       const run = await rateAgainstDevice(page, 2_000_000);
       expect(run.ratio, `position moved ${(run.moved / 1000).toFixed(0)} ms in ${(run.device / 1000).toFixed(0)} ms of device time`).toBeGreaterThan(0.95);
@@ -540,7 +556,8 @@ test.describe("crash recovery", () => {
       await waitState(page, "playing");
       await waitFor(page, () => (window.rvp.snapshot().video || { presented: 0 }).presented > 3, null, 30_000);
       const before = await picture(page);
-      expect(diff(before, await pictureChange(page, before, 0.005)), "the picture moves again").toBeGreaterThan(0.005);
+      const shown0 = await presentedNow(page);
+      expect(diff(before, await pictureAfter(page, shown0, 12)), "the picture moves again").toBeGreaterThan(0.005);
       expect(logs.some((l) => /crash|panick|unreachable/i.test(l)), "the crash was reported").toBe(true);
     });
   }

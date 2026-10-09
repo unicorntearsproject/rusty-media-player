@@ -10,13 +10,19 @@ use std::time::Instant;
 pub struct Smoke {
     start: Instant,
     exit_after: Option<f64>,
+    exit_at_position: Option<f64>,
+    exit_at_frames: Option<u64>,
+    screenshot_at_frames: Option<u64>,
     shot: Option<std::path::PathBuf>,
     shot_after: Option<f64>,
     shot_done: bool,
     report: Option<std::path::PathBuf>,
-    /// First and latest `(wall seconds, position us)` while playing from one second in.
-    first: Option<(f64, i64)>,
-    last: Option<(f64, i64)>,
+    /// The previous tick: `(wall seconds, position us)` while playing from one second in.
+    prev: Option<(f64, i64)>,
+    /// Wall seconds and media microseconds added up over the stretches that were playing at two ticks in a row: a stall (buffering)
+    /// in between is not counted, so the ratio is the speed of the clock itself and a busy machine cannot spoil it.
+    play_wall: f64,
+    play_media: i64,
     saw_playing: bool,
     saw_ended: bool,
     max_position_us: i64,
@@ -73,7 +79,13 @@ pub fn parse_key(text: &str) -> Option<(Key, Modifiers)> {
 impl Smoke {
     /// Active only if the command line asked for something scripted.
     pub fn new(o: &Options) -> Option<Self> {
-        if o.exit_after.is_none() && o.screenshot.is_none() && o.report.is_none() && o.press.is_empty() {
+        if o.exit_after.is_none()
+            && o.exit_at_position.is_none()
+            && o.exit_at_frames.is_none()
+            && o.screenshot.is_none()
+            && o.report.is_none()
+            && o.press.is_empty()
+        {
             return None;
         }
         let mut presses: Vec<(f64, Key, Modifiers)> =
@@ -82,12 +94,16 @@ impl Smoke {
         Some(Self {
             start: Instant::now(),
             exit_after: o.exit_after,
+            exit_at_position: o.exit_at_position,
+            exit_at_frames: o.exit_at_frames,
+            screenshot_at_frames: o.screenshot_at_frames,
             shot: o.screenshot.clone(),
             shot_after: o.screenshot_after,
             shot_done: false,
             report: o.report.clone(),
-            first: None,
-            last: None,
+            prev: None,
+            play_wall: 0.0,
+            play_media: 0,
             saw_playing: false,
             saw_ended: false,
             max_position_us: 0,
@@ -120,11 +136,18 @@ impl Smoke {
         if m.state == MediaState::Playing {
             self.saw_playing = true;
             if m.position_us >= 1_000_000 {
-                if self.first.is_none() {
-                    self.first = Some((t, m.position_us));
+                if let Some((t0, p0)) = self.prev {
+                    if p0 >= 1_000_000 && m.position_us >= p0 {
+                        self.play_wall += t - t0;
+                        self.play_media += m.position_us - p0;
+                    }
                 }
-                self.last = Some((t, m.position_us));
+                self.prev = Some((t, m.position_us));
+            } else {
+                self.prev = None;
             }
+        } else {
+            self.prev = None;
         }
         if m.state == MediaState::Ended {
             self.saw_ended = true;
@@ -133,13 +156,23 @@ impl Smoke {
         if host.video.width > 0 {
             self.video_size = (host.video.width, host.video.height);
         }
-        if let (Some(after), false) = (self.shot_after, self.shot_done)
-            && t >= after
-        {
-            self.take_screenshot(host);
+        let frames = host.video.count as u64;
+        if !self.shot_done {
+            let due = match self.screenshot_at_frames {
+                Some(n) => frames >= n,
+                None => self.shot_after.is_some_and(|after| t >= after),
+            };
+            if due {
+                self.take_screenshot(host);
+            }
         }
-        // Without an exit time, a run ends when the media has played out and everything asked for has been written.
-        self.exit_after.is_some_and(|s| t >= s)
+        // The conditions on the media (its position, the pictures shown) end the run when all of them hold; the wall-clock time is only the
+        // longest it may take.
+        let by_media = (self.exit_at_position.is_some() || self.exit_at_frames.is_some())
+            && self.exit_at_position.is_none_or(|p| self.max_position_us as f64 >= p * 1e6)
+            && self.exit_at_frames.is_none_or(|n| frames >= n)
+            && (self.shot_done || self.shot.is_none());
+        by_media || self.exit_after.is_some_and(|s| t >= s)
     }
 
     fn take_screenshot(&mut self, host: &DesktopHost) {
@@ -162,16 +195,12 @@ impl Smoke {
         }
         let Some(path) = &self.report else { return };
         let m = app.model();
-        let ratio = match (self.first, self.last) {
-            (Some((t0, p0)), Some((t1, p1))) if t1 - t0 >= 1.0 => {
-                format!("{:.4}", (p1 - p0) as f64 / 1e6 / (t1 - t0))
-            }
-            _ => "null".into(),
+        let ratio = if self.play_wall >= 1.0 {
+            format!("{:.4}", self.play_media as f64 / 1e6 / self.play_wall)
+        } else {
+            "null".into()
         };
-        let span = match (self.first, self.last) {
-            (Some((t0, _)), Some((t1, _))) => t1 - t0,
-            _ => 0.0,
-        };
+        let span = self.play_wall;
         let state = format!("{:?}", m.state);
         let json = format!(
             "{{\n  \"version\": \"{}\",\n  \"state\": \"{}\",\n  \"saw_playing\": {},\n  \"saw_ended\": {},\n  \"position_ms\": {},\n  \"max_position_ms\": {},\n  \"duration_ms\": {},\n  \"clock_ratio\": {},\n  \"clock_span_s\": {:.3},\n  \"title\": {},\n  \"artist\": {},\n  \"queue_len\": {},\n  \"video_frames\": {},\n  \"video_size\": [{}, {}],\n  \"frames_presented\": {},\n  \"window\": [{}, {}, {:.2}],\n  \"audio_backend\": {},\n  \"audio_frames_written\": {},\n  \"audio_frames_played\": {},\n  \"audio_failed\": {},\n  \"media_controls\": {},\n  \"mode\": \"{}\",\n  \"fullscreen\": {},\n  \"library_tracks\": {},\n  \"library_albums\": {},\n  \"library_videos\": {},\n  \"library_playable_tracks\": {},\n  \"library_playable_videos\": {},\n  \"library_roots_connected\": {},\n  \"library_roots\": [{}],\n  \"dialog\": {},\n  \"first_run\": {},\n  \"crossfade\": {},\n  \"crossfade_secs\": {},\n  \"auto_level\": {},\n  \"target_lufs\": {},\n  \"level_mode\": \"{}\"\n}}\n",

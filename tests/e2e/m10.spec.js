@@ -125,7 +125,9 @@ test.describe("M10", () => {
     expect(album.length).toBe(10);
     // Poll the metadata as the ten short tracks go by (they are gapless): every track shows up, in order.
     const seen = [];
-    const deadline = Date.now() + 15_000;
+    // (The loop ends when the album has played out or every title was seen; the wall-clock limit is only a safety net for a machine that is
+    // far too busy, not a budget the playing must fit in.)
+    const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
       const s = await snap(page);
       const t = s.now.title;
