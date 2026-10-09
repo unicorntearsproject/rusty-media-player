@@ -2280,17 +2280,6 @@ fn the_phone_transport_has_the_five_in_order_at_44_px_and_fits_the_width() {
 
 // ---- collapsing the rail -----------------------------------------------------------------------------------------------------------
 
-fn ctx_of(r: &Rig) -> LibCtx<'_> {
-    LibCtx {
-        lib: &r.lib,
-        now_art: None,
-        scan: None,
-        viz: None,
-        video: None,
-        resume: crate::lib_ui::no_resume(),
-    }
-}
-
 #[test]
 fn the_rail_collapses_to_icons_keeps_every_entry_and_a_button_brings_it_back() {
     let mut r = Rig::new();
