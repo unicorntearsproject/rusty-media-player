@@ -49,8 +49,8 @@ pub(crate) struct NowMeta {
     pub art: Option<Image>,
 }
 
-/// What the cached queue entries were built for: playlist revision, current item, library revision.
-type QueueKey = (u32, Option<u32>, u64);
+/// What the cached queue entries were built for: playlist revision, current item, library revision, and the order they play in.
+type QueueKey = (u32, Option<u32>, u64, u64);
 
 type Imports = Rc<RefCell<Vec<(String, Result<Vec<u8>, Error>)>>>;
 
@@ -575,18 +575,23 @@ impl App {
 
     /// The queue as the UI shows it, rebuilt only when the list, the current item or the library changed.
     pub(crate) fn queue_entries(&mut self) -> Rc<Vec<PlaylistEntry>> {
-        let key = (self.playlist.revision(), self.playlist.current_id(), self.lib.lib.revision());
+        // The queue as it will play: the song playing, then what "next" visits (shuffled order, repeat and play-next items included).
+        let view = self.playlist.play_view();
+        let view_hash = view
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325u64, |h, id| (h ^ *id as u64).wrapping_mul(0x100_0000_01b3));
+        let key = (self.playlist.revision(), self.playlist.current_id(), self.lib.lib.revision(), view_hash);
         if let Some((k, v)) = &self.lib.queue_cache {
             if *k == key {
                 return v.clone();
             }
         }
         let cur = self.playlist.current_id();
-        let v: Vec<PlaylistEntry> = self
-            .playlist
-            .items()
+        let v: Vec<PlaylistEntry> = view
             .iter()
-            .map(|i| {
+            .enumerate()
+            .filter_map(|(pos, id)| self.playlist.get(*id).map(|i| (pos, i)))
+            .map(|(pos, i)| {
                 let t = i.track.and_then(|id| self.lib.lib.track(id));
                 match t {
                     Some(t) => {
@@ -597,7 +602,7 @@ impl App {
                         PlaylistEntry {
                             id: i.id,
                             label: t.display_title().to_string(),
-                            current: Some(i.id) == cur,
+                            current: pos == 0 && Some(i.id) == cur,
                             subtitle: sub,
                             duration_us: t.duration_us,
                             track: Some(t.id),
@@ -607,7 +612,7 @@ impl App {
                     None => PlaylistEntry {
                         id: i.id,
                         label: i.name.clone(),
-                        current: Some(i.id) == cur,
+                        current: pos == 0 && Some(i.id) == cur,
                         subtitle: String::new(),
                         duration_us: 0,
                         track: i.track,
@@ -701,12 +706,11 @@ impl App {
                 }
             }
             Enqueue::Next => {
-                let mut after = self.playlist.current_id();
+                // Each goes behind the "play next" items already waiting, so they play in the order they were added.
                 let mut first = None;
                 for (id, name, src) in &items {
-                    let item = self.playlist.insert_after(after, name, src, Some(*id));
+                    let item = self.playlist.insert_next(name, src, Some(*id));
                     first.get_or_insert(item);
-                    after = Some(item);
                 }
                 self.requeue();
                 if idle {
@@ -714,6 +718,8 @@ impl App {
                         self.lib.auto_mode = false;
                         self.play_item(host, f);
                     }
+                } else if items.len() == 1 {
+                    self.ui.show_toast(&format!("Playing next: {}", items[0].1), now);
                 } else {
                     self.ui.show_toast(&format!("Playing {} next", items.len()), now);
                 }
@@ -884,9 +890,10 @@ impl App {
             }
             LibAction::ClearHistory => self.ask_clear_history(now),
             LibAction::QueueToNext(id) => {
-                self.playlist.move_after(id, None);
+                self.playlist.move_next(id);
                 self.requeue();
-                self.ui.show_toast("Playing next", now);
+                let name = self.playlist.get(id).map(|i| i.name.clone()).unwrap_or_default();
+                self.ui.show_toast(&format!("Playing next: {name}"), now);
             }
             LibAction::SortTracks(by, asc) => self.ui.set_track_sort(by, asc),
             // The video list's layout and order live in the UI's state; nothing for the app to do yet.

@@ -729,3 +729,90 @@ fn skipping_a_song_echoes_it_out_but_other_changes_do_not() {
         assert!(on == off, "{how}: no echo");
     }
 }
+
+// ---- the queue as it plays, and play next -----------------------------------------------------------------------------------------
+
+fn queue_ids(r: &Rig) -> Vec<u32> {
+    r.app.model().playlist.iter().map(|e| e.id).collect()
+}
+
+#[test]
+fn the_queue_lists_what_next_will_play_shuffled_or_not() {
+    if skip() {
+        return;
+    }
+    for shuffle in [false, true] {
+        let mut r = Rig::scanned();
+        let album = r.album("Delta Hiss", "Feedback Loop");
+        r.act(Action::Lib(LibAction::Play(Scope::Album(album.id), Enqueue::Now)));
+        r.run(300);
+        if shuffle {
+            r.act(Action::ToggleShuffle);
+            r.run(100);
+        }
+        let first = queue_ids(&r);
+        assert!(first.len() >= 3, "{first:?}");
+        assert!(r.app.model().playlist[0].current, "now playing is on top");
+        // Walk Next: each press lands on the next row of what was shown, and the list then starts from there.
+        for k in 1..first.len().min(5) {
+            let shown = queue_ids(&r);
+            r.act(Action::Next);
+            r.run(200);
+            assert_eq!(r.app.playlist().current_id(), Some(shown[1]), "shuffle {shuffle}: step {k}");
+            assert_eq!(queue_ids(&r)[0], shown[1], "the new song is on top");
+            assert_eq!(queue_ids(&r)[..], shown[1..], "the rest is what was shown");
+        }
+    }
+}
+
+#[test]
+fn play_next_stacks_in_order_ahead_of_the_queue_and_says_what_it_did() {
+    if skip() {
+        return;
+    }
+    for shuffle in [false, true] {
+        let mut r = Rig::scanned();
+        let album = r.album("Delta Hiss", "Feedback Loop");
+        r.act(Action::Lib(LibAction::Play(Scope::Album(album.id), Enqueue::Now)));
+        r.run(300);
+        if shuffle {
+            r.act(Action::ToggleShuffle);
+            r.step();
+        }
+        let other = r.album(
+            "Aurora Vale",
+            &r.app.library().albums().iter().find(|a| a.artist == "Aurora Vale").unwrap().title.clone(),
+        );
+        let tracks: Vec<u32> = other.tracks.iter().copied().take(2).collect();
+        // Two separate "play next" actions: the first plays first.
+        r.act(Action::Lib(LibAction::Play(Scope::Track(tracks[0]), Enqueue::Next)));
+        let toast = r.app.ui().toast_text().map(str::to_string).unwrap_or_default();
+        assert!(toast.starts_with("Playing next: "), "{toast}");
+        r.act(Action::Lib(LibAction::Play(Scope::Track(tracks[1]), Enqueue::Next)));
+        r.step();
+        let q = r.app.model().playlist.clone();
+        assert_eq!(q[1].track, Some(tracks[0]), "shuffle {shuffle}");
+        assert_eq!(q[2].track, Some(tracks[1]), "shuffle {shuffle}");
+        // "Add to queue" still goes to the end.
+        let before = q.len();
+        r.act(Action::Lib(LibAction::Play(Scope::Track(tracks[0]), Enqueue::Append)));
+        r.step();
+        let q = r.app.model().playlist.clone();
+        assert_eq!(q.len(), before + 1);
+        assert_eq!(q[1].track, Some(tracks[0]));
+        if shuffle {
+            // Shuffled, an added song lands somewhere in the rest, never in front of the play-next block.
+            assert!(q.iter().skip(3).any(|e| e.track == Some(tracks[0])), "behind the block");
+        } else {
+            assert_eq!(q.last().unwrap().track, Some(tracks[0]));
+        }
+        // The block resets once its songs have played: after two Nexts a new play-next goes right behind the current song.
+        r.act(Action::Next);
+        r.act(Action::Next);
+        r.run(200);
+        let third = album.tracks[0];
+        r.act(Action::Lib(LibAction::Play(Scope::Track(third), Enqueue::Next)));
+        r.step();
+        assert_eq!(r.app.model().playlist[1].track, Some(third), "shuffle {shuffle}");
+    }
+}

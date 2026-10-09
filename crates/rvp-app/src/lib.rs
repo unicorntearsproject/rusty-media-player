@@ -1396,6 +1396,9 @@ impl App {
             self.playlist.revision() as u64,
             self.playlist.current_id().unwrap_or(0) as u64,
             self.lib.lib.revision(),
+            m.playlist
+                .iter()
+                .fold(0xcbf2_9ce4_8422_2325u64, |h, e| (h ^ e.id as u64).wrapping_mul(0x100_0000_01b3)),
         ]
         .iter()
         .fold(0xcbf2_9ce4_8422_2325u64, |h, v| (h ^ v).wrapping_mul(0x100_0000_01b3));

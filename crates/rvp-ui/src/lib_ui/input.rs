@@ -1102,6 +1102,7 @@ impl Ui {
                     0 => out.push(Action::Lib(LibAction::Play(scope, Enqueue::Now))),
                     1 => out.push(Action::Lib(LibAction::Play(scope, Enqueue::ShuffleNow))),
                     2 => out.push(Action::Lib(LibAction::Play(scope, Enqueue::Append))),
+                    8 => out.push(Action::Lib(LibAction::Play(scope, Enqueue::Next))),
                     3 => out.push(Action::Lib(LibAction::FavoriteScope(scope))),
                     4 | 5 => {
                         if let Detail::Playlist(p) = d {

@@ -59,6 +59,9 @@ pub struct Playlist {
     /// Shuffled with repeat all, standing on the last item: the order of the next round, shuffled so that the item that
     /// ends this round does not start the next one.
     wrap_order: Option<Vec<u32>>,
+    /// The last item of the "play next" block: the items added with "play next" that have not played yet sit right after the current
+    /// one, in the order they were added, and the next one goes behind this.
+    next_tail: Option<u32>,
 }
 
 impl Playlist {
@@ -151,8 +154,9 @@ impl Playlist {
         let id = self.next_id;
         self.items.push(Item { id, name: String::from(name), source: String::from(source), track });
         if self.shuffle {
-            // Somewhere after the current item.
-            let from = self.pos.map_or(0, |p| p + 1);
+            // Somewhere after the current item and the "play next" items waiting behind it.
+            let after = self.next_anchor().and_then(|a| self.order.iter().position(|&o| o == a));
+            let from = after.map_or(self.pos.map_or(0, |p| p + 1), |p| p + 1);
             let at = from + self.rand(self.order.len() - from + 1);
             self.order.insert(at.min(self.order.len()), id);
         } else {
@@ -193,6 +197,57 @@ impl Playlist {
         }
         self.prepare_wrap();
         id
+    }
+
+    /// Where a "play next" goes: right after the current item, or after the items added with "play next" before it that have not played yet,
+    /// so they play in the order they were added.
+    fn next_anchor(&self) -> Option<u32> {
+        if let Some(t) = self.next_tail {
+            if let Some(tp) = self.order.iter().position(|&x| x == t) {
+                if self.pos.is_none_or(|p| tp >= p) {
+                    return Some(t);
+                }
+            }
+        }
+        self.current_id()
+    }
+
+    /// Add an item that plays next ("play next"): behind the current item and any earlier "play next" items still waiting, ahead of
+    /// everything else, shuffled or not. Returns its id.
+    pub fn insert_next(&mut self, name: &str, source: &str, track: Option<u32>) -> u32 {
+        let anchor = self.next_anchor();
+        let id = self.insert_after(anchor, name, source, track);
+        self.next_tail = Some(id);
+        id
+    }
+
+    /// Move an item that is already in the queue to play next, behind earlier "play next" items. Does nothing for the current item.
+    pub fn move_next(&mut self, id: u32) {
+        if self.current_id() == Some(id) {
+            return;
+        }
+        let anchor = self.next_anchor();
+        if anchor == Some(id) {
+            return;
+        }
+        self.move_after(id, anchor);
+        self.next_tail = Some(id);
+    }
+
+    /// The queue as it will play: the current item first, then the items that "next" visits, one after the other. With repeat all the
+    /// rest of the round is followed by the items already played (or, shuffled and on the last item, by the round that is already decided).
+    /// With nothing current it is the whole play order.
+    pub fn play_view(&self) -> Vec<u32> {
+        let Some(p) = self.pos.filter(|p| *p < self.order.len()) else { return self.order.clone() };
+        let mut v: Vec<u32> = self.order[p..].to_vec();
+        if self.repeat == Repeat::All {
+            if !self.shuffle {
+                v.extend_from_slice(&self.order[..p]);
+            } else if let Some(w) = &self.wrap_order {
+                v.extend_from_slice(w);
+            }
+        }
+        v
     }
 
     /// Move item `id` to right after item `after` (`None`: after the current item) in both the list and the play order
@@ -260,6 +315,11 @@ impl Playlist {
         let Some(i) = self.index_of(id) else { return false };
         self.rev = self.rev.wrapping_add(1);
         self.wrap_order = None;
+        if self.next_tail == Some(id) {
+            // The block now ends at the item before it (the current item when nothing else of the block is left).
+            let o = self.order.iter().position(|&x| x == id);
+            self.next_tail = o.and_then(|o| o.checked_sub(1)).map(|k| self.order[k]);
+        }
         self.items.remove(i);
         let Some(o) = self.order.iter().position(|&x| x == id) else { return false };
         self.order.remove(o);
@@ -291,25 +351,33 @@ impl Playlist {
         self.items.clear();
         self.order.clear();
         self.pos = None;
+        self.next_tail = None;
     }
 
-    /// Move the item `id` by `delta` places in the list (negative = earlier). The play order follows when not
-    /// shuffled.
+    /// Move the item `id` by `delta` places in the play order (negative = earlier), the order the queue shows. An item that comes after the
+    /// current one cannot be moved in front of it. The list follows when not shuffled (the list is then the play order).
     pub fn move_item(&mut self, id: u32, delta: i32) {
-        let Some(i) = self.index_of(id) else { return };
-        let j = (i as i32 + delta).clamp(0, self.items.len() as i32 - 1) as usize;
-        if i == j {
+        let Some(o) = self.order.iter().position(|&x| x == id) else { return };
+        let lo = match self.pos {
+            Some(p) if o > p => p + 1,
+            _ => 0,
+        };
+        let j = (o as i32 + delta).clamp(lo as i32, self.order.len() as i32 - 1) as usize;
+        if o == j {
             return;
         }
         self.rev = self.rev.wrapping_add(1);
         self.wrap_order = None;
-        let it = self.items.remove(i);
-        self.items.insert(j, it);
+        let cur = self.current_id();
+        let moved = self.order.remove(o);
+        self.order.insert(j, moved);
+        self.pos = cur.and_then(|c| self.order.iter().position(|&x| x == c));
         if !self.shuffle {
-            let cur = self.current_id();
-            self.order = self.items.iter().map(|i| i.id).collect();
-            self.pos = cur.and_then(|c| self.order.iter().position(|&o| o == c));
+            let mut items = core::mem::take(&mut self.items);
+            items.sort_by_key(|it| self.order.iter().position(|&x| x == it.id));
+            self.items = items;
         }
+        self.prepare_wrap();
     }
 
     /// Turn shuffle on or off. Turning it on keeps the current item first; turning it off restores list order
@@ -320,6 +388,7 @@ impl Playlist {
         }
         self.rev = self.rev.wrapping_add(1);
         self.wrap_order = None;
+        self.next_tail = None;
         self.shuffle = on;
         let cur = self.current_id();
         if on {
@@ -470,8 +539,8 @@ mod tests {
     fn add_remove_move() {
         let mut p = list(4);
         p.set_current(2);
-        p.move_item(4, -3);
-        assert_eq!(names(&p), ["t3", "t0", "t1", "t2"]);
+        p.move_item(1, 3); // an item before the current one may go anywhere; one after it never in front of it
+        assert_eq!(names(&p), ["t1", "t2", "t3", "t0"]);
         assert_eq!(p.current_id(), Some(2), "the current item stays current when the list is reordered");
         assert_eq!(p.peek_next(), Some(3));
         assert!(!p.remove(1), "removing an item before the current one keeps the current one");
@@ -479,6 +548,8 @@ mod tests {
         assert!(p.remove(2), "removing the current item reports it");
         assert_eq!(p.current_id(), Some(3), "the next item took its place");
         assert!(p.remove(3));
+        assert_eq!(p.current_id(), Some(4));
+        assert!(p.remove(4));
         assert_eq!(p.current_id(), None, "ran off the end with repeat off");
         p.clear();
         assert!(p.is_empty() && p.peek_next().is_none());
@@ -598,5 +669,124 @@ mod tests {
             rest.push(i);
         }
         assert!(rest.contains(&id));
+    }
+
+    // ---- play next, and the queue as it plays ------------------------------------------------------------------------------
+
+    fn upcoming(p: &Playlist) -> Vec<u32> {
+        p.play_view().into_iter().skip(1).collect()
+    }
+
+    #[test]
+    fn play_nexts_stack_in_the_order_they_were_added_ahead_of_the_rest() {
+        let mut p = list(5); // 1..=5, playing 2
+        p.set_current(2);
+        let a = p.insert_next("a", "sa", None);
+        let b = p.insert_next("b", "sb", None);
+        let c = p.insert_next("c", "sc", None);
+        assert_eq!(upcoming(&p), [a, b, c, 3, 4, 5], "first added plays first, then the old queue");
+        // A queue item moved to play next goes behind them.
+        p.move_next(5);
+        assert_eq!(upcoming(&p), [a, b, c, 5, 3, 4]);
+        // They play in that order.
+        let walked: Vec<u32> = (0..6).map(|_| p.next().unwrap()).collect();
+        assert_eq!(walked, [a, b, c, 5, 3, 4]);
+    }
+
+    #[test]
+    fn the_play_next_block_resets_once_its_songs_have_played() {
+        let mut p = list(4);
+        p.set_current(1);
+        let a = p.insert_next("a", "sa", None);
+        assert_eq!(p.next(), Some(a));
+        // `a` is playing, the block is spent: the next play-next goes right behind the current one, not behind a stale tail.
+        let b = p.insert_next("b", "sb", None);
+        assert_eq!(upcoming(&p), [b, 2, 3, 4]);
+        p.next();
+        p.next(); // on 2
+        let c = p.insert_next("c", "sc", None);
+        assert_eq!(upcoming(&p), [c, 3, 4]);
+        // Removing the tail does not strand the block.
+        let d = p.insert_next("d", "sd", None);
+        p.remove(d);
+        let e = p.insert_next("e", "se", None);
+        assert_eq!(upcoming(&p), [c, e, 3, 4]);
+        // Nothing playing: play nexts stack at the front, still in order.
+        let mut q = Playlist::new();
+        let x = q.add("x", "sx");
+        let first = q.insert_next("p", "sp", None);
+        let second = q.insert_next("q", "sq", None);
+        assert_eq!(q.play_view(), [first, second, x]);
+    }
+
+    #[test]
+    fn play_nexts_are_not_shuffled_and_stay_ahead_of_the_shuffled_rest() {
+        let mut p = list(12);
+        p.set_current(3);
+        p.set_shuffle(true, 99);
+        let a = p.insert_next("a", "sa", None);
+        let b = p.insert_next("b", "sb", None);
+        let v = upcoming(&p);
+        assert_eq!(&v[..2], [a, b], "ahead of the shuffled auto-queue, in order");
+        assert_eq!(v.len(), 13);
+        let walked: Vec<u32> = (0..13).map(|_| p.next().unwrap()).collect();
+        assert_eq!(&walked[..2], [a, b]);
+        assert_eq!(walked, v);
+    }
+
+    #[test]
+    fn the_queue_view_is_what_next_does_shuffled_or_not_with_every_repeat() {
+        for shuffle in [false, true] {
+            for repeat in [Repeat::Off, Repeat::All, Repeat::One] {
+                for start in [1u32, 4, 6] {
+                    let mut p = list(6);
+                    p.set_current(start);
+                    p.set_repeat(repeat);
+                    if shuffle {
+                        p.set_shuffle(true, 7 + start as u64);
+                    }
+                    let view = p.play_view();
+                    assert_eq!(view[0], start, "now playing is on top");
+                    let expect = match (shuffle, repeat) {
+                        (false, Repeat::All) => 6,
+                        (false, _) => 6 - (start as usize - 1),
+                        (true, _) => 6, // shuffled: the current song first, then the other five (a decided next round adds more)
+                    };
+                    assert!(view.len() >= expect.min(6) || shuffle, "{shuffle} {repeat:?} {start}: {view:?}");
+                    // Walk Next through the view: it lands on exactly those items, in that order, then stops (or wraps, with repeat all).
+                    let mut got = Vec::new();
+                    for _ in 1..view.len() {
+                        got.push(p.next().expect("next goes where the view says"));
+                    }
+                    assert_eq!(got, view[1..], "{shuffle} {repeat:?} from {start}");
+                    if repeat == Repeat::Off || (repeat == Repeat::One && !view.is_empty()) {
+                        // Past the view there is nothing more with repeat off.
+                        if repeat == Repeat::Off {
+                            assert_eq!(p.next(), None);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn moving_in_the_queue_view_moves_in_the_play_order_and_never_in_front_of_the_current_song() {
+        let mut p = list(5);
+        p.set_current(2);
+        p.move_item(4, -5);
+        assert_eq!(upcoming(&p), [4, 3, 5], "stops right behind the current song");
+        p.set_shuffle(true, 5);
+        let list_before: Vec<u32> = p.items().iter().map(|i| i.id).collect();
+        let before = upcoming(&p);
+        let last = *before.last().unwrap();
+        p.move_item(last, -1);
+        let after = upcoming(&p);
+        assert_eq!(after[after.len() - 2], last, "shuffled: the play order itself moves");
+        assert_eq!(
+            p.items().iter().map(|i| i.id).collect::<Vec<_>>(),
+            list_before,
+            "the list keeps its order"
+        );
     }
 }

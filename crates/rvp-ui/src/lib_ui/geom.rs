@@ -543,6 +543,7 @@ impl Ui {
                     (0, "Play", Icon::Play, true),
                     (1, "Shuffle", Icon::Shuffle, false),
                     (2, "Add to queue", Icon::ListEnd, false),
+                    (8, "Play next", Icon::ListPlus, false),
                     (3, "Favorite", Icon::Heart, false)
                 ]
             }
@@ -550,6 +551,7 @@ impl Ui {
                 (0, "Play", Icon::Play, true),
                 (1, "Shuffle", Icon::Shuffle, false),
                 (2, "Add to queue", Icon::ListEnd, false),
+                (8, "Play next", Icon::ListPlus, false),
                 (4, "M3U8", Icon::Download, false),
                 (5, "PLS", Icon::Download, false),
                 (6, "Rename", Icon::Pencil, false),

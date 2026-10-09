@@ -133,6 +133,7 @@ fn ent_menu_base(
             item("Open", Action::OpenDetail(Detail::Playlist(id))),
             play("Play", "", Scope::Playlist(id), Enqueue::Now),
             play("Shuffle", "", Scope::Playlist(id), Enqueue::ShuffleNow),
+            play("Play next", "", Scope::Playlist(id), Enqueue::Next),
             play("Add to queue", "", Scope::Playlist(id), Enqueue::Append),
             item("Rename\u{2026}", Action::Lib(LibAction::RenamePlaylist(id))).sep(),
             item("Export as M3U8", Action::Lib(LibAction::ExportPlaylist(id, false))),
