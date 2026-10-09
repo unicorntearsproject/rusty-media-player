@@ -17,9 +17,12 @@ const VP9_OPUS = path.join(FIXTURES, "vp9", "av_opus.webm"); // 6 s, 320x240, li
 const VP9_VORBIS = path.join(FIXTURES, "vp9_vorbis.webm"); // 6 s, 320x240, VP9 + Vorbis
 const VP9_RESIZE = path.join(FIXTURES, "vp9", "r_keyframe.webm"); // 1.5 s, 320x240 then 480x270 then 200x120, video only
 
+/** The most a wait may take in the codec tests: their own timeout. */
+const CAP = 280_000;
+
 const { snap, waitFor, waitState, frames, press, ticks, settled, playedFor, rateAgainstDevice, toFace } = require("./helpers");
 
-async function load(page, file = LONG, { play = true } = {}) {
+async function load(page, file = LONG, { play = true, cap = 20_000 } = {}) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -28,9 +31,9 @@ async function load(page, file = LONG, { play = true } = {}) {
   expect((await snap(page)).state).toBe("idle");
   // The hidden <input type=file> is what the Open button clicks: this hands the page a real File.
   await page.setInputFiles("#file", file);
-  await waitState(page, "playing");
+  await waitState(page, "playing", cap);
   // Wait for the first picture.
-  await waitFor(page, () => (window.rvp.snapshot().video || { presented: 0 }).presented > 3);
+  await waitFor(page, () => (window.rvp.snapshot().video || { presented: 0 }).presented > 3, undefined, cap);
   if (!play) await page.keyboard.press("Space");
   return errors;
 }
@@ -65,8 +68,8 @@ async function pictureChange(page, before, min = 0.01) {
 }
 
 /** Wait until the page has shown more than `n` pictures (`n` read before whatever should make a new one), then sample the picture. */
-async function pictureAfter(page, n, more = 1) {
-  await waitFor(page, ([n, more]) => (window.rvp.snapshot().video || { presented: 0 }).presented >= n + more, [n, more], 120_000);
+async function pictureAfter(page, n, more = 1, cap = 120_000) {
+  await waitFor(page, ([n, more]) => (window.rvp.snapshot().video || { presented: 0 }).presented >= n + more, [n, more], cap);
   await frames(page, 2);
   return picture(page);
 }
@@ -152,26 +155,27 @@ test.describe("player", () => {
     test(`${codec} (${name}): shows a moving picture at 1x and a seek lands`, async ({ page }) => {
       test.setTimeout(300_000);
       expect(fs.existsSync(file), `${file} is missing: run cargo xtask fixtures`).toBeTruthy();
-      const errors = await load(page, file);
+      // Every wait is on a counter (pictures shown, position); the cap is the test's own timeout, never a budget the machine's load can use up.
+      const errors = await load(page, file, { cap: CAP });
       const s0 = await snap(page);
       expect(s0.has_video).toBe(true);
       expect(s0.error).toBeFalsy();
       const before = await picture(page);
       expect(spread(before)).toBeGreaterThan(40);
       const shown0 = await presentedNow(page);
-      const after = await pictureAfter(page, shown0, 12);
+      const after = await pictureAfter(page, shown0, 12, CAP);
       expect(diff(before, after), "the picture changes while playing").toBeGreaterThan(0.01);
-      const run = await rateAgainstDevice(page, 2_000_000);
+      const run = await rateAgainstDevice(page, 2_000_000, 12, CAP);
       expect(run.ratio, `position moved ${(run.moved / 1000).toFixed(0)} ms in ${(run.device / 1000).toFixed(0)} ms of device time`).toBeGreaterThan(0.95);
       expect(run.ratio).toBeLessThan(1.05);
       // Pause, seek to the middle and make sure the frame there decodes (reference chains restart cleanly).
       await page.keyboard.press("Space");
-      await waitState(page, "paused");
-      await waitFor(page, () => window.rvp.snapshot().controls_opacity > 0.95);
+      await waitState(page, "paused", CAP);
+      await waitFor(page, () => window.rvp.snapshot().controls_opacity > 0.95, undefined, CAP);
       const held = await picture(page);
       const s = await snap(page);
       await page.mouse.click(s.seek.x + s.seek.w * 0.7, s.seek.y + 2);
-      await waitFor(page, (t) => Math.abs(window.rvp.snapshot().position_us / 1e6 - t) < 1, 0.7 * (s.duration_us / 1e6));
+      await waitFor(page, (t) => Math.abs(window.rvp.snapshot().position_us / 1e6 - t) < 1, 0.7 * (s.duration_us / 1e6), CAP);
       const moved = diff(held, await pictureChange(page, held));
       expect(moved, "the picture shows the new position").toBeGreaterThan(0.01);
       expect(errors).toEqual([]);

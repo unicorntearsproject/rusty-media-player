@@ -76,9 +76,9 @@ const playedFor = async (page, us) => {
  * How fast the position runs against the audio device's own clock (`AudioContext.currentTime`) over about `us` of playback: 1 is
  * real time at 1x, 2 is 2x. Both are read in the same moment. A window in which the player had to stop and refill its buffer (the
  * state left "playing") says nothing about the rate and is measured again, up to `tries` times: that is the one place these tests
- * retry, because a stall on a loaded machine is not what is being measured.
+ * retry, because a stall on a loaded machine is not what is being measured. `cap` bounds the wait for one window (wall time is only a cap).
  */
-const rateAgainstDevice = async (page, us, tries = 4) => {
+const rateAgainstDevice = async (page, us, tries = 4, cap = 30_000) => {
   const read = () =>
     page.evaluate(() => ({ p: window.rvp.snapshot().position_us, s: window.rvp.snapshot().state, t: window.rvp.audio().time }));
   let last;
@@ -90,7 +90,7 @@ const rateAgainstDevice = async (page, us, tries = 4) => {
         if (window.rvp.snapshot().state !== "playing") window.__stalled = true;
       }, 20);
     });
-    await waitFor(page, (t) => window.rvp.snapshot().position_us >= t, a.p + us, 30_000);
+    await waitFor(page, (t) => window.rvp.snapshot().position_us >= t, a.p + us, cap);
     const b = await read();
     const stalled = await page.evaluate(() => {
       clearInterval(window.__probe);
