@@ -133,6 +133,12 @@ impl Ui {
             );
             j += &format!("\"add_folder\":{},\"search\":{},", rect(g.add_folder), rect(g.search));
             j += &format!("\"settings\":{},\"about\":{},", rect(g.settings), rect(g.about));
+            j += &format!(
+                "\"rail_box\":{},\"rail_toggle\":{},\"rail_collapsed\":{},",
+                rect(g.m.rail),
+                g.rail_toggle.map_or("null".to_string(), rect),
+                l.rail_collapsed
+            );
             let msg: Vec<String> = l
                 .msg_btns
                 .iter()

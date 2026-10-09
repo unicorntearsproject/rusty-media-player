@@ -3,7 +3,7 @@
 use rvp_app::{App, Effect};
 use rvp_host::{HostClock, InputEvent, Key, Modifiers};
 use rvp_host_headless::{DefaultCodecs, UiHost};
-use rvp_ui::UiConfig;
+use rvp_ui::{Action, LibAction, UiConfig};
 use std::rc::Rc;
 
 struct Rig {
@@ -104,4 +104,25 @@ fn the_about_pages_suggestion_links_open_x_and_the_github_issues() {
         urls,
         ["https://x.com/djunicorntears", "https://github.com/unicorntearsproject/rusty-media-player/issues"]
     );
+}
+
+#[test]
+fn the_collapsed_rail_is_kept_between_runs() {
+    let mut r = Rig::new(false);
+    assert!(!r.app.ui().rail_collapsed());
+    let now = 1_000_000;
+    r.app.apply(&mut r.host, Action::Lib(LibAction::ToggleRail), now);
+    r.run(100);
+    assert!(r.app.ui().rail_collapsed() && r.app.app_settings().rail_collapsed);
+    let saved = r.host.storage.0.get("settings/app").expect("saved with the app settings");
+    assert!(std::str::from_utf8(saved).unwrap().contains("rail_collapsed=1"));
+    // A new run reads it back.
+    let host = std::mem::replace(&mut r.host, UiHost::new());
+    let mut again =
+        Rig { host, app: App::new(Rc::new(DefaultCodecs::default()), UiConfig { reduce_motion: true }) };
+    again.run(200);
+    assert!(again.app.ui().rail_collapsed(), "collapsed after a restart");
+    again.app.apply(&mut again.host, Action::Lib(LibAction::ToggleRail), now);
+    again.run(100);
+    assert!(!again.app.ui().rail_collapsed());
 }

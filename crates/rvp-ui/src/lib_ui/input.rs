@@ -37,6 +37,19 @@ const DIGITS: [View; 10] = [
 impl Ui {
     // ---- state changes the application and the UI itself use ---------------------------------------------------------
 
+    /// Collapse the rail to icons, or expand it (the application's saved choice; it glides there).
+    pub fn set_rail_collapsed(&mut self, on: bool) {
+        if self.lib.rail_collapsed != on {
+            self.lib.rail_collapsed = on;
+            self.dirty = true;
+        }
+    }
+
+    /// Whether the rail is collapsed by choice.
+    pub fn rail_collapsed(&self) -> bool {
+        self.lib.rail_collapsed
+    }
+
     /// Switch between the Library and the Player face.
     pub fn set_mode(&mut self, mode: Mode) {
         if self.lib.mode != mode {
@@ -436,6 +449,9 @@ impl Ui {
         }
         // The rail.
         if g.m.rail.contains(x, y) {
+            if g.rail_toggle.is_some_and(|r| r.contains(x, y)) {
+                return LibHit::RailToggle;
+            }
             for (i, r) in g.mode.iter().enumerate() {
                 if r.contains(x, y) {
                     return LibHit::ModeSwitch(if i == 0 { Mode::Library } else { Mode::Player });
@@ -786,6 +802,7 @@ impl Ui {
         self.keyboard_mode = false;
         let g = self.lib_geom(model, ctx);
         let hit = self.lib_hit(x, y, &g, model, ctx);
+        let s_ = self.scale;
         match button {
             PointerButton::Secondary => {
                 if self.lib.prompt.is_some() || self.lib.tagform.is_some() {
@@ -796,7 +813,19 @@ impl Ui {
                         self.lib.sel = Some(i);
                         menus::ent_menu(self, i, model, ctx)
                     }
-                    LibHit::Rail(v) => menus::rail_menu(v),
+                    LibHit::Rail(v) => {
+                        menus::rail_menu(v, self.lib.rail_collapsed, !g.m.phone && g.m.w >= 860.0 * s_)
+                    }
+                    // The empty parts of the rail (and the toggle) offer to collapse or expand it.
+                    LibHit::RailToggle
+                    | LibHit::None
+                    | LibHit::About
+                    | LibHit::Settings
+                    | LibHit::AddFolder
+                        if g.m.rail.contains(x, y) && !g.m.phone && g.m.w >= 860.0 * s_ =>
+                    {
+                        menus::rail_only_menu(self.lib.rail_collapsed)
+                    }
                     LibHit::Folder(i) => menus::folder_menu(i),
                     LibHit::BarInfo | LibHit::Bar(_) | LibHit::Seek | LibHit::Volume => {
                         menus::global_menu(self, model, ctx)
@@ -944,6 +973,7 @@ impl Ui {
             LibHit::PromptOk => self.confirm_prompt(),
             LibHit::PromptCancel => self.lib.prompt = None,
             LibHit::DrawerBtn => self.lib.drawer = !self.lib.drawer,
+            LibHit::RailToggle => out.push(Action::Lib(LibAction::ToggleRail)),
             LibHit::Scrim => self.lib.drawer = false,
             LibHit::Rail(v) => {
                 self.lib.drawer = false;
@@ -1369,6 +1399,13 @@ impl Ui {
             }
             Key::Char('/') if plain => {
                 self.show_view(View::Search);
+                return;
+            }
+            // Ctrl+B collapses the rail to icons, or expands it (where the window leaves the choice).
+            Key::Char('b' | 'B')
+                if mods.ctrl && !mods.alt && !mods.logo && !mods.shift && g.rail_toggle.is_some() =>
+            {
+                out.push(Action::Lib(LibAction::ToggleRail));
                 return;
             }
             Key::Char('0') if plain && !mods.shift => {

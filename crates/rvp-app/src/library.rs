@@ -781,6 +781,11 @@ impl App {
                     data: LICENSES.as_bytes().to_vec(),
                 }),
             },
+            LibAction::ToggleRail => {
+                self.svc.settings.rail_collapsed = !self.svc.settings.rail_collapsed;
+                self.ui.set_rail_collapsed(self.svc.settings.rail_collapsed);
+                self.save_app_settings(host);
+            }
             LibAction::ToggleFavorite(id) => {
                 if let Some(on) = self.lib.lib.toggle_favorite(id) {
                     let what = match (self.lib.lib.track(id), self.lib.lib.video(id)) {

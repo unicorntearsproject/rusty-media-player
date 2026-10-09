@@ -84,6 +84,13 @@ pub fn library_keys() -> Vec<LibKey> {
         k("Delete", "Remove the item from the queue, a playlist or the history", LIBRARY, None, false),
         k("Alt+Up / Alt+Down", "Move an item in the queue or a playlist", LIBRARY, None, false),
         k("Menu key / Shift+F10", "Open the menu of the selected item", LIBRARY, None, false),
+        k(
+            "Ctrl+B",
+            "Collapse the side menu to icons, or expand it (also the arrow at its top, or right-click it)",
+            LIBRARY,
+            Some((Key::Char('b'), Modifiers { ctrl: true, ..Modifiers::default() })),
+            false
+        ),
         k("E", "Edit the tags of the selected song or album", LIBRARY, None, true),
         k("Left / Right", "Previous or next effect", VISUALIZER, None, false),
         k("Enter", "Start or stop the animation", VISUALIZER, None, false),

@@ -486,6 +486,16 @@ test.describe("M10", () => {
     await waitFor(page, () => window.rvp.snapshot().lib.view === "tracks");
     await page.mouse.move(1200, 700);
     await check("library-tracks.png");
+    // The rail collapsed to icons (Ctrl+B).
+    await press(page, "Control+b");
+    await waitFor(page, () => {
+      const l = window.rvp.snapshot().lib;
+      return l.rail_collapsed === true && l.rail_box.w < 100 * (window.devicePixelRatio || 1);
+    });
+    await page.mouse.move(1200, 700);
+    await check("library-collapsed.png");
+    await press(page, "Control+b");
+    await waitFor(page, () => window.rvp.snapshot().lib.rail_collapsed === false);
   });
 });
 

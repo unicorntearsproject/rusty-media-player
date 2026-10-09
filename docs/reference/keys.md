@@ -18,7 +18,7 @@ The Audio settings (`U`, or right-click, Audio effects) turn on a **crossfade** 
 Library keys: `1` Albums, `2` Artists, `3` Tracks, `4` Playlists, `5` Queue, `6` Now playing, `7` or `V` the visualizer, `8` Videos, `9` Favorites, `0` History, `F1` About, `/` search (type;
 `Esc` clears and goes back). Plain arrows, `Home`/`End`, `PageUp`/`PageDown` move through the list or grid, `Enter` plays from the selected row (or
 opens an album, artist or playlist), `Shift+Enter` adds to the queue, `Ctrl+Enter` plays next, `Delete` removes from the queue or a playlist,
-`Alt+Up`/`Alt+Down` move an item, `Backspace` or `Esc` go back, `Tab` walks rail, content and bar, the menu key or `Shift+F10` opens the context menu
+`Alt+Up`/`Alt+Down` move an item, `Ctrl+B` collapses the side menu to icons (and expands it again; also the arrow at its top, or right-click it), `Backspace` or `Esc` go back, `Tab` walks rail, content and bar, the menu key or `Shift+F10` opens the context menu
 of the selection. `Ctrl+Left`/`Ctrl+Right` seek and `Ctrl+Up`/`Ctrl+Down` change the volume (`J`/`L` and `M` still work). In the visualizer:
 `Left`/`Right` change the effect, `C` the colours, `T` the title, `Enter` turns it on or off, `Shift+V` changes the effect by itself. With the pointer: click a card or row (double click plays),
 the play button on a card, right-click anything for its menu, drag queue rows to reorder, the mouse's back button goes back, the wheel scrolls.

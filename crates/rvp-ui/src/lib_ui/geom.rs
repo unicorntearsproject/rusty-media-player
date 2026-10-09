@@ -85,6 +85,8 @@ pub(crate) struct Geom {
     /// Folders that do not fit under the others: a "+N more" line after the last row.
     pub folders_more: usize,
     pub back: Option<RectF>,
+    /// The button that collapses the rail to icons or expands it (only where there is a choice: from 860 px up).
+    pub rail_toggle: Option<RectF>,
     /// The menu button that opens the rail as a drawer (phone width only).
     pub menu_btn: Option<RectF>,
     pub search: RectF,
@@ -111,6 +113,9 @@ pub(crate) struct Geom {
     pub scroll_track: RectF,
 }
 
+/// How long the rail takes to glide between expanded and collapsed.
+const RAIL_GLIDE_US: i64 = 160_000;
+
 /// The rail's entries, top to bottom (a `None` is a divider).
 pub(crate) const NAV: [Option<(View, &str, Icon, &str)>; 12] = [
     Some((View::Search, "Search", Icon::Search, "/")),
@@ -132,7 +137,8 @@ impl Ui {
     pub(crate) fn lib_geom(&mut self, model: &UiModel, ctx: &LibCtx<'_>) -> Geom {
         let s = self.scale;
         let (w, h) = (self.w as f32, self.h as f32);
-        let m = Metrics::new(w, h, s, self.lib.view, self.lib.detail, self.lib.drawer);
+        self.step_rail(w);
+        let m = Metrics::new(w, h, s, self.lib.view, self.lib.detail, self.lib.drawer, self.lib.rail_t);
         if !m.phone {
             self.lib.drawer = false;
         }
@@ -145,6 +151,7 @@ impl Ui {
             about: RectF::default(),
             folders: Vec::new(),
             folders_more: 0,
+            rail_toggle: None,
             back: None,
             menu_btn: None,
             search: RectF::default(),
@@ -184,14 +191,44 @@ impl Ui {
         g
     }
 
+    /// Move the rail towards where it should be (collapsed or not) by the time that has passed; with reduced motion, or the first time, at
+    /// once. Marks the screen as animating while it moves.
+    pub(crate) fn step_rail(&mut self, w: f32) {
+        let target = if self.lib.rail_collapsed { 1.0 } else { 0.0 };
+        let now = self.now;
+        if self.config.reduce_motion || self.lib.rail_t_at == 0 || w < 860.0 * self.scale {
+            self.lib.rail_t = target;
+        } else if self.lib.rail_t != target {
+            let dt = (now - self.lib.rail_t_at).clamp(0, 50_000) as f32 / RAIL_GLIDE_US as f32;
+            let t = self.lib.rail_t;
+            self.lib.rail_t = if target > t { (t + dt).min(target) } else { (t - dt).max(target) };
+        }
+        self.lib.rail_t_at = now.max(1);
+    }
+
+    /// True while the rail is still gliding (the application keeps drawing frames).
+    pub fn rail_moving(&self) -> bool {
+        self.lib.rail_t != if self.lib.rail_collapsed { 1.0 } else { 0.0 }
+            && self.w as f32 >= 860.0 * self.scale
+    }
+
     fn geom_rail(&mut self, g: &mut Geom, ctx: &LibCtx<'_>) {
         let s = self.scale;
         let r = g.m.rail;
         let compact = g.m.compact;
         let px = if compact { 10.0 * s } else { 16.0 * s };
         let iw = r.w - 2.0 * px;
+        // Where the window leaves the choice, the collapse button: at the right of the brand, or (collapsed) above the switch.
+        let has_toggle = !g.m.phone && g.m.w >= 860.0 * s;
+        if has_toggle {
+            g.rail_toggle = Some(if compact {
+                RectF::new(px, 12.0 * s, iw, 28.0 * s)
+            } else {
+                RectF::new(r.right() - px - 30.0 * s, 24.0 * s, 30.0 * s, 30.0 * s)
+            });
+        }
         // The Library / Player switch.
-        let top = if compact { 16.0 * s } else { 74.0 * s };
+        let top = if compact { (if has_toggle { 52.0 } else { 16.0 }) * s } else { 74.0 * s };
         if compact {
             g.mode = [RectF::new(px, top, iw, 36.0 * s), RectF::new(px, top + 40.0 * s, iw, 36.0 * s)];
         } else {

@@ -204,8 +204,21 @@ fn ent_menu_base(
 }
 
 /// The menu of a rail entry.
-pub(crate) fn rail_menu(v: View) -> Vec<MenuItem> {
-    alloc::vec![item("Open", Action::ShowView(v))]
+pub(crate) fn rail_menu(v: View, collapsed: bool, can_toggle: bool) -> Vec<MenuItem> {
+    let mut m = alloc::vec![item("Open", Action::ShowView(v))];
+    if can_toggle {
+        m.extend(rail_only_menu(collapsed).into_iter().map(MenuItem::sep));
+    }
+    m
+}
+
+/// The menu of the rail's empty parts: collapse it to icons, or expand it again.
+pub(crate) fn rail_only_menu(collapsed: bool) -> Vec<MenuItem> {
+    alloc::vec![hinted(
+        if collapsed { "Expand sidebar" } else { "Collapse sidebar" },
+        "Ctrl+B",
+        Action::Lib(LibAction::ToggleRail)
+    )]
 }
 
 /// The menu of a folder in the rail.

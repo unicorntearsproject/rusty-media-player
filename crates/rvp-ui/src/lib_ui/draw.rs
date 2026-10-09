@@ -358,7 +358,7 @@ impl Ui {
         if let Some(tip) = tip {
             self.draw_tip_box(fb, &tip, g.m.w, g.m.h);
         }
-        self.lib.animated = animated;
+        self.lib.animated = animated || self.rail_moving();
     }
 
     // ---- the rail -------------------------------------------------------------------------------------------------------
@@ -374,6 +374,25 @@ impl Ui {
             0.07,
         );
         let px = if compact { 10.0 * s } else { 16.0 * s };
+        if let Some(tg) = g.rail_toggle {
+            let hot = self.lib.hover == LibHit::RailToggle;
+            if hot {
+                fb.fill_rrect(tg, 10.0 * s, Paint::Solid(fade(t::white(), 0.10)), 1.0);
+            } else if compact {
+                fb.stroke_rrect(tg, 10.0 * s, 1.0 * s, fade(t::white(), 0.10), 1.0);
+            }
+            let icon = if self.lib.rail_collapsed { Icon::ChevronRight } else { Icon::ChevronLeft };
+            self.icon(
+                fb,
+                icon,
+                tg.cx(),
+                tg.cy(),
+                18.0,
+                if hot { t::white() } else { t::text_muted() },
+                1.0,
+                false,
+            );
+        }
         if !compact {
             // The brand: the logo and the kicker.
             let mark = RectF::new(px - 2.0 * s, 20.0 * s, 38.0 * s, 38.0 * s);

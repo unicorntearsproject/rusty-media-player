@@ -52,6 +52,8 @@ pub struct AppSettings {
     pub default_player: IntegrationChoice,
     /// Nothing new is written to the play history (privacy); what is there stays.
     pub history_paused: bool,
+    /// The library's side menu is collapsed to icons.
+    pub rail_collapsed: bool,
 }
 
 /// `15 s`, `1 min`, `10 min`.
@@ -72,6 +74,7 @@ impl Default for AppSettings {
             integration: IntegrationChoice::default(),
             default_player: IntegrationChoice::default(),
             history_paused: false,
+            rail_collapsed: false,
         }
     }
 }
@@ -96,7 +99,7 @@ impl AppSettings {
     /// The text to keep.
     pub fn to_text(&self) -> String {
         format!(
-            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\ndefault_player={}\ntooltips={}\nviz_cycle={}\nviz_random={}\nviz_secs={}\nhistory_paused={}\n",
+            "rvp-app-settings 1\nauto_check={}\nlast_check={}\nskipped={}\nintegration={}\ndefault_player={}\ntooltips={}\nviz_cycle={}\nviz_random={}\nviz_secs={}\nhistory_paused={}\nrail_collapsed={}\n",
             self.auto_check as u8,
             self.last_check,
             self.skipped.replace(['\n', '\r'], ""),
@@ -107,6 +110,7 @@ impl AppSettings {
             self.viz_random as u8,
             self.viz_secs,
             self.history_paused as u8,
+            self.rail_collapsed as u8,
         )
     }
 
@@ -129,6 +133,7 @@ impl AppSettings {
                 "viz_cycle" => s.viz_cycle = v.trim() == "1",
                 "viz_random" => s.viz_random = v.trim() == "1",
                 "history_paused" => s.history_paused = v.trim() == "1",
+                "rail_collapsed" => s.rail_collapsed = v.trim() == "1",
                 "viz_secs" => {
                     // Only the offered lengths (a hand-edited file cannot make it flicker); anything else is the default.
                     s.viz_secs = v.trim().parse().ok().filter(|n| VIZ_CYCLE_STEPS.contains(n)).unwrap_or(60)

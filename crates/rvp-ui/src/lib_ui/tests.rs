@@ -2277,3 +2277,118 @@ fn the_phone_transport_has_the_five_in_order_at_44_px_and_fits_the_width() {
         }
     }
 }
+
+// ---- collapsing the rail -----------------------------------------------------------------------------------------------------------
+
+fn ctx_of(r: &Rig) -> LibCtx<'_> {
+    LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    }
+}
+
+#[test]
+fn the_rail_collapses_to_icons_keeps_every_entry_and_a_button_brings_it_back() {
+    let mut r = Rig::new();
+    let (expanded, n) = {
+        let g = geom_of(&mut r);
+        assert!(g.rail_toggle.is_some(), "there is a choice at 1280 px");
+        (g.m.rail.w, g.nav.len())
+    };
+    assert!((expanded - 236.0).abs() < 0.5, "{expanded}");
+    r.ui.set_rail_collapsed(true);
+    let g = geom_of(&mut r);
+    // Reduced motion: it is there at once. Icon width, every entry still reachable, content takes the room.
+    assert!((g.m.rail.w - 76.0).abs() < 0.5, "{}", g.m.rail.w);
+    assert_eq!(g.nav.len(), n, "every view is still in the rail");
+    assert!(g.m.body.x < 80.0 && g.m.body.w > 1280.0 - 80.0);
+    let tg = g.rail_toggle.unwrap();
+    assert!(g.m.rail.contains(tg.cx(), tg.cy()));
+    assert!(
+        g.nav.iter().all(|(_, rc)| rc.y > tg.bottom() && rc.right() <= g.m.rail.right()),
+        "nothing under the button"
+    );
+    // The same rectangles of the nav, none overlapping.
+    for (i, (_, a)) in g.nav.iter().enumerate() {
+        for (_, b) in &g.nav[i + 1..] {
+            assert!(a.bottom() <= b.y + 0.01, "{a:?} {b:?}");
+        }
+    }
+    // A click on the button asks to expand; the key does the same; both ways.
+    let (x, y) = center(tg);
+    assert_eq!(r.click(x, y), [Action::Lib(LibAction::ToggleRail)]);
+    let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
+    assert_eq!(r.key_mod(Key::Char('b'), ctrl), [Action::Lib(LibAction::ToggleRail)]);
+    // Plain B is still the switch between the faces.
+    assert_eq!(r.key(Key::Char('b')), [Action::ToggleMode]);
+}
+
+#[test]
+fn right_clicking_the_rail_offers_collapse_or_expand_and_the_choice_is_only_offered_where_it_exists() {
+    let mut r = Rig::new();
+    let (empty, gap) = {
+        let g = geom_of(&mut r);
+        // A spot of the rail that is no entry: between the nav and the buttons at the bottom.
+        let last = g.nav.last().unwrap().1;
+        (g.m.rail, (g.m.rail.cx(), (last.bottom() + g.add_folder.y.min(g.settings.y)) * 0.5))
+    };
+    assert!(empty.contains(gap.0, gap.1));
+    r.right_click(gap.0, gap.1);
+    let rows: Vec<String> = r.ui.menu.iter().flat_map(|p| p.items.iter().map(|i| i.label.clone())).collect();
+    assert!(rows.contains(&String::from("Collapse sidebar")), "{rows:?}");
+    r.key(Key::Escape);
+    r.ui.set_rail_collapsed(true);
+    r.right_click(gap.0.min(70.0), gap.1);
+    let rows: Vec<String> = r.ui.menu.iter().flat_map(|p| p.items.iter().map(|i| i.label.clone())).collect();
+    assert!(rows.contains(&String::from("Expand sidebar")), "{rows:?}");
+    // An entry's menu has it too.
+    r.key(Key::Escape);
+    let nav0 = { geom_of(&mut r).nav[2].1 };
+    r.right_click(nav0.cx(), nav0.cy());
+    let rows: Vec<String> = r.ui.menu.iter().flat_map(|p| p.items.iter().map(|i| i.label.clone())).collect();
+    assert!(
+        rows.contains(&String::from("Open")) && rows.contains(&String::from("Expand sidebar")),
+        "{rows:?}"
+    );
+    // Under 860 px the rail is icons anyway: no button, no key, no menu entry. A phone has its drawer.
+    for (w, h) in [(840u32, 700u32), (500, 800)] {
+        let mut small = Rig::new();
+        small.ui.set_size(w, h, 1.0);
+        assert!(geom_of(&mut small).rail_toggle.is_none(), "{w}");
+        let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
+        assert!(small.key_mod(Key::Char('b'), ctrl).is_empty(), "{w}");
+    }
+}
+
+#[test]
+fn the_rail_glides_with_motion_and_the_toggle_has_a_tooltip() {
+    let mut r = Rig::new();
+    r.ui.config.reduce_motion = false;
+    geom_of(&mut r);
+    r.ui.set_rail_collapsed(true);
+    let mut widths = Vec::new();
+    for _ in 0..14 {
+        r.now += 16_000;
+        r.ui.now = r.now;
+        widths.push(geom_of(&mut r).m.rail.w);
+    }
+    assert!(widths.windows(2).all(|w| w[1] <= w[0] + 0.01), "{widths:?}");
+    assert!(widths[0] < 236.0 && widths[0] > 76.0, "it starts to move: {widths:?}");
+    assert!((widths.last().unwrap() - 76.0).abs() < 0.5, "and arrives: {widths:?}");
+    assert!(!r.ui.rail_moving(), "arrived");
+    // The tooltip says what the button does and names the key.
+    let ctx = LibCtx {
+        lib: &r.lib,
+        now_art: None,
+        scan: None,
+        viz: None,
+        video: None,
+        resume: crate::lib_ui::no_resume(),
+    };
+    let tip = r.ui.lib_tip_text(crate::lib_ui::LibHit::RailToggle, &r.m, &ctx).unwrap();
+    assert!(tip.0.contains("Show the side menu in full") && tip.1 == "Ctrl+B", "{tip:?}");
+}

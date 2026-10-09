@@ -137,6 +137,8 @@ impl crate::ui::Ui {
 /// An action of the library mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibAction {
+    /// Collapse the rail to icons, or expand it (the application keeps the choice).
+    ToggleRail,
     /// Play, queue or insert tracks.
     Play(Scope, Enqueue),
     /// Append tracks to a saved playlist (id).
@@ -272,6 +274,8 @@ pub enum LibHit {
     None,
     /// A rail entry.
     Rail(View),
+    /// The button that collapses the rail to icons, or expands it.
+    RailToggle,
     /// The Library / Player switch.
     ModeSwitch(Mode),
     /// The add-folder button in the rail.
@@ -379,6 +383,12 @@ pub(crate) struct VizReturn {
 pub struct LibUi {
     /// On a phone-width window: the rail is open as a drawer over the content.
     pub(crate) drawer: bool,
+    /// The rail is collapsed to icons by choice (a window under 860 px wide has the icon rail anyway). Kept by the application.
+    pub(crate) rail_collapsed: bool,
+    /// How far the rail has moved towards collapsed (0 expanded, 1 collapsed): it glides over a moment.
+    pub(crate) rail_t: f32,
+    /// When `rail_t` was last moved (0: never, jump to where it belongs).
+    pub(crate) rail_t_at: i64,
     pub(crate) mode: Mode,
     /// The Player face has nothing loaded: it is drawn inside the same frame as the library (rail and bar), with the open-a-video card
     /// in the body (set by the application every frame).
@@ -456,6 +466,9 @@ impl Default for LibUi {
             scroll: 0.0,
             zone: Zone::Content,
             rail_focus: 1,
+            rail_collapsed: false,
+            rail_t: 0.0,
+            rail_t_at: 0,
             bar_focus: 0,
             hover: LibHit::None,
             rows: None,
@@ -549,15 +562,25 @@ pub(crate) struct Metrics {
 }
 
 impl Metrics {
-    pub(crate) fn new(w: f32, h: f32, s: f32, view: View, detail: Option<Detail>, drawer: bool) -> Self {
+    pub(crate) fn new(
+        w: f32,
+        h: f32,
+        s: f32,
+        view: View,
+        detail: Option<Detail>,
+        drawer: bool,
+        rail_t: f32,
+    ) -> Self {
         let phone = w < 600.0 * s;
-        let compact = !phone && w < 860.0 * s;
+        let narrow = !phone && w < 860.0 * s;
+        // The rail glides between 236 and 76 px; the icon layout takes over once it is more than half way.
+        let compact = narrow || (!phone && rail_t > 0.5);
         let rail_w = if phone {
             (300.0 * s).min(w * 0.86)
-        } else if compact {
+        } else if narrow {
             76.0 * s
         } else {
-            236.0 * s
+            (236.0 + (76.0 - 236.0) * rail_t.clamp(0.0, 1.0)) * s
         };
         let full = view == View::Visualizer;
         let bar_h = if phone { 152.0 * s } else { 96.0 * s };
