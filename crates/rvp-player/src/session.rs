@@ -63,6 +63,8 @@ const START_BUFFER_US: i64 = 100_000;
 /// (Opus, Vorbis, AAC, MP3) are warm when the target is reached.
 const PREROLL_US: i64 = 100_000;
 /// Preferred output format; the host may answer with something else.
+/// How far ahead of the ear a waiting tail is kept queued.
+const LEAD_AHEAD_US: i64 = 150_000;
 const WANT_AUDIO: AudioParams = AudioParams { sample_rate: 48_000, channels: 2 };
 /// How often `tick` wants to run while playing.
 const TICK_US: i64 = 10_000;
@@ -766,6 +768,8 @@ pub struct Session {
     audio: Option<AudioOut>,
     /// The tail of a song that was skipped for this item: handed to the audio output when it opens.
     pending_throw: Option<Throw>,
+    /// The tail of `pending_throw` is already playing (see [`Session::lead_throw`]): the sink holds it and must not be flushed or paused.
+    lead_fed: bool,
     audio_opened: bool,
     /// What the audio device was last told about pausing.
     sink_paused: bool,
@@ -831,6 +835,7 @@ impl Session {
             clock: MasterClock::new(ClockSource::Monotonic),
             audio: None,
             pending_throw: None,
+            lead_fed: false,
             audio_opened: false,
             sink_paused: true,
             want_play: false,
@@ -920,9 +925,9 @@ impl Session {
         }
     }
 
-    /// Whether the output is copied so a skip of this item can be echoed: the setting is on and the item is a song.
+    /// Whether the output is copied so a skip of this item can be echoed (or at least faded): the item is a song.
     fn keeps_echo_copy(&self) -> bool {
-        self.settings.echo_skip && !self.has_video()
+        !self.has_video()
     }
 
     /// The echo of the song being heard now, for the item that replaces it after a skip. `None` for anything else: the setting off, a
@@ -931,11 +936,35 @@ impl Session {
         if !self.keeps_echo_copy() || self.state() != SessionState::Playing || self.sh.borrow().seeking {
             return None;
         }
-        self.audio.as_ref()?.make_throw(host.audio())
+        self.audio.as_ref()?.make_throw(host.audio(), self.settings.echo_skip)
+    }
+
+    /// At the moment of a skip: drop what the device still holds of the skipped song and start `throw`'s tail in its place, so the sound goes on
+    /// from the last frame the device took with no gap. The session that takes the throw over keeps the tail playing until its own sound is ready.
+    pub fn lead_throw<H: Host>(host: &mut H, throw: &mut Throw) {
+        host.audio().flush();
+        host.audio().set_paused(false);
+        Self::feed_lead(host, throw);
+    }
+
+    /// Keep a tail playing at most [`LEAD_AHEAD_US`] ahead of the ear.
+    fn feed_lead<H: Host>(host: &mut H, throw: &mut Throw) {
+        let ahead = (WANT_AUDIO.sample_rate as i64 * LEAD_AHEAD_US / 1_000_000) as usize;
+        let queued = host.audio().queued_frames();
+        if queued >= ahead {
+            return;
+        }
+        let v = throw.lead(ahead - queued);
+        if v.is_empty() {
+            return;
+        }
+        let n = host.audio().write(&v);
+        throw.unlead(v.len() / WANT_AUDIO.channels as usize - n);
     }
 
     /// Mix the tail of a skipped song into the start of this item.
     pub fn set_throw(&mut self, throw: Throw) {
+        self.lead_fed = throw.started();
         match &mut self.audio {
             Some(a) => a.set_throw(throw),
             None => self.pending_throw = Some(throw),
@@ -1420,6 +1449,15 @@ impl Session {
             }
         }
 
+        // A skip's tail goes on playing while this item is still opening.
+        if self.audio.is_none() && !self.audio_opened && self.want_play {
+            if let Some(t) = &mut self.pending_throw {
+                if self.lead_fed {
+                    Self::feed_lead(host, t);
+                }
+            }
+        }
+
         // 2. Open the audio sink once we know the streams.
         let (opened, has_audio, seeking) = {
             let s = self.sh.borrow();
@@ -1442,10 +1480,14 @@ impl Session {
                     if self.trace {
                         out.enable_trace();
                     }
-                    // A stream of its own: nothing an earlier item (or an earlier open) left in the device counts.
-                    host.audio().flush();
-                    host.audio().set_paused(true);
-                    self.sink_paused = true;
+                    // A stream of its own: nothing an earlier item (or an earlier open) left in the device counts, unless it is a skip's tail.
+                    if !(self.lead_fed && out.throwing()) {
+                        host.audio().flush();
+                        host.audio().set_paused(true);
+                        self.sink_paused = true;
+                    } else {
+                        self.sink_paused = false;
+                    }
                     self.audio = Some(out);
                     self.clock.set_source(ClockSource::Audio, now);
                 }
@@ -1465,14 +1507,20 @@ impl Session {
         // 3. Feed the audio sink (see `feed_audio`). The device only runs while the clock does: a pause, a seek or the wait for
         // the start buffer must not let what is queued play on.
         self.sync_sink_pause(host);
+        if let Some(a) = &mut self.audio {
+            a.set_release(self.sh.borrow().audio_done);
+        }
         self.feed_audio(host, seeking);
+        self.sync_sink_pause(host);
 
         // 4. Start playback once enough is buffered.
         if self.want_play && !self.running && !self.ended && opened && !seeking {
             let audio_done = self.sh.borrow().audio_done;
             let ready = match &self.audio {
                 Some(out) => {
-                    let frames = out.pending_frames() + host.audio().queued_frames();
+                    // A throw's tail playing by itself is not the item's own sound.
+                    let queued = if out.leading() { 0 } else { host.audio().queued_frames() };
+                    let frames = out.pending_frames() + queued;
                     let queued_us = frames as i64 * 1_000_000 / WANT_AUDIO.sample_rate as i64;
                     queued_us >= START_BUFFER_US
                         || (audio_done && out.origin().is_some())
@@ -1774,8 +1822,10 @@ impl Session {
 
     /// Keep the device paused exactly while the clock is not running (tracked, so the host is only told on a change).
     fn sync_sink_pause<H: Host>(&mut self, host: &mut H) {
-        if self.audio.is_some() && self.sink_paused == self.running {
-            self.sink_paused = !self.running;
+        let lead = self.want_play && self.audio.as_ref().is_some_and(|a| a.leading());
+        let paused = !(self.running || lead);
+        if self.audio.is_some() && self.sink_paused != paused {
+            self.sink_paused = paused;
             host.audio().set_paused(self.sink_paused);
         }
     }

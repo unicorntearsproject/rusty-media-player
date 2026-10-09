@@ -711,14 +711,14 @@ fn skipping_a_song_echoes_it_out_but_other_changes_do_not() {
             "{how}: the skip is echoed with the setting on"
         );
         assert!(on.iter().all(|v| v.is_finite() && v.abs() <= 1.0), "{how}: nothing clips");
-        // After the tail (2 s) the new song is exactly what it would have been.
+        // After the tail (2 s) the new song is exactly what it would have been (it starts a little later or earlier, so find where).
         let from = 3 * 48_000 * 2;
-        if on.len() > from && off.len() > from {
-            let n = (on.len() - from).min(off.len() - from).min(48_000 * 2);
-            assert_eq!(
-                on[from..from + n],
-                off[from..from + n],
-                "{how}: the song is untouched after the echo"
+        if on.len() > from + 48_000 * 2 && off.len() > from + 48_000 * 2 {
+            let probe = &off[from..from + 4_800 * 2];
+            let at = (0..on.len() - probe.len()).step_by(2).find(|&i| on[i..i + probe.len()] == *probe);
+            assert!(
+                at.is_some_and(|i| i.abs_diff(from) < 48_000),
+                "{how}: the song is untouched after the echo ({at:?})"
             );
         }
     }
@@ -727,6 +727,70 @@ fn skipping_a_song_echoes_it_out_but_other_changes_do_not() {
         let (on, off) = (after_trigger(true, how), after_trigger(false, how));
         assert_eq!(on.len(), off.len(), "{how}");
         assert!(on == off, "{how}: no echo");
+    }
+}
+
+/// The skip on the sink as the ear gets it: no hole (a run of exact zeros) and no step at the cut, even when the next song is slow to start.
+#[test]
+fn a_skip_is_seamless_at_the_sink_even_with_a_slow_next_song() {
+    if skip() {
+        return;
+    }
+    const RATE: usize = 48_000;
+    let rms = |v: &[f32]| (v.iter().map(|x| x * x).sum::<f32>() / v.len().max(1) as f32).sqrt();
+    for echo in [true, false] {
+        let mut host = UiHost::new();
+        host.library = Some(ScriptedLibrary::default());
+        host.now_playing = Some(RecordingNowPlaying::default());
+        let slow = Rc::new(std::cell::Cell::new(0));
+        let codecs = DefaultCodecs {
+            clock: Some(host.virtual_clock()),
+            audio_start_us: slow.clone(),
+            ..Default::default()
+        };
+        let app = App::new(Rc::new(codecs), UiConfig { reduce_motion: true });
+        let mut r = Rig { host, app, effects: Vec::new() };
+        r.add_folder();
+        r.act(Action::SetMode(Mode::Library));
+        r.act(Action::SetEchoSkip(echo));
+        r.key(Key::Char('3'));
+        r.run(50);
+        r.key(Key::Down);
+        r.key(Key::Down);
+        r.key(Key::Enter);
+        r.run(4_000);
+        assert_eq!(r.app.model().state, MediaState::Playing);
+        r.host.audio.record_played();
+        r.run(1_000);
+        r.host.audio.settle();
+        let before = r.host.audio.played.as_ref().unwrap().len();
+        slow.set(15_000);
+        r.act(Action::Next);
+        r.run(3_000);
+        r.host.audio.settle();
+        let played = r.host.audio.played.take().unwrap();
+        let mono: Vec<f32> = played.chunks_exact(2).map(|f| (f[0] + f[1]) * 0.5).collect();
+        let cut = before / 2;
+        // The longest hole from a little before the cut to a second after it.
+        let (mut run, mut worst) = (0usize, 0usize);
+        for &v in &mono[cut - 2_000..cut + RATE] {
+            run = if v == 0.0 { run + 1 } else { 0 };
+            worst = worst.max(run);
+        }
+        // With the echo off the song stops (after a short fade) and the next one comes when it is ready; the echo fills that time.
+        assert!(!echo || worst <= RATE * 5 / 1000, "echo {echo}: a hole of {worst} frames at the skip");
+        // No step bigger than the song itself makes.
+        let step = |a: &[f32]| a.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        let normal = step(&mono[cut - RATE..cut - 2_000]);
+        let around = step(&mono[cut - 2_000..cut + RATE]);
+        assert!(
+            around <= normal * 1.5 + 0.02,
+            "echo {echo}: a step of {around} at the skip (the song makes {normal})"
+        );
+        if echo {
+            let (song, tail) = (rms(&mono[cut - 4_800..cut]), rms(&mono[cut + 480..cut + 480 + 2_400]));
+            assert!(tail >= song * 0.5, "the tail starts near the song's level: {tail} against {song}");
+        }
     }
 }
 

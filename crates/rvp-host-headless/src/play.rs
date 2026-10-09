@@ -18,8 +18,40 @@ pub struct DefaultCodecs {
     pub clock: Option<Rc<VirtualClock>>,
     /// Test hook: every video packet takes this much virtual time to decode (a slow machine); needs `clock`.
     pub video_cost_us: Timestamp,
+    /// Test hook: each of the first ten packets a new audio decoder gets takes this much virtual time (a slow start); needs `clock`. Shared, so a test can set it
+    /// right before a skip.
+    pub audio_start_us: Rc<std::cell::Cell<Timestamp>>,
     /// A platform decoder service for the codecs ours does not decode (HEVC), as a host such as a browser would offer.
     pub platform: Option<Rc<dyn rvp_core::PlatformVideo>>,
+}
+
+/// How many packets at the start of an audio stream are slow under [`DefaultCodecs::audio_start_us`].
+const SLOW_START_PACKETS: usize = 10;
+
+/// Wraps an audio decoder so each of its first packets takes a while.
+struct SlowStartAudio {
+    inner: Box<dyn AudioDecoder>,
+    clock: Rc<VirtualClock>,
+    us: Rc<std::cell::Cell<Timestamp>>,
+    count: usize,
+}
+
+impl AudioDecoder for SlowStartAudio {
+    fn send_packet(&mut self, p: &Packet) -> Result<()> {
+        if self.count < SLOW_START_PACKETS {
+            self.count += 1;
+            self.clock.advance(self.us.get());
+        }
+        self.inner.send_packet(p)
+    }
+
+    fn receive_buffer(&mut self) -> Result<Option<rvp_core::AudioBuffer>> {
+        self.inner.receive_buffer()
+    }
+
+    fn flush(&mut self) {
+        self.inner.flush()
+    }
 }
 
 /// Wraps a decoder and advances the virtual clock inside one `send_packet`, as a slow decode would.
@@ -59,7 +91,16 @@ impl VideoDecoder for StallDecoder {
 
 impl CodecFactory for DefaultCodecs {
     fn audio(&self, info: &StreamInfo) -> Result<Box<dyn AudioDecoder>> {
-        rvp_codec_audio::audio_decoder(info)
+        let dec = rvp_codec_audio::audio_decoder(info)?;
+        match &self.clock {
+            Some(clock) => Ok(Box::new(SlowStartAudio {
+                inner: dec,
+                clock: clock.clone(),
+                us: self.audio_start_us.clone(),
+                count: 0,
+            })),
+            None => Ok(dec),
+        }
     }
 
     fn video(&self, info: &StreamInfo) -> Result<Box<dyn VideoDecoder>> {
@@ -170,6 +211,7 @@ pub fn play_file(path: &str, opts: &PlayOptions) -> Result<PlayReport> {
         clock: Some(clock.clone()),
         video_cost_us: 0,
         platform: None,
+        ..Default::default()
     };
     let mut session = Session::new(FileSource::open(path)?, Rc::new(codecs));
     session.enable_audio_trace();

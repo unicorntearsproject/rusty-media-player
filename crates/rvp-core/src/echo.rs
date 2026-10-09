@@ -14,7 +14,7 @@ pub const DELAY_MS: u32 = 300;
 /// How much of each repeat is fed back.
 pub const FEEDBACK: f32 = 0.68;
 /// The level of the first repeat against the song it echoes.
-pub const WET: f32 = 0.9;
+pub const WET: f32 = 0.95;
 /// How long the echo lasts; its level also falls in a straight line to zero over this time.
 pub const TAIL_MS: u32 = 2000;
 /// The song is carried on for this long, fading out, after the point where it was cut (the part that was queued but not yet heard), so
@@ -34,8 +34,10 @@ const FLUSH: f32 = 1.0e-20;
 pub struct Throw {
     tail: Vec<f32>,
     channels: usize,
-    /// Frames of the next song already mixed.
+    /// Frames of the tail already played (written ahead of the next song or mixed into it).
     pos: usize,
+    /// Frames of the next song already mixed (it rises over `fade_in`).
+    song_pos: usize,
     fade_in: usize,
 }
 
@@ -110,7 +112,50 @@ impl Throw {
                 *v = 0.0;
             }
         }
-        Some(Throw { tail, channels: ch, pos: 0, fade_in: frames(FADE_IN_MS, rate) })
+        Some(Throw { tail, channels: ch, pos: 0, song_pos: 0, fade_in: frames(FADE_IN_MS, rate) })
+    }
+
+    /// Only the end of the song, faded out over [`DRY_FADE_MS`], and the next song rising over a few milliseconds: what a skip does when the echo
+    /// is switched off (or for Back), so the cut never clicks. `after` is what had been queued beyond the cut.
+    pub fn declick(after: &[f32], channels: usize, rate: u32) -> Option<Throw> {
+        let ch = channels.max(1);
+        let fade = frames(DRY_FADE_MS, rate).max(1);
+        let n = (after.len() / ch).min(fade);
+        if n == 0 {
+            return None;
+        }
+        let mut tail = alloc::vec![0.0f32; fade * ch];
+        for i in 0..n {
+            let g = 1.0 - i as f32 / fade as f32;
+            for c in 0..ch {
+                tail[i * ch + c] = after[i * ch + c] * g;
+            }
+        }
+        Some(Throw { tail, channels: ch, pos: 0, song_pos: 0, fade_in: frames(DRY_FADE_MS, rate) })
+    }
+
+    /// The next `n` frames of the tail by themselves (interleaved), to play before the next song is ready; fewer when the tail is over. The song
+    /// then joins at the place the tail has reached.
+    pub fn lead(&mut self, n: usize) -> Vec<f32> {
+        let total = self.len_frames();
+        let take = n.min(total.saturating_sub(self.pos));
+        let ch = self.channels;
+        let mut out: Vec<f32> = self.tail[self.pos * ch..(self.pos + take) * ch].to_vec();
+        for v in &mut out {
+            *v = ceil(*v);
+        }
+        self.pos += take;
+        out
+    }
+
+    /// True once any of the tail has been played on its own.
+    pub fn started(&self) -> bool {
+        self.pos > 0
+    }
+
+    /// Take back `n` frames of what [`Throw::lead`] gave, when the sink accepted fewer.
+    pub fn unlead(&mut self, n: usize) {
+        self.pos = self.pos.saturating_sub(n);
     }
 
     /// Frames of the tail (its length in time at the rate it was built for).
@@ -118,9 +163,9 @@ impl Throw {
         self.tail.len() / self.channels
     }
 
-    /// True once the next song has been mixed past the end of the tail.
+    /// True once the tail is over and the next song has risen fully.
     pub fn done(&self) -> bool {
-        self.pos >= self.len_frames().max(self.fade_in)
+        self.pos >= self.len_frames() && self.song_pos >= self.fade_in
     }
 
     /// Mix the tail into `song`, the next frames of the incoming song (interleaved): the song rises over [`FADE_IN_MS`], the tail is added, and
@@ -129,12 +174,12 @@ impl Throw {
         let ch = self.channels;
         let total = self.len_frames();
         for (j, frame) in song.chunks_exact_mut(ch).enumerate() {
-            let p = self.pos + j;
-            if p >= total && p >= self.fade_in {
+            let (p, sp) = (self.pos + j, self.song_pos + j);
+            if p >= total && sp >= self.fade_in {
                 break;
             }
-            let rise = if p < self.fade_in {
-                0.5 - 0.5 * libm::cosf(core::f32::consts::PI * p as f32 / self.fade_in as f32)
+            let rise = if sp < self.fade_in {
+                0.5 - 0.5 * libm::cosf(core::f32::consts::PI * sp as f32 / self.fade_in as f32)
             } else {
                 1.0
             };
@@ -143,7 +188,9 @@ impl Throw {
                 *s = ceil(*s * rise + echo);
             }
         }
-        self.pos += song.len() / ch;
+        let n = song.len() / ch;
+        self.pos += n;
+        self.song_pos += n;
     }
 }
 

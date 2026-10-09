@@ -516,11 +516,10 @@ impl App {
         H: Host<Video = FrameSink>,
         H::Source: 'static,
     {
-        self.skip_throw = if self.settings.echo_skip {
-            self.session.as_ref().and_then(|s| s.make_throw(host))
-        } else {
-            None
-        };
+        self.skip_throw = self.session.as_ref().and_then(|s| s.make_throw(host));
+        if let Some(t) = &mut self.skip_throw {
+            Session::lead_throw(host, t);
+        }
         self.play_item(host, id);
         self.skip_throw = None;
     }

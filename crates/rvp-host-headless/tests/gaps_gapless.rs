@@ -78,6 +78,7 @@ fn run(first: &str, rest: &[&str], delay_us: i64) -> Run {
         clock: Some(clock.clone()),
         video_cost_us: 0,
         platform: None,
+        ..Default::default()
     };
     let mut session = Session::new(FileSource::open(&fixture(first)).unwrap(), Rc::new(codecs));
     session.play();

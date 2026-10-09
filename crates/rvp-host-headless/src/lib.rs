@@ -104,6 +104,10 @@ pub struct NullAudio {
     capacity_frames: u64,
     /// When set, every accepted sample is appended here (interleaved `f32`).
     pub capture: Option<Vec<f32>>,
+    /// When set (see [`NullAudio::record_played`]), what the device would have played second by second: queued audio as it drains, exact zeros
+    /// where the queue ran dry, nothing while paused; audio dropped by `flush` never appears.
+    pub played: Option<Vec<f32>>,
+    ring: std::collections::VecDeque<f32>,
     /// A failing output (see [`NullAudio::inject_failure`]): nothing drains, the queue and the position stand still.
     fail: Option<FailingOutput>,
     recovered: Option<String>,
@@ -152,10 +156,24 @@ impl NullAudio {
             volume: 1.0,
             capacity_frames: 0,
             capture: None,
+            played: None,
+            ring: std::collections::VecDeque::new(),
             fail: None,
             recovered: None,
             retries: Vec::new(),
         }
+    }
+
+    /// Start recording what the device plays in [`NullAudio::played`].
+    pub fn record_played(&mut self) {
+        self.drain();
+        self.played = Some(Vec::new());
+        self.ring.clear();
+    }
+
+    /// Bring the recording up to the present.
+    pub fn settle(&mut self) {
+        self.drain();
     }
 
     /// True while the device is paused (nothing queued plays).
@@ -172,6 +190,14 @@ impl NullAudio {
         let now = self.clock.now_us();
         if let (false, Some(p), None) = (self.paused, self.params, &self.fail) {
             let played = ((now - self.last_update) as u128 * p.sample_rate as u128 / 1_000_000) as u64;
+            if let Some(out) = &mut self.played {
+                let ch = p.channels.max(1) as usize;
+                for _ in 0..played {
+                    for _ in 0..ch {
+                        out.push(self.ring.pop_front().unwrap_or(0.0));
+                    }
+                }
+            }
             self.queued = self.queued.saturating_sub(played);
         }
         self.last_update = now;
@@ -182,7 +208,11 @@ impl AudioSink for NullAudio {
     fn open(&mut self, want: AudioParams) -> Result<AudioParams, HostError> {
         // A new stream: nothing from an earlier one is left in the buffer (the drain is computed lazily, so the count of what
         // an earlier stream left there can be stale).
-        self.queued = 0;
+        // Reopening the same format keeps what is queued (a skip's tail is playing); the player flushes when it wants a clean stream.
+        if self.params != Some(want) {
+            self.queued = 0;
+            self.ring.clear();
+        }
         self.written = 0;
         self.params = Some(want);
         self.capacity_frames = want.sample_rate as u64; // one second of buffer
@@ -217,12 +247,16 @@ impl AudioSink for NullAudio {
         if let Some(c) = &mut self.capture {
             c.extend_from_slice(&interleaved[..n * p.channels.max(1) as usize]);
         }
+        if self.played.is_some() {
+            self.ring.extend(&interleaved[..n * p.channels.max(1) as usize]);
+        }
         n
     }
 
     fn flush(&mut self) {
         self.drain();
         self.queued = 0;
+        self.ring.clear();
     }
 
     fn set_paused(&mut self, paused: bool) {

@@ -290,7 +290,16 @@ pub struct AudioOut {
     capture_base: u64,
     /// The tail of a skipped song, mixed into the first seconds of this item.
     throw: Option<Throw>,
+    /// How much of `pending` the throw has already been mixed into.
+    throw_applied: usize,
+    /// The first sound of the item may go to the sink even though less than a start buffer is ready (it has ended).
+    release: bool,
 }
+
+/// While a throw waits for the next item, its tail goes to the sink at most this far ahead of the ear.
+const LEAD_AHEAD_MS: u64 = 150;
+/// The next item's first sound is held back until this much is ready, so the tail can go on in the meantime (it matches the start buffer).
+const LEAD_RELEASE_MS: u64 = 100;
 
 /// How much output is kept for the echo: the sink may hold a second or more that has not been heard yet, plus the stretch that is echoed.
 const CAPTURE_MS: u64 = 3_000;
@@ -321,6 +330,8 @@ impl AudioOut {
             capture: None,
             capture_base: 0,
             throw: None,
+            throw_applied: 0,
+            release: false,
         }
     }
 
@@ -346,23 +357,62 @@ impl AudioOut {
         self.throw.is_some()
     }
 
-    /// The echo of what is being heard right now, to hand to the item that replaces this one. `None` when no copy is kept or there is
-    /// too little sound.
-    pub fn make_throw(&self, sink: &impl AudioSink) -> Option<Throw> {
+    /// The echo of what is being heard right now, to hand to the item that replaces this one. The tail carries on from the last frame the
+    /// device has taken (what is still queued fades out into it). `echo` false gives only the short fade that stops a click. `None` when no
+    /// copy is kept or there is too little sound.
+    pub fn make_throw(&self, sink: &impl AudioSink, echo: bool) -> Option<Throw> {
         let cap = self.capture.as_ref()?;
         let ch = self.sink.channels as usize;
         let rate = self.sink.sample_rate;
-        let heard = self.heard_frame(sink);
-        if heard <= self.capture_base as i64 {
+        let cut = self.written as i64 - sink.queued_frames() as i64;
+        if cut <= self.capture_base as i64 {
             return None;
         }
         let have = cap.len() / ch;
-        let rel = ((heard as u64 - self.capture_base) as usize).min(have);
+        let rel = ((cut as u64 - self.capture_base) as usize).min(have);
         let d = (rate as u64 * DELAY_MS as u64 / 1000) as usize;
         let dry = (rate as u64 * DRY_FADE_MS as u64 / 1000) as usize;
         let from = rel.saturating_sub(d);
         let to = (rel + dry).min(have);
-        Throw::build(&cap[from * ch..rel * ch], &cap[rel * ch..to * ch], ch, rate)
+        let after = &cap[rel * ch..to * ch];
+        if echo {
+            if let Some(t) = Throw::build(&cap[from * ch..rel * ch], after, ch, rate) {
+                return Some(t);
+            }
+        }
+        Throw::declick(after, ch, rate)
+    }
+
+    /// True while a throw's tail plays by itself because the item it is for has not made sound yet.
+    pub fn leading(&self) -> bool {
+        self.throw.is_some() && self.written == 0 && !self.release_ready()
+    }
+
+    /// Let the first sound go out even if less than a start buffer is ready.
+    pub fn set_release(&mut self, on: bool) {
+        self.release = on;
+    }
+
+    fn release_ready(&self) -> bool {
+        let ready = (self.pending.len() - self.pending_off) / self.sink.channels as usize;
+        self.release || ready as u64 * 1000 >= LEAD_RELEASE_MS * self.sink.sample_rate as u64
+    }
+
+    /// Keep the tail of a throw playing, a little ahead of the ear, until the item's own sound can follow it.
+    fn feed_lead(&mut self, sink: &mut impl AudioSink) {
+        let ahead = (self.sink.sample_rate as u64 * LEAD_AHEAD_MS / 1000) as usize;
+        let queued = sink.queued_frames();
+        if queued >= ahead {
+            return;
+        }
+        let Some(t) = &mut self.throw else { return };
+        let v = t.lead(ahead - queued);
+        if v.is_empty() {
+            return;
+        }
+        let ch = self.sink.channels as usize;
+        let n = sink.write(&v);
+        t.unlead(v.len() / ch - n);
     }
 
     /// Set the playback rate. Only call this right after [`AudioOut::reset`]: audio already queued keeps the
@@ -449,6 +499,8 @@ impl AudioOut {
         }
         self.capture_base = 0;
         self.throw = None;
+        self.throw_applied = 0;
+        self.release = false;
         self.lane.discard_until = discard_until;
         if let Some(r) = &mut self.lane.resampler {
             r.reset();
@@ -584,12 +636,6 @@ impl AudioOut {
             None => self.pending.extend_from_slice(&frames),
         }
         let added = (self.pending.len() - before) / self.sink.channels as usize;
-        if let Some(t) = &mut self.throw {
-            t.apply(&mut self.pending[before..]);
-            if t.done() {
-                self.throw = None;
-            }
-        }
         if self.need_seg || self.segs.is_empty() {
             self.need_seg = false;
             self.segs.push(Seg { start_frame: self.pushed, origin: pts, item: self.cur_item });
@@ -770,6 +816,20 @@ impl AudioOut {
             }
             None => self.pending.len(),
         };
+        if self.throw.is_some() && self.written == 0 && !self.release_ready() {
+            self.feed_lead(sink);
+            return 0;
+        }
+        if let Some(t) = &mut self.throw {
+            let from = self.throw_applied.max(self.pending_off);
+            if ready_end > from {
+                t.apply(&mut self.pending[from..ready_end]);
+                self.throw_applied = ready_end;
+            }
+            if t.done() {
+                self.throw = None;
+            }
+        }
         let mut total = 0;
         while self.pending_off < ready_end {
             let n = sink.write(&self.pending[self.pending_off..ready_end]);
@@ -796,9 +856,11 @@ impl AudioOut {
             self.pending.clear();
             self.pending_off = 0;
             self.limited_end = 0;
+            self.throw_applied = 0;
         } else if self.pending_off > (1 << 16) {
             self.pending.drain(..self.pending_off);
             self.limited_end -= self.pending_off.min(self.limited_end);
+            self.throw_applied = self.throw_applied.saturating_sub(self.pending_off);
             self.pending_off = 0;
         }
         total
@@ -1341,20 +1403,20 @@ mod tests {
         let mut a = AudioOut::new(params);
         a.reset(0);
         played(&mut a, &mut sink, 2);
-        assert!(a.make_throw(&sink).is_none(), "no copy is kept until asked");
+        assert!(a.make_throw(&sink, true).is_none(), "no copy is kept until asked");
         a.set_capture(true);
         played(&mut a, &mut sink, 2);
-        let t = a.make_throw(&sink).expect("an echo");
+        let t = a.make_throw(&sink, true).expect("an echo");
         assert_eq!(t.len_frames(), 96_000);
         // Turning the copy off forgets it.
         a.set_capture(false);
-        assert!(a.make_throw(&sink).is_none());
+        assert!(a.make_throw(&sink, true).is_none());
         // Too little heard since the copy began: nothing worth echoing.
         let mut b = AudioOut::new(params);
         b.reset(0);
         b.set_capture(true);
         played(&mut b, &mut sink, 0);
-        assert!(b.make_throw(&sink).is_none());
+        assert!(b.make_throw(&sink, true).is_none());
     }
 
     #[test]
@@ -1365,7 +1427,7 @@ mod tests {
         a.reset(0);
         a.set_capture(true);
         played(&mut a, &mut sink, 2);
-        let throw = a.make_throw(&sink).unwrap();
+        let throw = a.make_throw(&sink, true).unwrap();
         // The next song (a steady 0.5, like the old one): the echo is mixed in for two seconds, then it is exactly itself.
         let mut next = AudioOut::new(params);
         next.reset(0);
@@ -1392,7 +1454,7 @@ mod tests {
             during.set_throw(Throw::build(&alloc::vec![0.3; 48_000 * 2], &[], 2, 48_000).unwrap());
             let mut s2 = Sink { cap: 1 << 24, fixed_queued: Some(4800), ..Sink::default() };
             played(&mut during, &mut s2, 1);
-            during.make_throw(&s2)
+            during.make_throw(&s2, true)
         };
         assert!(throw2.is_some());
     }

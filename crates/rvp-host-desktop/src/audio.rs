@@ -101,6 +101,8 @@ pub struct DesktopAudio {
     recovered: Option<String>,
     /// The name of the device last tried, for the messages.
     last_device: String,
+    /// What the open stream was asked for: asking again for the same keeps the stream (rebuilding it leaves a gap in the sound).
+    last_want: Option<AudioParams>,
 }
 
 /// The ring's lock, whatever happened to the thread that held it last: the ring is plain numbers, so what a panic left is still usable, and
@@ -148,6 +150,7 @@ impl DesktopAudio {
             silent_carry: 0.0,
             recovered: None,
             last_device: String::new(),
+            last_want: None,
         }
     }
 
@@ -306,9 +309,17 @@ impl DesktopAudio {
 
 impl AudioSink for DesktopAudio {
     fn open(&mut self, want: AudioParams) -> Result<AudioParams, HostError> {
-        self.out = Output::Closed;
         self.written = 0;
         self.recovered = None;
+        let same = self.last_want == Some(want)
+            && matches!(self.out, Output::Device { .. })
+            && !self.force_silent
+            && !self.shared.failed.load(Ordering::Relaxed);
+        if let (true, Some(p)) = (same, self.params) {
+            return Ok(p);
+        }
+        self.out = Output::Closed;
+        self.last_want = Some(want);
         let got =
             if self.force_silent { Err("audio is off".to_string()) } else { self.try_device(want, false) };
         let params = match got {
