@@ -332,13 +332,13 @@ fn queue_operations_through_actions() {
     assert_eq!(r.app.playlist().len(), 8);
     let cur = r.app.playlist().current().unwrap().track;
     assert_eq!(cur, Some(a.tracks[0]));
-    // Play next: three tracks of another album go right after the current one, in order.
+    // Play next: two tracks of another album go right after the current one, in the order they were added.
     r.act(Action::Lib(LibAction::Play(Scope::Track(b.tracks[2]), Enqueue::Next)));
     r.act(Action::Lib(LibAction::Play(Scope::Track(b.tracks[3]), Enqueue::Next)));
     let order: Vec<Option<u32>> = r.app.playlist().items().iter().map(|i| i.track).collect();
     assert_eq!(order[0], Some(a.tracks[0]));
-    assert_eq!(order[1], Some(b.tracks[3]), "each 'play next' lands right after the current item");
-    assert_eq!(order[2], Some(b.tracks[2]));
+    assert_eq!(order[1], Some(b.tracks[2]), "the first 'play next' plays first");
+    assert_eq!(order[2], Some(b.tracks[3]), "and the next one stacks behind it");
     // Add to queue appends.
     r.act(Action::Lib(LibAction::Play(Scope::Album(b.id), Enqueue::Append)));
     assert_eq!(r.app.playlist().len(), 8 + 2 + 12);
@@ -352,7 +352,7 @@ fn queue_operations_through_actions() {
     // Move one item to play next, remove another, clear.
     let last = r.app.playlist().items().last().unwrap().id;
     r.act(Action::Lib(LibAction::QueueToNext(last)));
-    assert_eq!(r.app.playlist().items()[1].id, last);
+    assert_eq!(r.app.playlist().items()[3].id, last, "it joins the end of the play-next block");
     r.act(Action::RemoveItem(last));
     assert_eq!(r.app.playlist().len(), 21);
     // Replace with a shuffled album: every track once, shuffle on.

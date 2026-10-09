@@ -76,6 +76,11 @@ const AUDIO_ONLY_US: i64 = 25_000;
 const AUDIO_FEED_US: i64 = 900_000;
 /// Rounds of the task loop in one turn, at most.
 const MAX_ROUNDS: usize = 256;
+/// While a seek's preview picture is still being decoded (paused, a seek waiting for its picture) the video tasks may work this long per turn:
+/// nothing else is moving, so the picture should come as fast as the decoder can make it.
+const PREVIEW_BUDGET_US: i64 = 40_000;
+/// A stand-in picture (the newest one decoded on the way to the target) is shown at most this often.
+const STAND_IN_EVERY_US: i64 = 80_000;
 /// The caller should queue the next item when this little of the current one is left, microseconds (plus the length of the
 /// crossfade, when there is one, so the next item is open and decoding before the fade has to start).
 const NEXT_LEAD_US: i64 = 12_000_000;
@@ -658,9 +663,15 @@ async fn video_task(sh: Sh, codecs: Rc<dyn CodecFactory>) {
             }
             // Far behind (a slow machine): jump to the newest keyframe of the backlog, skipping the pictures between, and start the decoder
             // clean there. Better a gap in the picture than a decoder that never catches up and a sound that starves behind it.
-            let late = s.video_in.front().is_some_and(|p| p.pts + VIDEO_LATE_US < s.clock_us);
+            let clock = s.clock_us;
+            let late = s.video_in.front().is_some_and(|p| p.pts + VIDEO_LATE_US < clock);
             if s.video_in.len() >= VIDEO_BACKLOG_PACKETS && late {
-                if let Some(k) = s.video_in.iter().rposition(|p| p.keyframe).filter(|&k| k > 0) {
+                // Only to a key frame the clock has already reached: one beyond it would skip the very picture that is due (after a seek the
+                // decoder starts a whole group before the target, and with a slow decoder the next key frame is queued behind it; jumping
+                // there left a paused seek without any picture for good).
+                if let Some(k) =
+                    s.video_in.iter().rposition(|p| p.keyframe && p.pts <= clock).filter(|&k| k > 0)
+                {
                     s.video_in.drain(..k);
                     s.video_skipped += k as u64;
                     s.video_dec.clear();
@@ -770,6 +781,8 @@ pub struct Session {
     stats: VideoStats,
     video_trace: Option<Vec<VideoTraceEntry>>,
     shown_preview: bool,
+    /// When a stand-in picture was last shown.
+    stand_in_at: Timestamp,
     last_presented: Option<Timestamp>,
     events: VecDeque<SessionEvent>,
     shown_subtitle: Option<String>,
@@ -832,6 +845,7 @@ impl Session {
             stats: VideoStats::default(),
             video_trace: None,
             shown_preview: false,
+            stand_in_at: i64::MIN / 2,
             last_presented: None,
             events: VecDeque::new(),
             shown_subtitle: None,
@@ -1349,7 +1363,12 @@ impl Session {
             let before = self.sh.borrow().progress;
             let next_before = self.next.as_ref().map(|n| n.sh.borrow().progress);
             let now_r = host.clock().now_us();
-            let in_budget = now_r - t0 <= BUDGET_US;
+            let budget = if !self.running && !self.shown_preview && self.seek_target.is_some() {
+                PREVIEW_BUDGET_US
+            } else {
+                BUDGET_US
+            };
+            let in_budget = now_r - t0 <= budget;
             let low = self.audio_hungry(host);
             let clock_us = self.clock.now_stream(now_r);
             {
@@ -1374,7 +1393,7 @@ impl Session {
                 break;
             }
             let after = host.clock().now_us();
-            if after - t0 > BUDGET_US {
+            if after - t0 > budget {
                 // Out of budget: go on only while the sound is short of audio, and only for a little longer.
                 let over = *over_at.get_or_insert(after);
                 if after - over > AUDIO_ONLY_US || !self.audio_hungry(host) {
@@ -1602,6 +1621,24 @@ impl Session {
                     candidate = s.video_dec.pop_front();
                 }
             }
+        }
+        // Paused after a seek, with the target picture still being decoded: show the newest picture decoded so far (the key frame first) as a
+        // stand-in, so the screen answers the seek at once; the picture of the target replaces it when it is ready.
+        if candidate.is_none()
+            && !self.running
+            && !self.shown_preview
+            && now - self.stand_in_at >= STAND_IN_EVERY_US
+            && let Some(f) = s.video_dec.front()
+            && f.pts <= pos
+            && self.last_presented != Some(f.pts)
+        {
+            host.video().present(f);
+            self.stats.presented += 1;
+            if let Some(t) = &mut self.video_trace {
+                t.push(VideoTraceEntry { clock_us: pos, pts: f.pts });
+            }
+            self.last_presented = Some(f.pts);
+            self.stand_in_at = now;
         }
         drop(s);
         // How long the previous frame has been on screen (measured before it is replaced).
