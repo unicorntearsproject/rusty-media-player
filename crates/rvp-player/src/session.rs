@@ -12,6 +12,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use rvp_core::echo::Throw;
 use rvp_core::task::yield_now;
 use rvp_core::{
     AudioBuffer, AudioParams, AudioSettings, ClockSource, CodecFactory, Error, LevelMode, LoudnessTags,
@@ -752,6 +753,8 @@ pub struct Session {
     sh: Sh,
     clock: MasterClock,
     audio: Option<AudioOut>,
+    /// The tail of a song that was skipped for this item: handed to the audio output when it opens.
+    pending_throw: Option<Throw>,
     audio_opened: bool,
     /// What the audio device was last told about pausing.
     sink_paused: bool,
@@ -814,6 +817,7 @@ impl Session {
             sh,
             clock: MasterClock::new(ClockSource::Monotonic),
             audio: None,
+            pending_throw: None,
             audio_opened: false,
             sink_paused: true,
             want_play: false,
@@ -896,6 +900,32 @@ impl Session {
     /// Set crossfade and automatic level. They take effect at once for the audio still to come.
     pub fn set_audio_settings(&mut self, settings: AudioSettings) {
         self.settings = settings.clamped();
+        let keep = self.keeps_echo_copy();
+        if let Some(a) = &mut self.audio {
+            a.set_capture(keep);
+        }
+    }
+
+    /// Whether the output is copied so a skip of this item can be echoed: the setting is on and the item is a song.
+    fn keeps_echo_copy(&self) -> bool {
+        self.settings.echo_skip && !self.has_video()
+    }
+
+    /// The echo of the song being heard now, for the item that replaces it after a skip. `None` for anything else: the setting off, a
+    /// video, a pause, a seek in progress, an item that has ended or has not started.
+    pub fn make_throw<H: Host>(&self, host: &mut H) -> Option<Throw> {
+        if !self.keeps_echo_copy() || self.state() != SessionState::Playing || self.sh.borrow().seeking {
+            return None;
+        }
+        self.audio.as_ref()?.make_throw(host.audio())
+    }
+
+    /// Mix the tail of a skipped song into the start of this item.
+    pub fn set_throw(&mut self, throw: Throw) {
+        match &mut self.audio {
+            Some(a) => a.set_throw(throw),
+            None => self.pending_throw = Some(throw),
+        }
     }
 
     /// The crossfade and level settings in force.
@@ -1383,6 +1413,12 @@ impl Session {
                     let mut out = AudioOut::new(p);
                     out.set_tap(host.visualizer().is_some());
                     out.set_rate(self.rate);
+                    out.set_capture(self.keeps_echo_copy());
+                    if let Some(t) = self.pending_throw.take() {
+                        if !self.has_video() {
+                            out.set_throw(t);
+                        }
+                    }
                     self.level_pushed = None;
                     if self.trace {
                         out.enable_trace();

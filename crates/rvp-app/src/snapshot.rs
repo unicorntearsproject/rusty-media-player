@@ -211,12 +211,13 @@ impl App {
         );
         let a = self.audio_settings();
         j += &format!(
-            "\"audio\":{{\"crossfade\":{},\"crossfade_secs\":{},\"auto_level\":{},\"target_lufs\":{},\"level_mode\":\"{}\",\"gain_db\":{},\"crossfading\":{},\"library_measured\":{},\"library_unmeasured\":{}}},",
+            "\"audio\":{{\"crossfade\":{},\"crossfade_secs\":{},\"auto_level\":{},\"target_lufs\":{},\"level_mode\":\"{}\",\"echo_skip\":{},\"gain_db\":{},\"crossfading\":{},\"library_measured\":{},\"library_unmeasured\":{}}},",
             a.crossfade,
             a.crossfade_secs,
             a.auto_level,
             a.target_lufs,
             if a.level_mode == rvp_core::LevelMode::Album { "album" } else { "track" },
+            a.echo_skip,
             m.level_gain_db.map_or("null".to_string(), |g| format!("{g:.2}")),
             self.session().is_some_and(|s| s.crossfading()),
             self.library().all_tracks().iter().filter(|t| t.loudness.lufs.is_some()).count(),

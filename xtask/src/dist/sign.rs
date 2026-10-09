@@ -19,11 +19,15 @@ pub(super) fn resolve_key(root: &Path, explicit: Option<String>) -> Result<Strin
         )?)
         .ok_or_else(|| format!("no key in {KEY_ASC}"))?,
     };
-    let secret =
-        capture(Command::new("gpg").args(["--batch", "--list-secret-keys", "--with-colons", &wanted]))
-            .map_err(|_| {
-                format!("the secret key {wanted} is not in your gpg keyring (see docs/release/packaging.md, Signing)")
-            })?;
+    let secret = capture(Command::new("gpg").args([
+        "--batch",
+        "--list-secret-keys",
+        "--with-colons",
+        &wanted,
+    ]))
+    .map_err(|_| {
+        format!("the secret key {wanted} is not in your gpg keyring (see docs/release/packaging.md, Signing)")
+    })?;
     fingerprint(&secret).ok_or_else(|| format!("no secret key {wanted}"))
 }
 

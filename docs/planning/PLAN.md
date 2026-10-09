@@ -1124,6 +1124,8 @@ Features added on top of M12 (details in the docs named in brackets):
 
 - **Music button in the player bar**: the music-note button (every layout: desktop from 600 px, phone portrait, the Bucket adapter; in the Tab order) now asks for the music library (`Action::ShowMusic`): the Library face, on Albums when it was last on Videos or About, otherwise on the view it was. What is playing keeps playing (navigation never stops playback). Tooltip: "Music library".
 
+- **Echo out on skip** (setting, on by default; Audio panel and menu): skipping a song in the middle (Next, `>>`, choosing another track, a library Play) throws its last 300 ms into a wet feedback echo that fades out over 2 s while the next song rises over about 0.5 s. Songs only, never a natural end, Back, a seek, a pause or a video. The echo is computed once at the skip from a copy of what the sink was given (`rvp_core::echo`, no_std; the player keeps the copy only while the setting is on and a song plays), plus the next 15 ms of the old song faded out so the cut cannot click, and is mixed into the first two seconds of the new item before the limiter: no delay line runs on the incoming song and no latency is added. It is separate from the crossfade (which only joins a natural end; the throw uses its own fixed lengths).
+
 ### Phase A2 of the 2026-10-06 batch
 
 - **Favorites**: a heart on every song and video (rows, posters, the album page's *Favorite* button, the now-playing card, the bar, context menus, key `H`, since rc10 `Ctrl+F`), a Favorites view (key `9`) with Music and Videos

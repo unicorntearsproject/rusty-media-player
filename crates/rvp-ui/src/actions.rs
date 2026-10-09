@@ -131,6 +131,8 @@ pub enum Action {
     SetCrossfade(bool),
     /// The length of the crossfade, seconds.
     SetCrossfadeSecs(u8),
+    /// "Echo out on skip" on or off.
+    SetEchoSkip(bool),
     /// Automatic level on or off.
     SetAutoLevel(bool),
     /// The loudness the automatic level aims at, LUFS.
@@ -553,6 +555,10 @@ pub fn audio_effects_menu(model: &UiModel) -> Vec<MenuItem> {
         .sep(),
         MenuItem::parent("Crossfade length", lengths),
         plain(
+            if a.echo_skip { "Echo out on skip: on" } else { "Echo out on skip: off" },
+            Action::SetEchoSkip(!a.echo_skip)
+        ),
+        plain(
             if a.auto_level { "Auto-level: on" } else { "Auto-level: off" },
             Action::SetAutoLevel(!a.auto_level)
         )
@@ -726,11 +732,13 @@ mod tests {
             auto_level: true,
             target_lufs: -18,
             level_mode: LevelMode::Album,
+            echo_skip: true,
         };
         let items = audio_effects_menu(&m);
         let by = |label: &str| items.iter().find(|i| i.label == label).unwrap();
         assert_eq!(by("Crossfade: on").action, Some(Action::SetCrossfade(false)));
         assert_eq!(by("Auto-level: on").action, Some(Action::SetAutoLevel(false)));
+        assert_eq!(by("Echo out on skip: on").action, Some(Action::SetEchoSkip(false)));
         assert!(by("Level whole albums").checked && !by("Level each track").checked);
         let checked = |label: &str| {
             by(label).sub.iter().filter(|i| i.checked).map(|i| i.label.clone()).collect::<Vec<_>>()

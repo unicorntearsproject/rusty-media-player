@@ -28,6 +28,8 @@ pub enum AudioControl {
     Crossfade,
     /// The crossfade length slider.
     CrossfadeLength,
+    /// The "echo out on skip" switch.
+    EchoSkip,
     /// The automatic level switch.
     AutoLevel,
     /// The target level slider.
@@ -41,9 +43,10 @@ pub enum AudioControl {
 }
 
 /// The controls in tab order.
-const ORDER: [AudioControl; 6] = [
+const ORDER: [AudioControl; 7] = [
     AudioControl::Crossfade,
     AudioControl::CrossfadeLength,
+    AudioControl::EchoSkip,
     AudioControl::AutoLevel,
     AudioControl::Target,
     AudioControl::Mode,
@@ -56,6 +59,7 @@ impl AudioControl {
         match self {
             AudioControl::Crossfade => "crossfade",
             AudioControl::CrossfadeLength => "crossfade_length",
+            AudioControl::EchoSkip => "echo_skip",
             AudioControl::AutoLevel => "auto_level",
             AudioControl::Target => "target",
             AudioControl::Mode => "mode",
@@ -92,7 +96,7 @@ pub struct AudioPanelGeom {
     /// Every control: the area that reacts to the pointer, and the drawn part of it (a switch, a slider track, the segments).
     pub controls: Vec<(AudioControl, RectF, RectF)>,
     /// Rows: `(label, description or value)` text positions are derived from these tops.
-    pub rows: [f32; 5],
+    pub rows: [f32; 6],
     /// The rule between the two groups.
     pub rule_y: f32,
     /// The footer line's centre.
@@ -150,7 +154,7 @@ impl Ui {
         let (w, h) = (self.w as f32, self.h as f32);
         let pad = 28.0 * s;
         let cw = (480.0f32).min(w / s - 32.0).max(280.0) * s;
-        let ch = 520.0 * s;
+        let ch = 586.0 * s;
         let card = RectF::new(((w - cw) * 0.5).max(0.0), ((h - ch) * 0.5).max(8.0 * s), cw, ch);
         let close =
             RectF::new(card.right() - pad - 32.0 * s + 8.0 * s, card.y + 18.0 * s, 36.0 * s, 36.0 * s);
@@ -159,7 +163,8 @@ impl Ui {
         // Row tops.
         let r_cross = card.y + 76.0 * s;
         let r_len = r_cross + 66.0 * s;
-        let rule_y = r_len + 74.0 * s;
+        let r_echo = r_len + 74.0 * s;
+        let rule_y = r_echo + 66.0 * s;
         let r_auto = rule_y + 12.0 * s;
         let r_target = r_auto + 66.0 * s;
         let r_mode = r_target + 74.0 * s;
@@ -174,6 +179,7 @@ impl Ui {
         let mut controls = alloc::vec![
             (AudioControl::Crossfade, hit_row(r_cross, 62.0 * s), switch(r_cross)),
             (AudioControl::CrossfadeLength, slider_hit(slider(r_len)), slider(r_len)),
+            (AudioControl::EchoSkip, hit_row(r_echo, 62.0 * s), switch(r_echo)),
             (AudioControl::AutoLevel, hit_row(r_auto, 62.0 * s), switch(r_auto)),
             (AudioControl::Target, slider_hit(slider(r_target)), slider(r_target)),
             (AudioControl::Mode, seg, seg),
@@ -187,7 +193,7 @@ impl Ui {
             card,
             close,
             controls,
-            rows: [r_cross, r_len, r_auto, r_target, r_mode],
+            rows: [r_cross, r_len, r_echo, r_auto, r_target, r_mode],
             rule_y,
             footer_cy: done.cy(),
         }
@@ -237,6 +243,7 @@ impl Ui {
     fn audio_activate(&mut self, c: AudioControl, model: &UiModel, out: &mut Vec<Action>) {
         match c {
             AudioControl::Crossfade => out.push(Action::SetCrossfade(!model.audio.crossfade)),
+            AudioControl::EchoSkip => out.push(Action::SetEchoSkip(!model.audio.echo_skip)),
             AudioControl::AutoLevel => out.push(Action::SetAutoLevel(!model.audio.auto_level)),
             AudioControl::Mode => out.push(Action::SetLevelMode(match model.audio.level_mode {
                 LevelMode::Track => LevelMode::Album,
@@ -396,13 +403,17 @@ impl Ui {
                     if want != model.audio.level_mode {
                         out.push(Action::SetLevelMode(want));
                     }
-                } else if matches!(cur, AudioControl::Crossfade | AudioControl::AutoLevel) && dir != 0 {
+                } else if matches!(
+                    cur,
+                    AudioControl::Crossfade | AudioControl::AutoLevel | AudioControl::EchoSkip
+                ) && dir != 0
+                {
                     // A switch: Right is on, Left is off.
                     let on = dir > 0;
-                    let (is_on, action) = if cur == AudioControl::Crossfade {
-                        (model.audio.crossfade, Action::SetCrossfade(on))
-                    } else {
-                        (model.audio.auto_level, Action::SetAutoLevel(on))
+                    let (is_on, action) = match cur {
+                        AudioControl::Crossfade => (model.audio.crossfade, Action::SetCrossfade(on)),
+                        AudioControl::EchoSkip => (model.audio.echo_skip, Action::SetEchoSkip(on)),
+                        _ => (model.audio.auto_level, Action::SetAutoLevel(on)),
                     };
                     if on != is_on {
                         out.push(action);
@@ -480,10 +491,20 @@ impl Ui {
             !a.crossfade,
             hot(AudioControl::CrossfadeLength),
         );
+        // Echo out on skip.
+        row_text(
+            self,
+            fb,
+            g.rows[2],
+            "Echo out on skip",
+            "Throw a skipped song into a fading echo as the next one starts",
+            false,
+        );
+        self.draw_switch(fb, g.control(AudioControl::EchoSkip).1, a.echo_skip, hot(AudioControl::EchoSkip));
         // The rule between the groups.
         fb.fill_rect_paint(RectF::new(x0, g.rule_y, inner, 1.0 * s), Paint::Solid(t::border_subtle()), 1.0);
         // Automatic level.
-        row_text(self, fb, g.rows[2], "Auto-level", "Play every song at the same loudness", false);
+        row_text(self, fb, g.rows[3], "Auto-level", "Play every song at the same loudness", false);
         self.draw_switch(
             fb,
             g.control(AudioControl::AutoLevel).1,
@@ -493,7 +514,7 @@ impl Ui {
         let (_, tr) = g.control(AudioControl::Target);
         self.draw_slider_row(
             fb,
-            g.rows[3],
+            g.rows[4],
             x0,
             inner,
             "Target",
@@ -509,7 +530,7 @@ impl Ui {
         row_text(
             self,
             fb,
-            g.rows[4],
+            g.rows[5],
             "Level by",
             if a.level_mode == LevelMode::Album {
                 "Albums keep their own balance"
@@ -545,7 +566,7 @@ impl Ui {
         if let Some(c) = focus {
             let (hit, drawn) = g.control(c);
             let r = match c {
-                AudioControl::Crossfade | AudioControl::AutoLevel => drawn,
+                AudioControl::Crossfade | AudioControl::AutoLevel | AudioControl::EchoSkip => drawn,
                 AudioControl::CrossfadeLength | AudioControl::Target => hit,
                 AudioControl::Mode | AudioControl::Done | AudioControl::Back => drawn,
             };
@@ -715,7 +736,13 @@ mod tests {
         // The crossfade switch, anywhere on its row.
         let (hit, _) = (g.controls[0].1, g.controls[0].2);
         assert_eq!(click(&mut ui, &m, hit.x + 40.0, hit.cy()), vec![Action::SetCrossfade(true)]);
-        let (_, sw) = (g.controls[2].1, g.controls[2].2);
+        let (_, esw) = (g.controls[2].1, g.controls[2].2);
+        assert_eq!(
+            click(&mut ui, &m, esw.cx(), esw.cy()),
+            vec![Action::SetEchoSkip(false)],
+            "on by default, so a click turns it off"
+        );
+        let (_, sw) = (g.controls[3].1, g.controls[3].2);
         assert_eq!(click(&mut ui, &m, sw.cx(), sw.cy()), vec![Action::SetAutoLevel(true)]);
         // The length slider: its ends are 2 s and 10 s, the middle 6 s, and a drag follows the pointer in whole steps.
         let tr = g.controls[1].2;
@@ -734,11 +761,11 @@ mod tests {
         ));
         assert_eq!(out, vec![Action::SetCrossfadeSecs(6), Action::SetCrossfadeSecs(9)]);
         // The target slider spans -23 to -10.
-        let tg = g.controls[3].2;
+        let tg = g.controls[4].2;
         assert_eq!(click(&mut ui, &m, tg.x, tg.cy()), vec![Action::SetTargetLufs(-23)]);
         assert_eq!(click(&mut ui, &m, tg.right(), tg.cy()), vec![Action::SetTargetLufs(-10)]);
         // The segmented control: left half track, right half album (nothing if it is already so).
-        let seg = g.controls[4].2;
+        let seg = g.controls[5].2;
         assert_eq!(
             click(&mut ui, &m, seg.x + seg.w * 0.75, seg.cy()),
             vec![Action::SetLevelMode(LevelMode::Album)]
@@ -758,7 +785,7 @@ mod tests {
         let g = ui.audio_panel_geom();
         click(&mut ui, &m, g.card.x + 10.0, g.card.y + g.card.h * 0.5);
         assert!(ui.audio_settings_open());
-        let done = g.controls[5].2;
+        let done = g.controls[6].2;
         click(&mut ui, &m, done.cx(), done.cy());
         assert!(!ui.audio_settings_open());
         ui.open_audio_settings();
@@ -779,13 +806,14 @@ mod tests {
         // Tab walks the controls in order and wraps; Shift+Tab goes back.
         let tab = Key::Other("Tab".into());
         let mut seen = vec![ui.audio_panel_focus().unwrap()];
-        for _ in 0..6 {
+        for _ in 0..7 {
             key(&mut ui, &m(a), tab.clone(), false);
             seen.push(ui.audio_panel_focus().unwrap());
         }
         assert_eq!(seen[0], AudioControl::Crossfade);
-        assert_eq!(seen[5], AudioControl::Done);
-        assert_eq!(seen[6], AudioControl::Crossfade);
+        assert_eq!(seen[2], AudioControl::EchoSkip);
+        assert_eq!(seen[6], AudioControl::Done);
+        assert_eq!(seen[7], AudioControl::Crossfade);
         key(&mut ui, &m(a), tab.clone(), true);
         assert_eq!(ui.audio_panel_focus(), Some(AudioControl::Done));
         key(&mut ui, &m(a), Key::Up, false);
@@ -808,6 +836,12 @@ mod tests {
         assert_eq!(key(&mut ui, &m(a), Key::End, false), vec![Action::SetCrossfadeSecs(10)]);
         a.crossfade_secs = 10;
         assert_eq!(key(&mut ui, &m(a), Key::Right, false), vec![]);
+        // Echo out on skip: a switch, on by default.
+        key(&mut ui, &m(a), Key::Down, false);
+        assert_eq!(ui.audio_panel_focus(), Some(AudioControl::EchoSkip));
+        assert_eq!(key(&mut ui, &m(a), Key::Space, false), vec![Action::SetEchoSkip(false)]);
+        assert_eq!(key(&mut ui, &m(a), Key::Right, false), vec![]);
+        assert_eq!(key(&mut ui, &m(a), Key::Left, false), vec![Action::SetEchoSkip(false)]);
         // The target slider and the mode.
         key(&mut ui, &m(a), Key::Down, false);
         assert_eq!(key(&mut ui, &m(a), Key::Space, false), vec![Action::SetAutoLevel(true)]);

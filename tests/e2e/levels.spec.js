@@ -41,7 +41,7 @@ test.describe("Audio settings", () => {
   test("a) the panel opens with U, the mouse and the keyboard change every setting, and a reload keeps them", async ({ page }) => {
     const errors = await boot(page);
     let a = await audio(page);
-    expect(a).toMatchObject({ crossfade: false, crossfade_secs: 5, auto_level: false, target_lufs: -14, level_mode: "track" });
+    expect(a).toMatchObject({ crossfade: false, crossfade_secs: 5, auto_level: false, target_lufs: -14, level_mode: "track", echo_skip: true });
     let p = await openPanel(page);
     // The keyboard belongs to the panel: N would be "next", Space flips the crossfade switch (the focus starts there).
     await press(page, "n");
@@ -51,6 +51,11 @@ test.describe("Audio settings", () => {
     await press(page, "Tab");
     await press(page, "ArrowRight");
     expect((await audio(page)).crossfade_secs).toBe(6);
+    // "Echo out on skip" sits under the length: on by default, Space turns it off.
+    await press(page, "ArrowDown");
+    expect((await snap(page)).audio_panel.focus).toBe("echo_skip");
+    await press(page, "Space");
+    expect((await audio(page)).echo_skip).toBe(false);
     await press(page, "ArrowDown");
     await press(page, "Space");
     expect((await audio(page)).auto_level).toBe(true);
@@ -85,6 +90,7 @@ test.describe("Audio settings", () => {
       auto_level: true,
       target_lufs: -23,
       level_mode: "album",
+      echo_skip: false,
     });
     expect(errors).toEqual([]);
   });
@@ -101,7 +107,7 @@ test.describe("Audio settings", () => {
     await page.mouse.move(...center(effects.rect));
     await frames(page, 2);
     s = await snap(page);
-    for (const l of ["Audio settings…", "Crossfade: off", "Auto-level: off", "Crossfade length", "Target level", "Level each track", "Level whole albums"]) {
+    for (const l of ["Audio settings…", "Crossfade: off", "Echo out on skip: on", "Auto-level: off", "Crossfade length", "Target level", "Level each track", "Level whole albums"]) {
       expect(row(l), l).toBeTruthy();
     }
     // Turn the crossfade on from the menu (the toast says so), then the length from its submenu.
@@ -161,6 +167,7 @@ test.describe("Audio settings", () => {
     const errors = await boot(page);
     await openPanel(page);
     await press(page, "Tab"); // length
+    await press(page, "ArrowDown"); // echo out on skip
     await press(page, "ArrowDown"); // auto-level
     await press(page, "Space");
     await closePanel(page);
@@ -171,17 +178,13 @@ test.describe("Audio settings", () => {
     expect(gain).toBeCloseTo(-2.5, 1);
     // Album mode takes the album tag (-14.8 LUFS): +0.8 dB.
     await openPanel(page);
-    await press(page, "Tab");
-    await press(page, "Tab");
-    await press(page, "Tab");
-    await press(page, "Tab");
+    for (let i = 0; i < 5; i++) await press(page, "Tab"); // length, echo, auto-level, target, mode
     await press(page, "ArrowRight"); // level whole albums
     await closePanel(page);
     expect(await settled(page, () => window.rvp.snapshot().audio.gain_db)).toBeCloseTo(0.8, 1);
     // Off: no gain.
     await openPanel(page);
-    await press(page, "Tab");
-    await press(page, "Tab");
+    for (let i = 0; i < 3; i++) await press(page, "Tab"); // length, echo, auto-level
     await press(page, "Space");
     await closePanel(page);
     await waitFor(page, () => window.rvp.snapshot().audio.gain_db === null);
@@ -198,6 +201,7 @@ test.describe("Audio settings", () => {
     expect(a.library_measured).toBe(1);
     await openPanel(page);
     await press(page, "Tab");
+    await press(page, "ArrowDown");
     await press(page, "ArrowDown");
     await press(page, "Space"); // auto-level on
     await closePanel(page);

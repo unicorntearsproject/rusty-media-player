@@ -695,7 +695,7 @@ impl App {
                 // A video starts on the Player face; a song stays where the user is.
                 self.lib.auto_mode = starts_video;
                 self.requeue();
-                self.play_item(host, pick);
+                self.play_item_thrown(host, pick);
                 if how == Enqueue::ShuffleNow {
                     self.ui.show_toast("Shuffling", now);
                 }

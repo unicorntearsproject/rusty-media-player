@@ -11,6 +11,7 @@
 //! first the falling and the second the rising half of an equal-power curve and sends the sum on as one stream.
 use alloc::vec::Vec;
 use rvp_core::dynamics::{GainStage, Limiter, equal_power};
+use rvp_core::echo::{DELAY_MS, DRY_FADE_MS, Throw};
 use rvp_core::{AudioBuffer, AudioParams, LoudnessMeter, Resampler, TimeStretcher, Timestamp};
 use rvp_host::AudioSink;
 
@@ -283,7 +284,16 @@ pub struct AudioOut {
     tap_buf: Vec<f32>,
     /// Output frame index of the first frame in `tap_buf`.
     tap_base: u64,
+    /// A copy of the most recent output (what the sink accepted), kept only while the "echo out on skip" setting is on for a song:
+    /// a skip echoes the last stretch of it. `capture_base` is the output frame index of its first frame.
+    capture: Option<Vec<f32>>,
+    capture_base: u64,
+    /// The tail of a skipped song, mixed into the first seconds of this item.
+    throw: Option<Throw>,
 }
+
+/// How much output is kept for the echo: the sink may hold a second or more that has not been heard yet, plus the stretch that is echoed.
+const CAPTURE_MS: u64 = 3_000;
 
 impl AudioOut {
     /// A pipeline for a sink that accepts `sink`.
@@ -308,7 +318,51 @@ impl AudioOut {
             tap: false,
             tap_buf: Vec::new(),
             tap_base: 0,
+            capture: None,
+            capture_base: 0,
+            throw: None,
         }
+    }
+
+    /// Keep a copy of the output so a skip can be echoed (on for songs when the setting is on), or stop keeping it.
+    pub fn set_capture(&mut self, on: bool) {
+        match (on, self.capture.is_some()) {
+            (true, false) => {
+                self.capture = Some(Vec::new());
+                self.capture_base = self.written;
+            }
+            (false, true) => self.capture = None,
+            _ => {}
+        }
+    }
+
+    /// The tail of the song that was skipped: this item rises over it and its echo is mixed in as the audio is made.
+    pub fn set_throw(&mut self, throw: Throw) {
+        self.throw = Some(throw);
+    }
+
+    /// True while a skipped song's tail is still being mixed in.
+    pub fn throwing(&self) -> bool {
+        self.throw.is_some()
+    }
+
+    /// The echo of what is being heard right now, to hand to the item that replaces this one. `None` when no copy is kept or there is
+    /// too little sound.
+    pub fn make_throw(&self, sink: &impl AudioSink) -> Option<Throw> {
+        let cap = self.capture.as_ref()?;
+        let ch = self.sink.channels as usize;
+        let rate = self.sink.sample_rate;
+        let heard = self.heard_frame(sink);
+        if heard <= self.capture_base as i64 {
+            return None;
+        }
+        let have = cap.len() / ch;
+        let rel = ((heard as u64 - self.capture_base) as usize).min(have);
+        let d = (rate as u64 * DELAY_MS as u64 / 1000) as usize;
+        let dry = (rate as u64 * DRY_FADE_MS as u64 / 1000) as usize;
+        let from = rel.saturating_sub(d);
+        let to = (rel + dry).min(have);
+        Throw::build(&cap[from * ch..rel * ch], &cap[rel * ch..to * ch], ch, rate)
     }
 
     /// Set the playback rate. Only call this right after [`AudioOut::reset`]: audio already queued keeps the
@@ -390,6 +444,11 @@ impl AudioOut {
         self.written = 0;
         self.tap_buf.clear();
         self.tap_base = 0;
+        if let Some(c) = &mut self.capture {
+            c.clear();
+        }
+        self.capture_base = 0;
+        self.throw = None;
         self.lane.discard_until = discard_until;
         if let Some(r) = &mut self.lane.resampler {
             r.reset();
@@ -525,6 +584,12 @@ impl AudioOut {
             None => self.pending.extend_from_slice(&frames),
         }
         let added = (self.pending.len() - before) / self.sink.channels as usize;
+        if let Some(t) = &mut self.throw {
+            t.apply(&mut self.pending[before..]);
+            if t.done() {
+                self.throw = None;
+            }
+        }
         if self.need_seg || self.segs.is_empty() {
             self.need_seg = false;
             self.segs.push(Seg { start_frame: self.pushed, origin: pts, item: self.cur_item });
@@ -713,6 +778,15 @@ impl AudioOut {
             }
             if self.tap {
                 self.tap_buf.extend_from_slice(&self.pending[self.pending_off..self.pending_off + n * ch]);
+            }
+            if let Some(c) = &mut self.capture {
+                c.extend_from_slice(&self.pending[self.pending_off..self.pending_off + n * ch]);
+                let keep = (self.sink.sample_rate as u64 * CAPTURE_MS / 1000) as usize * ch;
+                if c.len() > keep + (keep >> 1) {
+                    let drop = c.len() - keep;
+                    c.drain(..drop);
+                    self.capture_base += (drop / ch) as u64;
+                }
             }
             self.pending_off += n * ch;
             self.written += n as u64;
@@ -1249,5 +1323,77 @@ mod tests {
         assert!(!out.fading());
         // B's lane carried on, at its gain from the first frame of the fade.
         assert!((out.current_gain_db() - 12.0).abs() < 1e-3, "{}", out.current_gain_db());
+    }
+
+    // ---- echo out on skip -----------------------------------------------------------------------------------------------
+
+    fn played(a: &mut AudioOut, sink: &mut Sink, seconds: usize) {
+        for k in 0..seconds * 10 {
+            a.push(buf((k as i64) * 100_000, 4800, 48_000));
+            a.drain(sink);
+        }
+    }
+
+    #[test]
+    fn a_skip_makes_an_echo_of_what_was_heard_only_while_the_copy_is_kept() {
+        let params = AudioParams { sample_rate: 48_000, channels: 2 };
+        let mut sink = Sink { cap: 1 << 24, fixed_queued: Some(4800), ..Sink::default() };
+        let mut a = AudioOut::new(params);
+        a.reset(0);
+        played(&mut a, &mut sink, 2);
+        assert!(a.make_throw(&sink).is_none(), "no copy is kept until asked");
+        a.set_capture(true);
+        played(&mut a, &mut sink, 2);
+        let t = a.make_throw(&sink).expect("an echo");
+        assert_eq!(t.len_frames(), 96_000);
+        // Turning the copy off forgets it.
+        a.set_capture(false);
+        assert!(a.make_throw(&sink).is_none());
+        // Too little heard since the copy began: nothing worth echoing.
+        let mut b = AudioOut::new(params);
+        b.reset(0);
+        b.set_capture(true);
+        played(&mut b, &mut sink, 0);
+        assert!(b.make_throw(&sink).is_none());
+    }
+
+    #[test]
+    fn the_next_item_rises_over_the_echo_and_then_passes_untouched() {
+        let params = AudioParams { sample_rate: 48_000, channels: 2 };
+        let mut sink = Sink { cap: 1 << 24, fixed_queued: Some(4800), ..Sink::default() };
+        let mut a = AudioOut::new(params);
+        a.reset(0);
+        a.set_capture(true);
+        played(&mut a, &mut sink, 2);
+        let throw = a.make_throw(&sink).unwrap();
+        // The next song (a steady 0.5, like the old one): the echo is mixed in for two seconds, then it is exactly itself.
+        let mut next = AudioOut::new(params);
+        next.reset(0);
+        next.set_throw(throw);
+        assert!(next.throwing());
+        let mut out = Sink { cap: 1 << 24, ..Sink::default() };
+        played(&mut next, &mut out, 3);
+        // It carries on from the old song's level (the queued rest of it, fading), so the cut makes no step.
+        assert!((out.rec[0] - 0.5).abs() < 0.05, "no step at the cut: {}", out.rec[0]);
+        assert!(out.rec.iter().all(|v| v.abs() <= 1.0 && v.is_finite()));
+        let echo_part = &out.rec[2 * 48_000 * 2 / 10..2 * 48_000 * 2 / 5];
+        assert!(echo_part.iter().any(|v| (v - 0.5).abs() > 0.05), "the echo is audible under the song");
+        assert!(!next.throwing(), "done after the tail");
+        let late = &out.rec[(5 * 48_000 / 2) * 2..];
+        assert!(late.iter().all(|v| (v - 0.5).abs() < 1e-6), "after the echo the song is untouched");
+        // A skip during the echo: a second one is built from what is being heard, with no failure.
+        let mut again = AudioOut::new(params);
+        again.reset(0);
+        again.set_capture(true);
+        let throw2 = {
+            let mut during = AudioOut::new(params);
+            during.reset(0);
+            during.set_capture(true);
+            during.set_throw(Throw::build(&alloc::vec![0.3; 48_000 * 2], &[], 2, 48_000).unwrap());
+            let mut s2 = Sink { cap: 1 << 24, fixed_queued: Some(4800), ..Sink::default() };
+            played(&mut during, &mut s2, 1);
+            during.make_throw(&s2)
+        };
+        assert!(throw2.is_some());
     }
 }

@@ -12,6 +12,7 @@ pub mod clock;
 pub mod codec;
 pub mod color;
 pub mod dynamics;
+pub mod echo;
 pub mod error;
 pub mod hdr;
 pub mod loudness;

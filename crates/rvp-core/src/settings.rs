@@ -41,6 +41,9 @@ pub struct AudioSettings {
     pub target_lufs: i8,
     /// Track or album.
     pub level_mode: LevelMode,
+    /// "Echo out on skip": a song skipped in the middle is thrown into a decaying echo while the next one comes in
+    /// ([`crate::echo`]). On by default.
+    pub echo_skip: bool,
 }
 
 impl Default for AudioSettings {
@@ -51,6 +54,7 @@ impl Default for AudioSettings {
             auto_level: false,
             target_lufs: -14,
             level_mode: LevelMode::Track,
+            echo_skip: true,
         }
     }
 }
@@ -66,7 +70,7 @@ impl AudioSettings {
     /// The text to save.
     pub fn to_text(&self) -> String {
         alloc::format!(
-            "rvp-audio-settings 1\ncrossfade={}\ncrossfade_secs={}\nauto_level={}\ntarget_lufs={}\nlevel_mode={}\n",
+            "rvp-audio-settings 1\ncrossfade={}\ncrossfade_secs={}\nauto_level={}\ntarget_lufs={}\nlevel_mode={}\necho_skip={}\n",
             self.crossfade as u8,
             self.crossfade_secs,
             self.auto_level as u8,
@@ -74,7 +78,8 @@ impl AudioSettings {
             match self.level_mode {
                 LevelMode::Track => "track",
                 LevelMode::Album => "album",
-            }
+            },
+            self.echo_skip as u8
         )
     }
 
@@ -97,6 +102,7 @@ impl AudioSettings {
             match k {
                 "crossfade" => s.crossfade = flag().unwrap_or(s.crossfade),
                 "auto_level" => s.auto_level = flag().unwrap_or(s.auto_level),
+                "echo_skip" => s.echo_skip = flag().unwrap_or(s.echo_skip),
                 "crossfade_secs" => s.crossfade_secs = v.parse().unwrap_or(s.crossfade_secs),
                 "target_lufs" => s.target_lufs = v.parse().unwrap_or(s.target_lufs),
                 "level_mode" => {
@@ -125,8 +131,12 @@ mod tests {
             auto_level: true,
             target_lufs: -18,
             level_mode: LevelMode::Album,
+            echo_skip: false,
         };
         assert_eq!(AudioSettings::from_text(&s.to_text()), Some(s));
+        // Settings saved before the echo existed load with it on.
+        let old = "rvp-audio-settings 1\ncrossfade=1\ncrossfade_secs=5\n";
+        assert!(AudioSettings::from_text(old).unwrap().echo_skip);
         let d = AudioSettings::default();
         assert_eq!(AudioSettings::from_text(&d.to_text()), Some(d));
     }

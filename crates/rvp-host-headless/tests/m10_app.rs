@@ -637,3 +637,95 @@ fn the_players_music_button_goes_to_the_music_library_and_the_music_keeps_playin
     r.act(Action::ShowMusic);
     assert_eq!(r.app.ui().lib_state().view(), View::Tracks);
 }
+
+// ---- echo out on skip -------------------------------------------------------------------------------------------------------------
+
+/// What the sink was given after the moment of `how` (the new item's audio), with the setting `echo`.
+fn after_trigger(echo: bool, how: &str) -> Vec<f32> {
+    let mut r = Rig::scanned();
+    r.act(Action::SetMode(Mode::Library));
+    r.act(Action::SetEchoSkip(echo));
+    r.key(Key::Char('3'));
+    r.run(50);
+    r.key(Key::Down);
+    r.key(Key::Down);
+    r.key(Key::Enter);
+    r.run(if how == "prev" {
+        1_500
+    } else if how == "natural" {
+        100
+    } else {
+        4_000
+    });
+    assert_eq!(r.app.model().state, MediaState::Playing, "{how}");
+    r.host.audio.capture = Some(Vec::new());
+    match how {
+        "next" => r.act(Action::Next),
+        "play_item" => {
+            let id = r.app.playlist().items()[5].id;
+            r.act(Action::PlayItem(id));
+        }
+        "prev" => r.act(Action::Prev),
+        "paused_next" => {
+            r.act(Action::PlayPause);
+            r.run(300);
+            r.host.audio.capture = Some(Vec::new());
+            r.act(Action::Next);
+        }
+        "seek" => r.act(Action::SeekBy(10_000)),
+        "natural" => {
+            // Let the song play to its end: the next one follows by itself.
+            let first = r.app.playlist().current().map(|i| i.id);
+            for _ in 0..600 {
+                r.run(1_000);
+                if r.app.playlist().current().map(|i| i.id) != first {
+                    break;
+                }
+            }
+            assert_ne!(r.app.playlist().current().map(|i| i.id), first, "the song ended by itself");
+            r.host.audio.capture = Some(Vec::new());
+        }
+        other => panic!("{other}"),
+    }
+    r.run(3_000);
+    r.host.audio.capture.take().unwrap()
+}
+
+#[test]
+fn skipping_a_song_echoes_it_out_but_other_changes_do_not() {
+    if skip() {
+        return;
+    }
+    let first_two_seconds = |v: &[f32]| v[..(2 * 48_000 * 2).min(v.len())].to_vec();
+    for how in ["next", "play_item"] {
+        let (on, off) = (after_trigger(true, how), after_trigger(false, how));
+        assert!(
+            on.len() > 2 * 48_000 * 2 && off.len() > 2 * 48_000 * 2,
+            "{how}: {} / {}",
+            on.len(),
+            off.len()
+        );
+        assert_ne!(
+            first_two_seconds(&on),
+            first_two_seconds(&off),
+            "{how}: the skip is echoed with the setting on"
+        );
+        assert!(on.iter().all(|v| v.is_finite() && v.abs() <= 1.0), "{how}: nothing clips");
+        // After the tail (2 s) the new song is exactly what it would have been.
+        let from = 3 * 48_000 * 2;
+        if on.len() > from && off.len() > from {
+            let n = (on.len() - from).min(off.len() - from).min(48_000 * 2);
+            assert_eq!(
+                on[from..from + n],
+                off[from..from + n],
+                "{how}: the song is untouched after the echo"
+            );
+        }
+    }
+    // A seek, Back and a skip while paused are not echoed: the output is the same with the setting on and off.
+    for how in ["prev", "seek", "paused_next", "natural"] {
+        let (on, off) = (after_trigger(true, how), after_trigger(false, how));
+        assert_eq!(on.len(), off.len(), "{how}");
+        assert!(on == off, "{how}: no echo");
+    }
+}

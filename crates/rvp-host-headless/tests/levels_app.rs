@@ -139,6 +139,7 @@ fn the_settings_are_kept_in_storage_and_read_back() {
         auto_level: true,
         target_lufs: -10,
         level_mode: LevelMode::Album,
+        echo_skip: true,
     };
     assert_eq!(r.app.audio_settings(), want);
     let saved = r.host.storage.0.get("settings/audio").expect("saved under settings/audio");
@@ -191,6 +192,9 @@ fn the_panel_is_reachable_from_the_keyboard_and_the_mouse_on_both_faces() {
     r.key(Key::Other("Tab".into()));
     r.key(Key::Right);
     assert_eq!(r.app.audio_settings().crossfade_secs, 6);
+    r.key(Key::Down); // echo out on skip (on by default)
+    r.key(Key::Space);
+    assert!(!r.app.audio_settings().echo_skip);
     r.key(Key::Down); // auto-level
     r.key(Key::Space);
     assert!(r.app.audio_settings().auto_level);

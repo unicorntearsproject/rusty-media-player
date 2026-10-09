@@ -736,6 +736,10 @@ impl Ui {
             A::CrossfadeLength => {
                 ("How long the fade lasts, 2 to 10 seconds. Left and Right change it.", "Left / Right")
             }
+            A::EchoSkip => (
+                "When you skip a song, its last moments echo out and fade while the next song comes in. Songs only, never a natural end.",
+                "Space",
+            ),
             A::AutoLevel => ("Even out the loudness between songs, aiming at the level below.", "Space"),
             A::Target => (
                 "The loudness the automatic level aims at, in LUFS. Left and Right change it.",

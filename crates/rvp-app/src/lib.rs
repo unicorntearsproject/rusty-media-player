@@ -132,6 +132,8 @@ pub struct App {
     links: bool,
     /// The host can replace library files (set every tick): the tag editor is offered.
     can_edit_tags: bool,
+    /// The echo of the song just skipped, handed to the next session `start` makes.
+    skip_throw: Option<rvp_core::echo::Throw>,
     can_quit: bool,
     force_draw: bool,
     last_drawn: Option<UiModel>,
@@ -227,6 +229,7 @@ impl App {
             base_dirty: true,
             links: false,
             can_edit_tags: false,
+            skip_throw: None,
             can_quit: false,
             force_draw: true,
             last_drawn: None,
@@ -501,6 +504,22 @@ impl App {
         }
     }
 
+    /// Play item `id` because the listener skipped to it (Next, or choosing another track): a song that is playing is thrown into an echo
+    /// that fades out under the new one ("Echo out on skip"). Not for a natural end, Back, a seek, a pause or a video.
+    pub(crate) fn play_item_thrown<H>(&mut self, host: &mut H, id: u32)
+    where
+        H: Host<Video = FrameSink>,
+        H::Source: 'static,
+    {
+        self.skip_throw = if self.settings.echo_skip {
+            self.session.as_ref().and_then(|s| s.make_throw(host))
+        } else {
+            None
+        };
+        self.play_item(host, id);
+        self.skip_throw = None;
+    }
+
     /// Replace the session with one playing `source` (playlist item `id`).
     fn start<H>(&mut self, host: &mut H, source: H::Source, id: u32, resume: bool)
     where
@@ -527,6 +546,9 @@ impl App {
         s.set_volume(self.volume);
         s.set_muted(self.muted);
         s.set_rate(self.rate, now);
+        if let Some(t) = self.skip_throw.take() {
+            s.set_throw(t);
+        }
         s.play();
         self.session = Some(s);
         host.video().clear();
@@ -1015,7 +1037,7 @@ impl App {
             Action::SetSpeed(r) => self.set_speed(r as f64, now),
             Action::ResetSpeed => self.set_speed(1.0, now),
             Action::Next => match self.playlist.next() {
-                Some(id) => self.play_item(host, id),
+                Some(id) => self.play_item_thrown(host, id),
                 None => self.ui.show_toast("That's the end of the playlist.", now),
             },
             Action::Prev => {
@@ -1047,7 +1069,7 @@ impl App {
                 self.requeue();
                 self.ui.show_toast(if on { "Shuffle on" } else { "Shuffle off" }, now);
             }
-            Action::PlayItem(id) => self.play_item(host, id),
+            Action::PlayItem(id) => self.play_item_thrown(host, id),
             Action::RemoveItem(id) => {
                 let was_current = self.playlist.remove(id);
                 self.requeue();
@@ -1213,6 +1235,9 @@ impl App {
             Action::DialogClose => self.dialog_close(host, now),
             Action::DialogBack => self.dialog_back(now),
             Action::AudioBack => self.audio_back(now),
+            Action::SetEchoSkip(on) => {
+                self.update_settings(host, |s| s.echo_skip = on);
+            }
             Action::SetCrossfade(on) => {
                 self.update_settings(host, |s| s.crossfade = on);
                 let secs = self.settings.crossfade_secs;
