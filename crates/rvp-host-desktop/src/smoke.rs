@@ -136,11 +136,12 @@ impl Smoke {
         if m.state == MediaState::Playing {
             self.saw_playing = true;
             if m.position_us >= 1_000_000 {
-                if let Some((t0, p0)) = self.prev {
-                    if p0 >= 1_000_000 && m.position_us >= p0 {
-                        self.play_wall += t - t0;
-                        self.play_media += m.position_us - p0;
-                    }
+                if let Some((t0, p0)) = self.prev
+                    && p0 >= 1_000_000
+                    && m.position_us >= p0
+                {
+                    self.play_wall += t - t0;
+                    self.play_media += m.position_us - p0;
                 }
                 self.prev = Some((t, m.position_us));
             } else {
@@ -156,7 +157,7 @@ impl Smoke {
         if host.video.width > 0 {
             self.video_size = (host.video.width, host.video.height);
         }
-        let frames = host.video.count as u64;
+        let frames = host.video.count;
         if !self.shot_done {
             let due = match self.screenshot_at_frames {
                 Some(n) => frames >= n,
