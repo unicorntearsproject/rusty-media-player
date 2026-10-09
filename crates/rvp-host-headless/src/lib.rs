@@ -104,9 +104,42 @@ pub struct NullAudio {
     capacity_frames: u64,
     /// When set, every accepted sample is appended here (interleaved `f32`).
     pub capture: Option<Vec<f32>>,
+    /// A failing output (see [`NullAudio::inject_failure`]): nothing drains, the queue and the position stand still.
+    fail: Option<FailingOutput>,
+    recovered: Option<String>,
+    /// The (virtual) times the sink tried to get its output back, for tests of the backoff.
+    pub retries: Vec<Timestamp>,
+}
+
+/// What a failing fake output remembers.
+#[derive(Debug)]
+struct FailingOutput {
+    issue: rvp_host::AudioIssue,
+    /// The virtual time from which a retry succeeds (`None`: never).
+    recover_at: Option<Timestamp>,
+    attempt: u32,
+    next_try: Timestamp,
 }
 
 impl NullAudio {
+    /// True while no failure is injected (or it has recovered).
+    pub fn issue_is_none(&self) -> bool {
+        self.fail.is_none()
+    }
+
+    /// Make the output fail as a busy, unplugged or broken device does: what is queued stops draining (so the audio clock and the position
+    /// stand still), and the sink retries with the real backoff; the first retry at or after `recover_at` (virtual microseconds) works.
+    pub fn inject_failure(&mut self, issue: rvp_host::AudioIssue, recover_at: Option<Timestamp>) {
+        self.drain();
+        let now = self.clock.now_us();
+        self.fail = Some(FailingOutput {
+            issue,
+            recover_at,
+            attempt: 0,
+            next_try: now + rvp_host::retry_delay_us(0),
+        });
+    }
+
     fn new(clock: Rc<VirtualClock>) -> Self {
         Self {
             clock,
@@ -119,6 +152,9 @@ impl NullAudio {
             volume: 1.0,
             capacity_frames: 0,
             capture: None,
+            fail: None,
+            recovered: None,
+            retries: Vec::new(),
         }
     }
 
@@ -134,7 +170,7 @@ impl NullAudio {
 
     fn drain(&mut self) {
         let now = self.clock.now_us();
-        if let (false, Some(p)) = (self.paused, self.params) {
+        if let (false, Some(p), None) = (self.paused, self.params, &self.fail) {
             let played = ((now - self.last_update) as u128 * p.sample_rate as u128 / 1_000_000) as u64;
             self.queued = self.queued.saturating_sub(played);
         }
@@ -156,7 +192,7 @@ impl AudioSink for NullAudio {
 
     fn queued_frames(&self) -> usize {
         // Exact value as of "now" without needing `&mut`: recompute the drain.
-        match (self.paused, self.params) {
+        match (self.paused || self.fail.is_some(), self.params) {
             (false, Some(p)) => {
                 let played = ((self.clock.now_us() - self.last_update) as u128 * p.sample_rate as u128
                     / 1_000_000) as u64;
@@ -192,6 +228,35 @@ impl AudioSink for NullAudio {
     fn set_paused(&mut self, paused: bool) {
         self.drain();
         self.paused = paused;
+        // Pressing play asks for the output again at once.
+        if let (false, Some(f)) = (paused, &mut self.fail) {
+            f.next_try = self.clock.now_us();
+        }
+    }
+
+    fn issue(&self) -> Option<rvp_host::AudioIssue> {
+        self.fail.as_ref().map(|f| f.issue.clone())
+    }
+
+    fn maintain(&mut self) {
+        let now = self.clock.now_us();
+        let Some(f) = &mut self.fail else { return };
+        if now < f.next_try {
+            return;
+        }
+        self.retries.push(now);
+        if f.recover_at.is_some_and(|r| now >= r) {
+            self.recovered = Some(f.issue.device.clone());
+            self.fail = None;
+            self.last_update = now;
+        } else {
+            f.attempt += 1;
+            f.next_try = now + rvp_host::retry_delay_us(f.attempt);
+        }
+    }
+
+    fn take_recovered(&mut self) -> Option<String> {
+        self.recovered.take()
     }
 
     fn set_volume(&mut self, volume: f32) {

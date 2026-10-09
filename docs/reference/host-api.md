@@ -250,6 +250,25 @@ One bounded GET (2 MiB) of a text document, polled. Only the theme dialog uses i
 update client (HTTPS only); a page answers with `fetch` (a cross-origin link the server does not allow fails, and the dialog tells the person to paste the CSS instead);
 Rusty Bucket keeps the default and the dialog says to paste.
 
+## The audio output failing (`AudioSink::issue`, `maintain`, `take_recovered`)
+
+```rust
+fn issue(&self) -> Option<AudioIssue>   // why the sound has stopped; None while all is well
+fn maintain(&mut self)                  // every tick: retry a failed output, quietly
+fn take_recovered(&mut self) -> Option<String>  // the device the sound came back on, once
+```
+
+An output can be busy (another program holds the device exclusively: `EBUSY`, `AUDCLNT_E_DEVICE_IN_USE`), gone (unplugged, or the sound server restarted or went away) or broken some other
+way. `rvp_host::classify` tells them apart from the system's text and errno; `AudioIssue::message` names the device where the host knows it ("Another app is using DDJ-REV1 exclusively. Close it or
+choose another output. Rusty Wave will resume when it's free." / "DDJ-REV1 was unplugged or the sound server restarted. Rusty Wave will resume when it's back." / the reason for anything else). The
+application shows the note, puts it up again every few seconds while the output stays away, and says "Audio back on <device>" when it returns.
+
+The host keeps what is queued and the position: the desktop sink stops draining its ring on failure (the audio clock, and so the position, stand still), then tries to open the **system default**
+output again in the same format, after 1 s, 1.5 s, 2 s, 3 s, 4 s and then every 5 s (`retry_delay_us`), and starts draining again when it works; pressing Play retries at once. It never switches to
+another device by itself. Playback resumes if it was playing and stays paused if the listener paused meanwhile. A machine with no output device at all still plays silently, as before. The web sink reports an
+`interrupted` or `closed` audio context and asks for it back with the same backoff; the Bucket adapter maps `BUSY`/`NO_DEVICE` and reopens the stream (its silent stand-in keeps the position moving meanwhile).
+`NullAudio::inject_failure` fakes all this in virtual time for tests.
+
 ## Quitting (`Host::can_quit`, `Effect::Quit`, rc10)
 
 ```rust
@@ -332,6 +351,7 @@ are what the Rusty Bucket and desktop hosts' smoke output reports where they rep
 - 2026-10-05: the Rusty Bucket mapping and its open questions (M12). No trait changed.
 - 2026-10-06: optional `AppServices` capability (update checks, app-menu entry); `settings/app` key.
 - 2026-10-06: M12 against the Bucket Simulator: answers to the open questions recorded; the pause fix (`Session` pauses the audio sink with the clock) is verified there.
+- 2026-10-09: `AudioSink::issue`, `maintain`, `take_recovered` (default methods) and `rvp_host::AudioIssue`: busy, gone and other output failures are told apart, named, retried with a backoff and reported when the sound is back.
 - 2026-10-08 (rc10): `Host::can_quit` and `Effect::Quit` (Ctrl+Q); `AppModel.quit`; the Help page (`H`, `?`) is the UI's own and needs nothing from a host; favorites moved from `H` to `Ctrl+F`; the snapshot has `help` and `app.quit`.
 - 2026-10-06 (Phase A2): `Host::opens_links`, `Effect::OpenUrl`, `Effect::PickCover`, the optional `FileWriter` capability and `Host::file_writer`; the `library/favorites` key; app settings load without `AppServices`.
 - 2026-10-06: the stable `window.rvp.snapshot()` subset (`version`, `ready`, `state`, `position_us`, `duration_us`, `item`, `error`) is documented; `version` and `item` are new snapshot fields.

@@ -115,6 +115,26 @@ export class RvpAudio {
 
   // ---- the interface the Rust sink calls ----
 
+  /** Why the sound is not coming out, when the browser has taken the output away ("interrupted": a call, another tab, a device change;
+   *  "closed"). "suspended" before the first click is the autoplay rule, not a failure. */
+  issue() {
+    const s = this.ctx ? this.ctx.state : "none";
+    return s === "interrupted" || s === "closed" ? s : "";
+  }
+
+  /** Called every tick: while the output is interrupted, ask for it back with a growing pause (1 s, then easing to 5 s), never in a spin. */
+  maintain() {
+    if (this.issue() !== "interrupted") {
+      this._tries = 0;
+      return;
+    }
+    const now = performance.now();
+    if (now < (this._nextTry || 0)) return;
+    this._tries = (this._tries || 0) + 1;
+    this._nextTry = now + [1000, 1500, 2000, 3000, 4000, 5000][Math.min(this._tries - 1, 5)];
+    this.ctx.resume().catch(() => {});
+  }
+
   sampleRate() {
     return this.ctx ? this.ctx.sampleRate : 0;
   }

@@ -6,10 +6,10 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
 use rvp_core::{AudioParams, Timestamp};
-use rvp_host::{AudioSink, HostError};
+use rvp_host::{AudioIssue, AudioSink, HostError, retry_delay_us};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// A second of audio at most is held between the player and the device.
 const RING_SECONDS: usize = 1;
@@ -67,8 +67,10 @@ struct Shared {
     latency_us: AtomicI64,
     /// Frames the device has taken (played), for the report.
     played_frames: AtomicU64,
-    /// The stream reported an error (device unplugged).
+    /// The stream reported an error (device unplugged, taken by another program, the sound server gone).
     failed: AtomicBool,
+    /// What the system said when it did.
+    fail_reason: Mutex<String>,
 }
 
 /// Where the sound goes.
@@ -79,6 +81,10 @@ enum Output {
     Device { _stream: Stream, name: String },
     /// No device: the ring is drained in wall-clock time so playback still runs (video, seeking, the clock).
     Silent { last: Instant },
+    /// The device failed (or could not be opened because another program holds it, or it is gone): nothing drains the ring, so the audio clock and
+    /// the position stand still and the queued audio waits. Retried with a growing pause until it works; the same format is used so the
+    /// queued audio fits.
+    Failed { device: String, issue: AudioIssue, attempt: u32, next_try: Instant },
 }
 
 /// The audio sink of the desktop host.
@@ -91,10 +97,32 @@ pub struct DesktopAudio {
     force_silent: bool,
     written: u64,
     silent_carry: f64,
+    /// The device the sound came back on, until the application has said so.
+    recovered: Option<String>,
+    /// The name of the device last tried, for the messages.
+    last_device: String,
 }
 
 /// The ring's lock, whatever happened to the thread that held it last: the ring is plain numbers, so what a panic left is still usable, and
 /// neither the device's callback nor the player's thread may panic because of another thread's failure.
+/// An audio error as the words [`rvp_host::classify`] understands (the platform's own wording where it has one), so busy, gone and the
+/// rest are told apart the same way on every backend.
+fn describe(e: &cpal::Error) -> String {
+    match e.kind() {
+        cpal::ErrorKind::DeviceBusy => "Device or resource busy".to_string(),
+        cpal::ErrorKind::DeviceNotAvailable => "DeviceNotAvailable".to_string(),
+        cpal::ErrorKind::HostUnavailable => "the sound server is not available".to_string(),
+        cpal::ErrorKind::StreamInvalidated => {
+            "the stream is no longer valid (device invalidated)".to_string()
+        }
+        _ => e.to_string(),
+    }
+}
+
+fn lock_text(m: &Mutex<String>) -> std::sync::MutexGuard<'_, String> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn lock_ring(m: &Mutex<Ring>) -> std::sync::MutexGuard<'_, Ring> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -110,6 +138,7 @@ impl DesktopAudio {
                 latency_us: AtomicI64::new(40_000),
                 played_frames: AtomicU64::new(0),
                 failed: AtomicBool::new(false),
+                fail_reason: Mutex::new(String::new()),
             }),
             out: Output::Closed,
             params: None,
@@ -117,6 +146,8 @@ impl DesktopAudio {
             force_silent: silent,
             written: 0,
             silent_carry: 0.0,
+            recovered: None,
+            last_device: String::new(),
         }
     }
 
@@ -125,6 +156,7 @@ impl DesktopAudio {
         match &self.out {
             Output::Device { name, .. } => format!("cpal:{name}"),
             Output::Silent { .. } => "none".into(),
+            Output::Failed { device, .. } => format!("failed:{device}"),
             Output::Closed => "closed".into(),
         }
     }
@@ -141,18 +173,19 @@ impl DesktopAudio {
 
     /// True if the device reported an error since it was opened.
     pub fn failed(&self) -> bool {
-        self.shared.failed.load(Ordering::Relaxed)
+        self.shared.failed.load(Ordering::Relaxed) || matches!(self.out, Output::Failed { .. })
     }
 
     fn ring_sized(&self, frames: usize, channels: usize) {
         *lock_ring(&self.shared.ring) = Ring::new(frames * channels * RING_SECONDS);
     }
 
-    fn try_device(&mut self, want: AudioParams) -> Result<AudioParams, String> {
+    fn try_device(&mut self, want: AudioParams, keep_ring: bool) -> Result<AudioParams, String> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or("no audio output device")?;
         let name = device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "default".into());
-        let default = device.default_output_config().map_err(|e| e.to_string())?;
+        self.last_device = name.clone();
+        let default = device.default_output_config().map_err(|e| describe(&e))?;
         // Prefer exactly what the player has (its rate and channel count), else the device's default.
         let mut chosen: Option<(u32, u16)> = None;
         if let Ok(configs) = device.supported_output_configs() {
@@ -172,7 +205,9 @@ impl DesktopAudio {
         let format = default.sample_format();
         let player_channels = want.channels.min(channels).max(1);
         self.device_channels = channels;
-        self.ring_sized(rate as usize, player_channels as usize);
+        if !keep_ring {
+            self.ring_sized(rate as usize, player_channels as usize);
+        }
         let stream = match format {
             SampleFormat::F32 => self.build::<f32>(&device, config, player_channels),
             SampleFormat::I16 => self.build::<i16>(&device, config, player_channels),
@@ -183,7 +218,7 @@ impl DesktopAudio {
             SampleFormat::F64 => self.build::<f64>(&device, config, player_channels),
             other => Err(format!("unsupported sample format {other}")),
         }?;
-        stream.play().map_err(|e| e.to_string())?;
+        stream.play().map_err(|e| describe(&e))?;
         self.out = Output::Device { _stream: stream, name };
         Ok(AudioParams { sample_rate: rate, channels: player_channels })
     }
@@ -231,12 +266,22 @@ impl DesktopAudio {
                     shared.played_frames.fetch_add(got as u64, Ordering::Relaxed);
                     let _ = rate;
                 },
-                move |_err| {
+                move |err: cpal::Error| {
+                    // A reroute to the new default device, an underrun and a refused real-time priority leave the stream running.
+                    if matches!(
+                        err.kind(),
+                        cpal::ErrorKind::DeviceChanged
+                            | cpal::ErrorKind::Xrun
+                            | cpal::ErrorKind::RealtimeDenied
+                    ) {
+                        return;
+                    }
+                    *lock_text(&err_shared.fail_reason) = describe(&err);
                     err_shared.failed.store(true, Ordering::Relaxed);
                 },
                 None,
             )
-            .map_err(|e| e.to_string())
+            .map_err(|e| describe(&e))
     }
 
     /// Drain the silent clock's ring according to the wall clock.
@@ -263,15 +308,32 @@ impl AudioSink for DesktopAudio {
     fn open(&mut self, want: AudioParams) -> Result<AudioParams, HostError> {
         self.out = Output::Closed;
         self.written = 0;
-        let got = if self.force_silent { Err("audio is off".to_string()) } else { self.try_device(want) };
+        self.recovered = None;
+        let got =
+            if self.force_silent { Err("audio is off".to_string()) } else { self.try_device(want, false) };
         let params = match got {
             Ok(p) => p,
             Err(e) => {
-                if !self.force_silent {
-                    eprintln!("rusty-wave: no sound ({e}); playing silently");
-                }
                 self.ring_sized(want.sample_rate as usize, want.channels as usize);
-                self.out = Output::Silent { last: Instant::now() };
+                // A machine without any output device plays silently, as it always did. A device that exists but cannot be used right now (taken by
+                // another program, gone with its sound server) is waited for: the position stays, and the sound comes back by itself.
+                let no_device = self.force_silent || e.contains("no audio output device");
+                if no_device {
+                    if !self.force_silent {
+                        eprintln!("rusty-wave: no sound ({e}); playing silently");
+                    }
+                    self.out = Output::Silent { last: Instant::now() };
+                } else {
+                    eprintln!("rusty-wave: the audio output is not available ({e}); waiting for it");
+                    let device = self.last_device.clone();
+                    let issue = AudioIssue::from_error(&device, &e, None);
+                    self.out = Output::Failed {
+                        device,
+                        issue,
+                        attempt: 0,
+                        next_try: Instant::now() + Duration::from_micros(retry_delay_us(0) as u64),
+                    };
+                }
                 want
             }
         };
@@ -320,10 +382,78 @@ impl AudioSink for DesktopAudio {
 
     fn set_paused(&mut self, paused: bool) {
         self.drain_silent();
+        // Pressing play asks for the output again at once.
+        if let (false, Output::Failed { next_try, .. }) = (paused, &mut self.out) {
+            *next_try = Instant::now();
+        }
         self.shared.paused.store(paused, Ordering::Relaxed);
         if let Output::Silent { last } = &mut self.out {
             *last = Instant::now();
         }
+    }
+
+    fn issue(&self) -> Option<AudioIssue> {
+        match &self.out {
+            Output::Failed { issue, .. } => Some(issue.clone()),
+            _ => None,
+        }
+    }
+
+    fn maintain(&mut self) {
+        // A stream that failed while playing: keep what is queued, drop the stream, and wait for the device.
+        if self.shared.failed.load(Ordering::Relaxed) {
+            if let Output::Device { name, .. } = &self.out {
+                let name = name.clone();
+                let reason = lock_text(&self.shared.fail_reason).clone();
+                let issue = AudioIssue::from_error(&name, &reason, None);
+                eprintln!("rusty-wave: the audio stream failed ({reason}); waiting for {name}");
+                self.out = Output::Failed {
+                    device: name,
+                    issue,
+                    attempt: 0,
+                    next_try: Instant::now() + Duration::from_micros(retry_delay_us(0) as u64),
+                };
+            }
+            self.shared.failed.store(false, Ordering::Relaxed);
+        }
+        let Output::Failed { attempt, next_try, device, .. } = &self.out else { return };
+        if Instant::now() < *next_try {
+            return;
+        }
+        let (attempt, device) = (*attempt, device.clone());
+        let Some(want) = self.params else { return };
+        // Follow whatever the system default is now; never another device chosen here.
+        self.out = Output::Closed;
+        match self.try_device(want, true) {
+            Ok(p) if p == want => {
+                self.shared.failed.store(false, Ordering::Relaxed);
+                self.recovered = Some(self.last_device.clone());
+            }
+            other => {
+                let (reason, got) = match other {
+                    Err(e) => (e, None),
+                    Ok(p) => (
+                        format!("the output now uses {} Hz, {} channels", p.sample_rate, p.channels),
+                        Some(p),
+                    ),
+                };
+                if got.is_some() {
+                    self.out = Output::Closed; // a stream of another format cannot take the queued audio
+                }
+                let name = if self.last_device.is_empty() { device } else { self.last_device.clone() };
+                let issue = AudioIssue::from_error(&name, &reason, None);
+                self.out = Output::Failed {
+                    device: name,
+                    issue,
+                    attempt: attempt + 1,
+                    next_try: Instant::now() + Duration::from_micros(retry_delay_us(attempt + 1) as u64),
+                };
+            }
+        }
+    }
+
+    fn take_recovered(&mut self) -> Option<String> {
+        self.recovered.take()
     }
 
     fn set_volume(&mut self, volume: f32) {

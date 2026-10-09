@@ -140,7 +140,7 @@ impl RbPlayer {
         self.host.viz.flush();
         if let Some(e) = self.host.audio.take_failure() {
             api::warn(&format!("the audio stream failed: {}", api::code_name(e)));
-            self.toast("The audio device went away. Press play to start it again.");
+            // (The application says what is wrong and when the sound is back: `AudioSink::issue`.)
         }
         self.update_cursor();
         self.update_power();

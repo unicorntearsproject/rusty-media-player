@@ -8,7 +8,7 @@
 use crate::api;
 use bucket_v0_sys::{self as sys, err};
 use rvp_core::{AudioParams, Timestamp};
-use rvp_host::{AudioSink, HostError};
+use rvp_host::{AudioIssue, AudioIssueKind, AudioSink, HostError, retry_delay_us};
 use std::cell::Cell;
 
 /// A device-less ring drained by the clock.
@@ -32,6 +32,12 @@ pub struct RbAudio {
     native: Option<(u32, u32)>,
     /// A failure the driver has not yet shown to the user.
     failure: Option<i32>,
+    /// The failure being shown and retried: the stand-in plays on silently meanwhile, and `maintain` opens the device again with a growing
+    /// pause until it works.
+    issue: Option<AudioIssue>,
+    attempt: u32,
+    next_try_us: i64,
+    recovered: bool,
 }
 
 impl RbAudio {
@@ -47,6 +53,10 @@ impl RbAudio {
             volume: 1.0,
             native: None,
             failure: None,
+            issue: None,
+            attempt: 0,
+            next_try_us: 0,
+            recovered: false,
         }
     }
 
@@ -81,6 +91,15 @@ impl RbAudio {
             self.go_silent(self.written.get() as f64);
         }
         self.failure = Some(error);
+        let kind = match error {
+            sys::err::BUSY => AudioIssueKind::Busy,
+            sys::err::NO_DEVICE | sys::err::CLOSED => AudioIssueKind::Gone,
+            _ => AudioIssueKind::Other,
+        };
+        self.issue =
+            Some(AudioIssue { kind, device: String::new(), reason: api::code_name(error).to_string() });
+        self.attempt = 0;
+        self.next_try_us = api::now_us() + retry_delay_us(0);
     }
 
     /// The error of a failure not yet reported (once).
@@ -184,6 +203,29 @@ impl AudioSink for RbAudio {
         self.capacity.set(want.sample_rate);
         self.go_silent(0.0);
         Ok(want)
+    }
+
+    fn issue(&self) -> Option<AudioIssue> {
+        self.issue.clone()
+    }
+
+    fn maintain(&mut self) {
+        if self.issue.is_none() || api::now_us() < self.next_try_us {
+            return;
+        }
+        let Some(want) = self.params else { return };
+        let _ = self.open(want);
+        if self.stream.is_some() {
+            self.issue = None;
+            self.recovered = true;
+        } else {
+            self.attempt += 1;
+            self.next_try_us = api::now_us() + retry_delay_us(self.attempt);
+        }
+    }
+
+    fn take_recovered(&mut self) -> Option<String> {
+        std::mem::take(&mut self.recovered).then(String::new)
     }
 
     fn queued_frames(&self) -> usize {

@@ -132,6 +132,9 @@ pub struct App {
     links: bool,
     /// The host can replace library files (set every tick): the tag editor is offered.
     can_edit_tags: bool,
+    /// The failure of the audio output that is being shown, and when its note was last put up.
+    audio_issue: Option<rvp_host::AudioIssue>,
+    audio_issue_at: Timestamp,
     /// The echo of the song just skipped, handed to the next session `start` makes.
     skip_throw: Option<rvp_core::echo::Throw>,
     can_quit: bool,
@@ -229,6 +232,8 @@ impl App {
             base_dirty: true,
             links: false,
             can_edit_tags: false,
+            audio_issue: None,
+            audio_issue_at: 0,
             skip_throw: None,
             can_quit: false,
             force_draw: true,
@@ -518,6 +523,38 @@ impl App {
         };
         self.play_item(host, id);
         self.skip_throw = None;
+    }
+
+    /// The audio output: let the host retry a failed one, say what is wrong while it is (and keep saying it, so it is never lost), and say when
+    /// the sound is back. The host keeps the queued audio and the position, so playback goes on by itself when the output returns.
+    fn audio_supervise<H>(&mut self, host: &mut H, now: Timestamp)
+    where
+        H: Host<Video = FrameSink>,
+    {
+        const REMIND_US: Timestamp = 4_000_000;
+        use rvp_host::AudioSink as _;
+        host.audio().maintain();
+        let issue = host.audio().issue();
+        let recovered = host.audio().take_recovered();
+        match (&self.audio_issue, &issue) {
+            (_, Some(new)) => {
+                let changed = self.audio_issue.as_ref() != Some(new);
+                if changed || (self.ui.toast_text().is_none() && now - self.audio_issue_at >= REMIND_US) {
+                    self.ui.show_toast(&new.message(), now);
+                    self.audio_issue_at = now;
+                }
+            }
+            (Some(_), None) => {
+                let device = recovered.clone().unwrap_or_default();
+                self.ui.show_toast(&rvp_host::AudioIssue::recovered_message(&device), now);
+            }
+            (None, None) => {
+                if let Some(device) = &recovered {
+                    self.ui.show_toast(&rvp_host::AudioIssue::recovered_message(device), now);
+                }
+            }
+        }
+        self.audio_issue = issue;
     }
 
     /// Replace the session with one playing `source` (playlist item `id`).
@@ -923,6 +960,7 @@ impl App {
         self.links = host.opens_links();
         self.can_edit_tags = host.file_writer().is_some();
         self.can_quit = host.can_quit();
+        self.audio_supervise(host, t0);
         self.setup_tick(host);
         self.theme_tick(host);
         self.pump(host);

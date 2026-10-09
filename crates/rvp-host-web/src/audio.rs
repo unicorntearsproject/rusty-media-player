@@ -31,6 +31,12 @@ extern "C" {
     /// Output gain, 0.0..=1.0.
     #[wasm_bindgen(method, js_name = setVolume)]
     fn set_volume(this: &JsAudio, volume: f32);
+    /// Why the output is not running: "interrupted", "closed" or "" (all well; "suspended" before the first click is not a failure).
+    #[wasm_bindgen(method)]
+    fn issue(this: &JsAudio) -> String;
+    /// Ask for an interrupted output back, with a growing pause between tries.
+    #[wasm_bindgen(method)]
+    fn maintain(this: &JsAudio);
 }
 
 /// Frames the sink accepts ahead of playback: a second. It must ride over a slow frame of the page (the player tops the ring up
@@ -46,12 +52,15 @@ pub struct WebAudio {
     js: JsAudio,
     params: Option<AudioParams>,
     written: u64,
+    /// The output was taken away and has not come back yet.
+    away: bool,
+    came_back: bool,
 }
 
 impl WebAudio {
     /// Wrap the page's audio engine.
     pub fn new(js: JsAudio) -> Self {
-        Self { js, params: None, written: 0 }
+        Self { js, params: None, written: 0, away: false, came_back: false }
     }
 
     fn queued(&self) -> u64 {
@@ -101,5 +110,27 @@ impl AudioSink for WebAudio {
 
     fn set_volume(&mut self, volume: f32) {
         self.js.set_volume(volume);
+    }
+
+    fn issue(&self) -> Option<rvp_host::AudioIssue> {
+        let state = self.js.issue();
+        (!state.is_empty()).then(|| rvp_host::AudioIssue {
+            kind: rvp_host::AudioIssueKind::Gone,
+            device: String::new(),
+            reason: format!("the browser {state} the audio output"),
+        })
+    }
+
+    fn maintain(&mut self) {
+        self.js.maintain();
+        let now_away = !self.js.issue().is_empty();
+        if self.away && !now_away {
+            self.came_back = true;
+        }
+        self.away = now_away;
+    }
+
+    fn take_recovered(&mut self) -> Option<String> {
+        std::mem::take(&mut self.came_back).then(String::new)
     }
 }

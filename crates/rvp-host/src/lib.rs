@@ -10,6 +10,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod audio_issue;
 pub mod frame;
 pub mod input;
 pub mod library;
@@ -21,6 +22,7 @@ pub mod services;
 pub mod types;
 pub mod writer;
 
+pub use audio_issue::{AudioIssue, AudioIssueKind, classify, retry_delay_us};
 pub use frame::FrameSink;
 
 pub use input::{InputEvent, Key, Modifiers, PointerButton, Rect};
@@ -101,6 +103,19 @@ pub trait AudioSink {
     fn set_paused(&mut self, paused: bool);
     /// Output volume, 0.0..=1.0.
     fn set_volume(&mut self, volume: f32);
+    /// Why the sound has stopped, while the output is failing (busy, unplugged, the sound server gone), in a form the application can show.
+    /// The host keeps trying to get the output back by itself (see [`AudioSink::maintain`]); the queued audio and the playback position are
+    /// kept meanwhile. `None` while all is well.
+    fn issue(&self) -> Option<AudioIssue> {
+        None
+    }
+    /// Called on every tick of the application: retry a failed output (quietly, with a growing pause between tries, never faster than
+    /// [`retry_delay_us`]) and notice a stream that has failed since.
+    fn maintain(&mut self) {}
+    /// The device the sound is back on after a failure, once (the application says so in a short note).
+    fn take_recovered(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// Where decoded video goes.
