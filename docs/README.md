@@ -9,6 +9,7 @@ Back to the [project README](../README.md).
 | **Planning** | |
 | [planning/PLAN.md](planning/PLAN.md) | Architecture, the milestones and what each release round added |
 | [planning/v1.1-media-server.md](planning/v1.1-media-server.md) | The 1.1 plan: the media server as drop-ins, with estimates and risks |
+| [planning/web-mode.md](planning/web-mode.md) | Web mode: open a URL, play the media or playlist in it, remember it with a nice name (plan, not started) |
 | [planning/streaming-services.md](planning/streaming-services.md) | Spotify, Apple Music, YouTube Music, Amazon Music: what is possible and how |
 | **Reference** | |
 | [reference/development.md](reference/development.md) | Crate layout, build and test commands |
